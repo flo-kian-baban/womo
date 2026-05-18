@@ -1217,23 +1217,25 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Merge all video titles
   const allTitles = Array.from(new Set([...searchTitles, ...htmlTitles, ...popularTitles])).slice(0, 30);
 
-  // Check if we have enough data to proceed
-  const hasAnyData = transcripts.length > 0 || allTitles.length > 0 || followerCount > 0 || bio.length > 0;
+  // Check if we have meaningful content data (bio alone is not enough)
+  const hasContentData = transcripts.length > 0 || allTitles.length > 0;
+  const hasAnyData = hasContentData || followerCount > 0 || bio.length > 0;
 
-  // If quota was exhausted AND we have no data at all, surface a clear retry message
-  if (quotaExhausted && !hasAnyData) {
+  // If quota was exhausted AND we have no content (transcripts or titles), hard-block.
+  // Bio alone is insufficient — it produces hallucinated profiles.
+  if (quotaExhausted && !hasContentData) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
-      message: `The TikTok data API is temporarily rate-limited. Please wait 1–2 minutes and try again. (@${handle})`,
+      message: `The TikTok data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
     });
   }
 
-  // If quota was exhausted but we have some data (e.g. from HTML scrape), continue with what we have
+  // If quota was exhausted but we have content data (titles/transcripts), continue with what we have
   if (quotaExhausted) {
-    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with partial data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
+    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
   }
 
-  // Hard error only when truly nothing is available
+  // Hard error when truly nothing is available
   if (!hasAnyData) {
     throw new TRPCError({
       code: "NOT_FOUND",
@@ -1319,12 +1321,14 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     quotaExhausted: ytQuotaExhausted,
   } = ytData;
 
-  const hasAnyYtData = transcripts.length > 0 || videoTitles.length > 0 || followerCount > 0 || bio.length > 0;
+  const hasYtContentData = transcripts.length > 0 || videoTitles.length > 0;
+  const hasAnyYtData = hasYtContentData || followerCount > 0 || bio.length > 0;
 
-  if (ytQuotaExhausted && !hasAnyYtData) {
+  // Block when quota exhausted AND no content data — bio alone produces hallucinated profiles
+  if (ytQuotaExhausted && !hasYtContentData) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
-      message: `The YouTube data API is temporarily rate-limited. Please wait 1–2 minutes and try again. (@${handle})`,
+      message: `The YouTube data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
     });
   }
 
