@@ -217,6 +217,18 @@ export const matchRecords = mysqlTable("match_records", {
   narrativeSummary: text("narrativeSummary"),
   alignmentNotes: json("alignmentNotes"), // field-by-field notes object
 
+  // Verified F.I.T. Impressions Score (0–100)
+  verifiedFITScore: int("verifiedFITScore"),
+  verifiedFITLabel: varchar("verifiedFITLabel", { length: 64 }),
+  verifiedFITSignalBreakdown: json("verifiedFITSignalBreakdown"), // Record<string, number>
+  symbolicOverlapScore: float("symbolicOverlapScore"),
+  sharedKeywords: json("sharedKeywords"),   // string[]
+  sharedThemes: json("sharedThemes"),       // string[]
+
+  // Synergy Narrative + Content Directions
+  synergyNarrative: text("synergyNarrative"),
+  contentDirections: json("contentDirections"), // { title, rationale, exampleAngle }[]
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

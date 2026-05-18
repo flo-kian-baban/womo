@@ -526,6 +526,121 @@ export function evaluateRadarWarnings(inputs: RadarWarningInputs): RadarWarning[
   return warnings;
 }
 
+// ─── Symbolic Vocabulary Overlap ────────────────────────────────────────────
+/**
+ * Compares creator and brand decoded symbol arrays and returns:
+ * - overlapScore: 0–10 (how many terms are shared relative to corpus size)
+ * - sharedKeywords: the actual overlapping terms (for display in report)
+ */
+export function calculateSymbolicVocabularyOverlap(input: {
+  creatorKeywords: string[];
+  creatorThemes: string[];
+  brandKeywords: string[];
+  brandThemes: string[];
+}): { overlapScore: number; sharedKeywords: string[]; sharedThemes: string[] } {
+  const normalize = (s: string) => s.toLowerCase().trim();
+
+  const creatorTerms = new Set([
+    ...input.creatorKeywords.map(normalize),
+    ...input.creatorThemes.map(normalize),
+  ]);
+  const brandTerms = new Set([
+    ...input.brandKeywords.map(normalize),
+    ...input.brandThemes.map(normalize),
+  ]);
+
+  const sharedKeywords: string[] = [];
+  const sharedThemes: string[] = [];
+
+  for (const term of input.creatorKeywords.map(normalize)) {
+    if (brandTerms.has(term)) sharedKeywords.push(term);
+  }
+  for (const term of input.creatorThemes.map(normalize)) {
+    if (brandTerms.has(term)) sharedThemes.push(term);
+  }
+
+  // Jaccard-style overlap: intersection / union
+  const union = new Set(Array.from(creatorTerms).concat(Array.from(brandTerms)));
+  const intersection = Array.from(creatorTerms).filter(t => brandTerms.has(t));
+  const jaccardRaw = union.size > 0 ? intersection.length / union.size : 0;
+
+  // Scale to 0–10: Jaccard of 0.3+ is excellent for cultural vocabulary
+  const overlapScore = Math.min(10, Math.round(jaccardRaw * 33.3 * 10) / 10);
+
+  return { overlapScore, sharedKeywords, sharedThemes };
+}
+
+// ─── Verified F.I.T. Impressions Score ───────────────────────────────────────
+/**
+ * Audience Acceptance Probability Score (0–100).
+ * Measures how likely the creator's audience will accept this partnership
+ * as culturally legitimate rather than forced or inauthentic.
+ *
+ * Five signals (each 0–10), weighted:
+ *   1. Tribe Overlap (0.30)          — does the audience already live in the brand's world?
+ *   2. Stuart Hall Decoding (0.25)   — will the audience decode the brand message as intended?
+ *   3. Archetype Resonance (0.20)    — does the creator's archetype carry the brand's identity naturally?
+ *   4. Symbolic Vocabulary Overlap (0.15) — shared language between creator and brand decoded symbols
+ *   5. Goffman Stage Consistency (0.10)   — is the creator's persona consistent enough to trust?
+ */
+export interface VerifiedFITScoreInputs {
+  tribMatchScore: number;           // 0–10 from alignment calculation
+  stuartHallDecoding: string;       // Dominant / Negotiated / Oppositional
+  archetypeMatchScore: number;      // 0–10 from archetype matrix
+  symbolicOverlapScore: number;     // 0–10 from calculateSymbolicVocabularyOverlap
+  goffmanStageConsistency: string;  // Consistent / Minor Gap / Significant Gap
+}
+
+export type VerifiedFITLabel =
+  | "High Cultural Legitimacy"
+  | "Moderate Legitimacy"
+  | "Mixed Signal"
+  | "Low Legitimacy";
+
+export function calculateVerifiedFITScore(inputs: VerifiedFITScoreInputs): {
+  verifiedFITScore: number;
+  verifiedFITLabel: VerifiedFITLabel;
+  signalBreakdown: Record<string, number>;
+} {
+  // Stuart Hall → numeric signal (0–10)
+  const decodingSignal =
+    inputs.stuartHallDecoding === "Dominant" ? 10 :
+    inputs.stuartHallDecoding === "Negotiated" ? 5 :
+    inputs.stuartHallDecoding === "Oppositional" ? 0 : 5;
+
+  // Goffman → numeric signal (0–10)
+  const goffmanSignal =
+    inputs.goffmanStageConsistency === "Consistent" ? 10 :
+    inputs.goffmanStageConsistency === "Minor Gap" ? 5 :
+    inputs.goffmanStageConsistency === "Significant Gap" ? 1 : 5;
+
+  const signalBreakdown = {
+    tribeOverlap: inputs.tribMatchScore,
+    decodingAcceptance: decodingSignal,
+    archetypeResonance: inputs.archetypeMatchScore,
+    symbolicVocabularyOverlap: inputs.symbolicOverlapScore,
+    personaConsistency: goffmanSignal,
+  };
+
+  const rawScore =
+    signalBreakdown.tribeOverlap * 0.30 +
+    signalBreakdown.decodingAcceptance * 0.25 +
+    signalBreakdown.archetypeResonance * 0.20 +
+    signalBreakdown.symbolicVocabularyOverlap * 0.15 +
+    signalBreakdown.personaConsistency * 0.10;
+
+  // Scale 0–10 → 0–100
+  const verifiedFITScore = Math.round(rawScore * 10);
+
+  let verifiedFITLabel: VerifiedFITLabel;
+  if (verifiedFITScore >= 80) verifiedFITLabel = "High Cultural Legitimacy";
+  else if (verifiedFITScore >= 60) verifiedFITLabel = "Moderate Legitimacy";
+  else if (verifiedFITScore >= 40) verifiedFITLabel = "Mixed Signal";
+  else verifiedFITLabel = "Low Legitimacy";
+
+  return { verifiedFITScore, verifiedFITLabel, signalBreakdown };
+}
+
 // ─── Full Engine Entry Point ──────────────────────────────────────────────────
 
 export interface FullFITCalculationInput {
@@ -543,6 +658,11 @@ export interface FullFITCalculationInput {
   // AI-evaluated scores (0–10)
   mythAlignmentScore: number;
   tribMatchScore: number;
+  // Symbolic vocabulary overlap (optional — defaults to 5 if not provided)
+  creatorKeywords?: string[];
+  creatorThemes?: string[];
+  brandKeywords?: string[];
+  brandThemes?: string[];
 }
 
 export interface FullFITResult {
@@ -567,6 +687,13 @@ export interface FullFITResult {
   fitScore: number;
   fitStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
   radarWarnings: RadarWarning[];
+  // Verified F.I.T. Impressions Score
+  verifiedFITScore: number;
+  verifiedFITLabel: VerifiedFITLabel;
+  verifiedFITSignalBreakdown: Record<string, number>;
+  sharedKeywords: string[];
+  sharedThemes: string[];
+  symbolicOverlapScore: number;
 }
 
 export function runFullFITCalculation(input: FullFITCalculationInput): FullFITResult {
@@ -609,6 +736,25 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     creatorNichePosition: input.creatorNichePosition,
   });
 
+  // Symbolic vocabulary overlap (uses decoded symbol data if available)
+  const { overlapScore: symbolicOverlapScore, sharedKeywords, sharedThemes } =
+    calculateSymbolicVocabularyOverlap({
+      creatorKeywords: input.creatorKeywords ?? [],
+      creatorThemes: input.creatorThemes ?? [],
+      brandKeywords: input.brandKeywords ?? [],
+      brandThemes: input.brandThemes ?? [],
+    });
+
+  // Verified F.I.T. Impressions Score
+  const { verifiedFITScore, verifiedFITLabel, signalBreakdown: verifiedFITSignalBreakdown } =
+    calculateVerifiedFITScore({
+      tribMatchScore: input.tribMatchScore,
+      stuartHallDecoding: input.stuartHallDecoding,
+      archetypeMatchScore,
+      symbolicOverlapScore,
+      goffmanStageConsistency: input.goffmanStageConsistency,
+    });
+
   return {
     archetypeMatchScore,
     mythAlignmentScore: input.mythAlignmentScore,
@@ -628,5 +774,11 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     fitScore,
     fitStatus,
     radarWarnings,
+    verifiedFITScore,
+    verifiedFITLabel,
+    verifiedFITSignalBreakdown,
+    sharedKeywords,
+    sharedThemes,
+    symbolicOverlapScore,
   };
 }

@@ -294,3 +294,18 @@
 - [x] Update decodeBrandSymbols(): adaptive block label — when website text is short, label it as "limited direct website access" so LLM understands the source
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## F.I.T. Report Redesign — Synergy Narrative, Verified F.I.T. Impressions Score, Comparable Partnerships
+- [x] Add calculateVerifiedFITScore() to fitEngine.ts: 5-signal weighted composite (tribe overlap, Stuart Hall decoding, archetype resonance, symbolic vocabulary overlap, Goffman consistency) → 0–100 score with label
+- [x] Add symbolicVocabularyOverlap() helper: compare creator decodedSymbols keywords/themes against brand decodedSymbols keywords/themes → overlap percentage
+- [x] Add verifiedFITScore (int), verifiedFITLabel (text), verifiedFITSignalBreakdown (json), symbolicOverlapScore (int), sharedKeywords (json), sharedThemes (json) columns to match_records DB schema
+- [x] Generate Drizzle migration (0008_modern_magus.sql) and apply via webdev_execute_sql
+- [x] Build generateSynergyNarrative() LLM prompt: takes creator + brand full profiles + shared symbols, produces Cultural Synergy Brief + 3 Content Directions
+- [x] Add synergyNarrative (text) and contentDirections (json) columns to match_records DB schema; applied in same migration
+- [x] Update routers.ts fit.calculate: call calculateVerifiedFITScore() and generateSynergyNarrative() and save all new fields
+- [x] Build getComparablePartnerships() in db.ts: query match_records for saved pairs sharing same brandType or creatorNiche or archetype combination, ordered by fitScore desc, limit 5
+- [x] Add comparable partnerships tRPC route to routers.ts
+- [x] Redesign MatchReport.tsx: new report structure with Synergy Brief at top, Verified F.I.T. Impressions Score as hero metric alongside F.I.T. Score, Symbolic Resonance Evidence section, Content Directions section, Comparable Partnerships section at bottom
+- [x] Update FITScore.tsx: show Verified F.I.T. Impressions Score in the live calculation result card with shared themes and content directions
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint

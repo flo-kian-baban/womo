@@ -7,6 +7,7 @@ import {
   createCreatorProfile, getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
   createBrandProfile, getBrandProfileById, listBrandProfiles, deleteBrandProfile,
   createMatchRecord, getMatchRecordById, listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
+  getComparablePartnerships,
 } from "./db";
 import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from "./aiExtraction";
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
@@ -319,6 +320,24 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           }
         }
 
+        // Extract symbolic vocabulary arrays for overlap calculation
+        const creatorDecodedSymbols = creator.decodedSymbols as Record<string, unknown> | null;
+        const brandDecodedSymbols = brand.brandDecodedSymbols as Record<string, unknown> | null;
+        const creatorKeywords = (creator.rawKeywords as string[] | null) ?? [];
+        const creatorThemes = (creator.contentThemeLabels as string[] | null) ?? [];
+        const brandKeywords = (brand.brandRawKeywords as string[] | null) ?? [];
+        const brandThemes = (brand.brandThemeLabels as string[] | null) ?? [];
+
+        // Also pull from decodedSymbols if rawKeywords are sparse
+        if (creatorDecodedSymbols) {
+          const dsKeywords = creatorDecodedSymbols.rawKeywords as string[] | undefined;
+          if (dsKeywords?.length) creatorKeywords.push(...dsKeywords);
+        }
+        if (brandDecodedSymbols) {
+          const dsKeywords = brandDecodedSymbols.rawKeywords as string[] | undefined;
+          if (dsKeywords?.length) brandKeywords.push(...dsKeywords);
+        }
+
         // Run the F.I.T. engine
         const result = runFullFITCalculation({
           creatorArchetype: creator.archetype ?? "The Everyman",
@@ -332,7 +351,98 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           brandType: brand.brandType ?? "Retail — Local Boutique",
           mythAlignmentScore,
           tribMatchScore,
+          creatorKeywords,
+          creatorThemes,
+          brandKeywords,
+          brandThemes,
         });
+
+        // Generate Synergy Narrative + Content Directions
+        let synergyNarrative = "";
+        let contentDirections: Array<{ title: string; rationale: string; exampleAngle: string }> = [];
+        try {
+          const synergyResponse = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: `You are a senior influencer marketing strategist and cultural semiotician at Connex.
+Your job is to write a concise, insight-rich F.I.T. Synergy Brief for a proposed creator-brand partnership.
+This brief must be grounded in the cultural data provided — not generic marketing language.
+
+CREATOR PROFILE:
+- Handle: @${creator.handle}
+- Archetype: ${creator.archetype ?? "Unknown"}
+- Barthes Myth: ${creator.barthesMyth ?? "Not available"}
+- Audience Relationship: ${creator.audienceRelationshipType ?? "Unknown"}
+- Cultural Capital: ${creator.culturalCapital ?? "Unknown"}
+- Recurring Themes: ${(creator.recurringThemes as string[] | null)?.join(", ") ?? "Not available"}
+- Content Themes: ${creatorThemes.join(", ") || "Not available"}
+- Top Keywords: ${creatorKeywords.slice(0, 15).join(", ") || "Not available"}
+- Decoded Symbols Summary: ${creatorDecodedSymbols ? JSON.stringify(creatorDecodedSymbols).slice(0, 400) : "Not available"}
+
+BRAND PROFILE:
+- Brand: ${brand.brandName}
+- Archetype: ${brand.archetype ?? "Unknown"}
+- Barthes Myth: ${brand.barthesMyth ?? "Not available"}
+- Audience Tribe: ${brand.audienceTribe ?? "Unknown"}
+- Cultural Tension: ${brand.culturalTension ?? "Not available"}
+- Brand Type: ${brand.brandType ?? "Unknown"}
+- Brand Archetype Classification: ${brand.brandArchetypeClassification ?? "Unknown"}
+- Brand Themes: ${brandThemes.join(", ") || "Not available"}
+- Brand Keywords: ${brandKeywords.slice(0, 15).join(", ") || "Not available"}
+- Brand Decoded Symbols Summary: ${brandDecodedSymbols ? JSON.stringify(brandDecodedSymbols).slice(0, 400) : "Not available"}
+
+SHARED SYMBOLIC VOCABULARY:
+- Shared Keywords: ${result.sharedKeywords.join(", ") || "None detected"}
+- Shared Themes: ${result.sharedThemes.join(", ") || "None detected"}
+- Symbolic Overlap Score: ${result.symbolicOverlapScore}/10
+
+F.I.T. SCORES:
+- F.I.T. Score: ${result.fitScore}/10 (${result.fitStatus})
+- Verified F.I.T. Impressions Score: ${result.verifiedFITScore}/100 (${result.verifiedFITLabel})
+- Alignment: ${result.alignmentScoreRaw.toFixed(1)}/10 | Pulse: ${result.pulseScoreRaw.toFixed(1)}/10 | Stability: ${result.stabilityScoreRaw.toFixed(1)}/10
+
+Write the following in JSON format:
+1. synergyNarrative (string, 150–250 words): A plain-language cultural compatibility brief. Cover: (a) why this partnership makes symbolic sense, (b) what shared cultural territory they occupy, (c) what the audience will feel when they see this collaboration. Use the sociological terminology from the data (archetypes, Barthes myth, symbolic vocabulary) but translate it into strategic insight, not academic jargon.
+2. contentDirections (array of 3–5 objects): Specific content directions grounded in the shared symbolic vocabulary. Each must have: title (short, punchy), rationale (1 sentence explaining why it works culturally), exampleAngle (1 concrete example post/video concept).`,
+              },
+              { role: "user", content: "Generate the synergy brief and content directions." },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "synergy_brief",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    synergyNarrative: { type: "string" },
+                    contentDirections: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          title: { type: "string" },
+                          rationale: { type: "string" },
+                          exampleAngle: { type: "string" },
+                        },
+                        required: ["title", "rationale", "exampleAngle"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["synergyNarrative", "contentDirections"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+          const synergyParsed = JSON.parse(synergyResponse.choices[0]?.message?.content as string);
+          synergyNarrative = synergyParsed.synergyNarrative ?? "";
+          contentDirections = synergyParsed.contentDirections ?? [];
+        } catch (err) {
+          console.warn("[routers] Synergy narrative generation failed (non-fatal):", err);
+        }
 
         // Generate narrative
         const narrative = await generateFITNarrative({
@@ -377,6 +487,16 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           radarWarnings: result.radarWarnings,
           narrativeSummary: narrative.narrativeSummary,
           alignmentNotes: narrative.alignmentNotes as unknown as Record<string, unknown>,
+          // Verified F.I.T. Impressions Score
+          verifiedFITScore: result.verifiedFITScore,
+          verifiedFITLabel: result.verifiedFITLabel,
+          verifiedFITSignalBreakdown: result.verifiedFITSignalBreakdown as unknown as Record<string, unknown>,
+          symbolicOverlapScore: result.symbolicOverlapScore,
+          sharedKeywords: result.sharedKeywords as unknown as string[],
+          sharedThemes: result.sharedThemes as unknown as string[],
+          // Synergy Narrative + Content Directions
+          synergyNarrative: synergyNarrative || null,
+          contentDirections: contentDirections.length > 0 ? contentDirections as unknown as Record<string, unknown>[] : null,
         });
 
         const matches = await listMatchRecords();
@@ -406,6 +526,24 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
       .mutation(async ({ input }) => {
         await deleteMatchRecord(input.id);
         return { success: true };
+      }),
+
+    comparable: publicProcedure
+      .input(z.object({
+        matchId: z.number(),
+        brandType: z.string().optional(),
+        brandArchetypeClassification: z.string().optional(),
+        creatorArchetype: z.string().optional(),
+        creatorNicheTopicNode: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        return getComparablePartnerships({
+          excludeMatchId: input.matchId,
+          brandType: input.brandType,
+          brandArchetypeClassification: input.brandArchetypeClassification,
+          creatorArchetype: input.creatorArchetype,
+          creatorNicheTopicNode: input.creatorNicheTopicNode,
+        });
       }),
   }),
 

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
-import { BarChart3, Loader2, Sparkles, AlertTriangle, CheckCircle2, AlertCircle, XCircle, ChevronDown } from "lucide-react";
+import { BarChart3, Loader2, Sparkles, AlertTriangle, CheckCircle2, AlertCircle, XCircle, ChevronDown, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
@@ -153,6 +153,13 @@ type MatchResult = {
     fitScore: number;
     fitStatus: string;
     radarWarnings: string[];
+    // Verified F.I.T. Impressions Score
+    verifiedFITScore?: number;
+    verifiedFITLabel?: string;
+    verifiedFITSignalBreakdown?: Record<string, number>;
+    symbolicOverlapScore?: number;
+    sharedKeywords?: string[];
+    sharedThemes?: string[];
   };
   narrative: {
     narrativeSummary: string;
@@ -165,6 +172,9 @@ type MatchResult = {
       recommendation: string;
     };
   };
+  // Synergy narrative and content directions
+  synergyNarrative?: string;
+  contentDirections?: Array<{ title: string; rationale: string; exampleAngle: string }>;
 };
 
 export default function FITScore() {
@@ -364,6 +374,72 @@ export default function FITScore() {
               </span>
             </div>
 
+            {/* Verified F.I.T. Impressions Score */}
+            {matchResult.result.verifiedFITScore != null && (
+              <div className="p-5 rounded-xl border mb-6" style={{
+                borderColor: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145 / 0.3)' :
+                  matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75 / 0.3)' :
+                  matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50 / 0.3)' : 'oklch(0.60 0.18 25 / 0.3)',
+                background: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145 / 0.05)' :
+                  matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75 / 0.05)' :
+                  matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50 / 0.05)' : 'oklch(0.60 0.18 25 / 0.05)',
+              }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                    Verified F.I.T. Impressions Score
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-serif" style={{
+                      color: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                        matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                        matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                    }}>{matchResult.result.verifiedFITScore}</span>
+                    <span className="text-xs text-muted-foreground">/ 100</span>
+                  </div>
+                </div>
+                <div className="text-xs font-semibold mb-2" style={{
+                  color: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                    matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                    matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                }}>{matchResult.result.verifiedFITLabel}</div>
+                <div className="h-1.5 rounded-full bg-border overflow-hidden mb-3">
+                  <div className="h-full rounded-full transition-all duration-1000" style={{
+                    width: `${matchResult.result.verifiedFITScore}%`,
+                    background: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                      matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                      matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                  }} />
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Probability that this creator's audience will accept this partnership as culturally legitimate.
+                </p>
+                {/* Shared symbolic evidence */}
+                {(matchResult.result.sharedThemes?.length ?? 0) > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border/30">
+                    <div className="text-[10px] font-semibold tracking-[0.08em] uppercase text-muted-foreground mb-2">Shared Cultural Themes</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {matchResult.result.sharedThemes!.map((t) => (
+                        <span key={t} className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary border border-primary/20 capitalize">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Synergy Brief */}
+            {matchResult.synergyNarrative && (
+              <div className="p-5 rounded-xl bg-muted/20 border border-border/50 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-3.5 h-3.5 text-primary/70" />
+                  <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                    Cultural Synergy Brief
+                  </div>
+                </div>
+                <p className="text-sm text-foreground/85 leading-relaxed">{matchResult.synergyNarrative}</p>
+              </div>
+            )}
+
             {/* Narrative Summary */}
             {matchResult.narrative.narrativeSummary && (
               <div className="p-5 rounded-xl bg-muted/20 border border-border/50 mb-6">
@@ -373,6 +449,26 @@ export default function FITScore() {
                 <p className="text-sm text-foreground/80 leading-relaxed">
                   {matchResult.narrative.narrativeSummary}
                 </p>
+              </div>
+            )}
+
+            {/* Content Directions */}
+            {(matchResult.contentDirections?.length ?? 0) > 0 && (
+              <div className="p-5 rounded-xl bg-muted/20 border border-border/50 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Lightbulb className="w-3.5 h-3.5 text-primary/70" />
+                  <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                    Content Directions
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {matchResult.contentDirections!.map((dir, i) => (
+                    <div key={i} className="p-3 rounded-xl border border-border/50 bg-muted/10">
+                      <div className="text-xs font-semibold text-foreground mb-1">{dir.title}</div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{dir.rationale}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

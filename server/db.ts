@@ -1,4 +1,4 @@
-import { eq, desc, like, or } from "drizzle-orm";
+import { eq, desc, like, or, ne, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, creatorProfiles, brandProfiles, matchRecords, InsertCreatorProfile, InsertBrandProfile, InsertMatchRecord } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -155,4 +155,57 @@ export async function getMatchWithProfiles(id: number) {
   const creator = await getCreatorProfileById(match.creatorProfileId);
   const brand = await getBrandProfileById(match.brandProfileId);
   return { match, creator, brand };
+}
+
+/**
+ * Returns up to 5 comparable partnerships from the database that share:
+ * - the same brand type OR brand archetype classification, OR
+ * - the same creator niche/archetype
+ * Ordered by fitScore descending. Excludes the current match.
+ */
+export async function getComparablePartnerships(input: {
+  excludeMatchId: number;
+  brandType?: string | null;
+  brandArchetypeClassification?: string | null;
+  creatorArchetype?: string | null;
+  creatorNicheTopicNode?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Fetch all recent matches (excluding current), then filter in-memory
+  // This avoids complex OR queries across joined tables while keeping the helper simple
+  const allMatches = await db
+    .select()
+    .from(matchRecords)
+    .where(ne(matchRecords.id, input.excludeMatchId))
+    .orderBy(desc(matchRecords.fitScore))
+    .limit(100);
+
+  if (allMatches.length === 0) return [];
+
+  // Enrich with creator + brand profiles
+  const enriched = await Promise.all(
+    allMatches.map(async (match) => {
+      const creator = await getCreatorProfileById(match.creatorProfileId);
+      const brand = await getBrandProfileById(match.brandProfileId);
+      return { match, creator, brand };
+    })
+  );
+
+  // Score similarity: each matching dimension adds 1 point
+  const scored = enriched
+    .filter(({ creator, brand }) => creator && brand)
+    .map(({ match, creator, brand }) => {
+      let similarityScore = 0;
+      if (input.brandType && brand?.brandType === input.brandType) similarityScore += 2;
+      if (input.brandArchetypeClassification && brand?.brandArchetypeClassification === input.brandArchetypeClassification) similarityScore += 1;
+      if (input.creatorArchetype && creator?.archetype === input.creatorArchetype) similarityScore += 2;
+      if (input.creatorNicheTopicNode && creator?.nicheTopicNode === input.creatorNicheTopicNode) similarityScore += 1;
+      return { match, creator: creator!, brand: brand!, similarityScore };
+    })
+    .filter(({ similarityScore }) => similarityScore > 0)
+    .sort((a, b) => b.similarityScore - a.similarityScore || (b.match.fitScore ?? 0) - (a.match.fitScore ?? 0));
+
+  return scored.slice(0, 5);
 }
