@@ -1,6 +1,7 @@
 import { Separator } from "@/components/ui/separator";
 import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic } from "lucide-react";
 import type { CreatorProfile } from "../../../drizzle/schema";
+import TranscriptPanel from "./TranscriptPanel";
 
 interface CreatorProfileCardProps {
   profile: CreatorProfile;
@@ -151,10 +152,6 @@ export default function CreatorProfileCard({ profile, compact = false }: Creator
   const hasStats = (profile.followerCount ?? 0) > 0 || (profile.totalViews ?? 0) > 0 || (profile.videoCount ?? 0) > 0;
   const hasKeywordData = themes.length > 0 || hashtags.length > 0 || keywords.length > 0;
   const transcriptCount = profile.transcriptCount ?? 0;
-  const transcriptExcerpts = profile.transcriptExcerpts ?? "";
-  const excerptList = transcriptExcerpts
-    ? transcriptExcerpts.split("\n\n").filter(Boolean)
-    : [];
 
   // Data confidence level based on transcripts + video titles
   const dataConfidence = transcriptCount >= 3 ? 'transcript' : videoTitles.length >= 10 ? 'high' : videoTitles.length >= 3 ? 'medium' : 'low';
@@ -331,33 +328,8 @@ export default function CreatorProfileCard({ profile, compact = false }: Creator
       )}
 
       {/* ── Transcript Excerpts ─────────────────────────────────────────────── */}
-      {excerptList.length > 0 && !compact && (
-        <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/20 space-y-3">
-          <div className="flex items-center gap-2">
-            <Mic className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-emerald-400">
-              Transcript Excerpts (Spoken Content)
-            </span>
-            <span className="text-[10px] text-muted-foreground/50 ml-auto">Primary evidence</span>
-          </div>
-          <div className="space-y-3">
-            {excerptList.map((excerpt, i) => {
-              const colonIdx = excerpt.indexOf(']: ');
-              const label = colonIdx > 0 ? excerpt.slice(1, colonIdx) : `Video ${i + 1}`;
-              const text = colonIdx > 0 ? excerpt.slice(colonIdx + 3) : excerpt;
-              return (
-                <div key={i} className="space-y-1">
-                  <div className="text-[10px] font-medium text-emerald-400/70 uppercase tracking-wide truncate">
-                    {label}
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed italic">
-                    &ldquo;{text}&rdquo;
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      {!compact && profile.transcriptExcerpts && (
+        <TranscriptPanel profile={profile} />
       )}
 
       {/* ── Recent Video Titles ─────────────────────────────────────────────── */}
