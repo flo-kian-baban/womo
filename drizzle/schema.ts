@@ -87,6 +87,10 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   topHashtags: json("topHashtags"),         // string[] — top hashtags
   recentVideoTitles: json("recentVideoTitles"), // string[] — sampled video titles
 
+  // Transcript data (from transcript-first pipeline)
+  transcriptCount: int("transcriptCount").default(0),
+  transcriptExcerpts: text("transcriptExcerpts"), // Combined excerpt text from top 3 transcripts
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),

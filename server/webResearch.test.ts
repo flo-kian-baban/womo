@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 // ─── Unit Tests: Evidence Summary Instructions ────────────────────────────────
 
 describe("webResearch evidence summary", () => {
-  it("evidence summary contains content-first instructions", async () => {
+  it("evidence summary contains transcript-first instructions", async () => {
     // Import the module to check the evidence summary builder
     // We test the instructions are present by checking the module source
     const fs = await import("fs");
@@ -20,41 +20,43 @@ describe("webResearch evidence summary", () => {
     const filePath = path.resolve(__dirname, "webResearch.ts");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Verify the four critical rules are present in the source
-    expect(source).toContain("CONTENT IS PRIMARY");
-    expect(source).toContain("BIO IS SECONDARY AND MUST BE CHALLENGED");
-    expect(source).toContain("RULE 1:");
-    expect(source).toContain("RULE 2:");
-    expect(source).toContain("RULE 3:");
-    expect(source).toContain("RULE 4:");
+    // Verify the transcript-first pipeline markers are present
+    expect(source).toContain("PRIMARY EVIDENCE");
+    expect(source).toContain("TRANSCRIPT");
+    expect(source).toContain("WEBVTT");
+    expect(source).toContain("ACTUAL VIDEO TITLES / DESCRIPTIONS");
+    expect(source).toContain("posts sampled");
   });
 
-  it("AI extraction system prompt contains content-over-bio examples", async () => {
+  it("AI extraction system prompt contains transcript-first hierarchy", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const filePath = path.resolve(__dirname, "aiExtraction.ts");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Verify the critical instruction is present
-    expect(source).toContain("CONTENT OVER BIO");
+    // Verify the transcript-first hierarchy is present
+    expect(source).toContain("TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL");
+    expect(source).toContain("HIERARCHY OF EVIDENCE");
     expect(source).toContain("Bio says");
     expect(source).toContain("food reviews");
     expect(source).toContain("FOOD CREATOR");
     expect(source).toContain("NEVER let a personal bio override");
   });
 
-  it("TikTok research uses multi-query TikTok search as primary source", async () => {
+  it("TikTok research uses transcript-first pipeline", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const filePath = path.resolve(__dirname, "webResearch.ts");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Verify the multi-query TikTok search function exists
-    expect(source).toContain("collectTikTokVideosViaSearch");
+    // Verify the transcript-first pipeline functions exist
+    expect(source).toContain("fetchTikTokVideoTranscript");
+    expect(source).toContain("fetchTikTokTranscripts");
+    expect(source).toContain("WEBVTT");
+    // Verify TikTok search is used to collect video IDs
     expect(source).toContain("TikTok/search_tiktok_video_general");
-    // Verify YouTube is only used as a last-resort fallback for large creators
-    expect(source).toContain("DISABLED for small creators");
-    expect(source).toContain("followerCount >= 50000");
+    // Verify YouTube pipeline is separate (no YouTube fallback in TikTok flow)
+    expect(source).toContain("fetchYouTubeTranscripts");
   });
 
   it("evidence summary builder includes video titles section", async () => {

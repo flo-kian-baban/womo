@@ -141,8 +141,45 @@
 - [x] @camfant: 4.2M followers, avg views 5M+, original sounds, minimal captions → correctly flagged as PERSONALITY CREATOR
 - [x] All 27 tests still pass after all changes
 
+## CRITICAL FIX: TikTok Search Author Contamination
+- [ ] Filter collectTikTokVideosViaSearch results to ONLY include videos where author.uniqueId matches the target handle
+- [ ] Promote HTML scrape to PRIMARY source (runs first, extracts video data from page JSON)
+- [ ] Use TikTok search as SECONDARY source (only keep results where author matches)
+- [ ] Add author-match guard: normalize both handles (lowercase, strip dots/underscores) for comparison
+- [ ] If 0 matching videos found from search, use HTML scrape data only
+- [ ] Add evidence summary field showing how many videos were from confirmed author vs search
+- [ ] Test with @malik.the.prince19: verify only his videos are used
+- [ ] Test with @alkhussein and @kaylee.nhi: verify no regression
+
+## CRITICAL FIX: Remove YouTube Fallback + Hard Error on Insufficient TikTok Data
+- [ ] Remove ALL YouTube fallback/supplementary search from TikTok research pipeline
+- [ ] If TikTok returns < 3 confirmed video titles, throw a structured TRPCError with user-facing message
+- [ ] Error message: "Not enough public data found for @handle. TikTok does not expose this creator's content through available APIs. Please try a creator with more public content, or verify the handle is correct."
+- [ ] Show error as a styled error card in the UI (not a spinner or empty state)
+- [ ] Keep YouTube research pipeline intact for YouTube platform (it works correctly)
+- [ ] Update webResearch tests to reflect the new hard-error behavior
+
 ## Backlog / Future Enhancements (intentionally deferred — not in current scope)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands
 - [ ] Historical score tracking and trend charts
 - [ ] Team collaboration and shared workspaces
+
+## Transcript-First Pipeline: TikTok + YouTube
+- [x] Build fetchTikTokTranscripts(handle): query search API (count as STRING '20'), author-filter results, fetch each video page, extract WEBVTT subtitle URLs, download and parse to plain text
+- [x] Fix TikTok search count bug: use string '20' not integer 20 in all search calls
+- [x] Author-filter all TikTok search results: only keep videos where author.uniqueId matches handle (normalize: lowercase + strip dots/underscores)
+- [x] Build fetchYouTubeTranscripts(channelId): get video IDs from YouTube search API, fetch each watch page, extract caption track URLs, download and parse to plain text
+- [x] Remove ALL YouTube fallback/supplementary search from TikTok pipeline (causes hallucinations for small creators)
+- [x] If < 3 transcripts found for TikTok: return structured TRPCError with clear user-facing message (no hallucination)
+- [x] Update buildCreatorEvidenceSummary: transcripts are PRIMARY EVIDENCE, captions/bio/hashtags are SECONDARY
+- [x] Update AI extraction system prompt: spoken transcript content is ground truth
+- [x] Add transcriptCount INT and transcriptExcerpts TEXT columns to creator_profiles DB schema
+- [x] Generate migration SQL and apply via webdev_execute_sql
+- [x] Update creator.analyze route: save transcriptCount and transcriptExcerpts from research data
+- [x] Update CreatorProfileCard UI: show 'Analyzed from X video transcripts' badge
+- [x] Show transcript excerpts in profile card evidence panel
+- [ ] Update JSON export to include transcriptCount and transcriptExcerpts
+- [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content
+- [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content
+- [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)

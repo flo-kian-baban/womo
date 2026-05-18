@@ -43,18 +43,27 @@ export async function extractCreatorProfile(
   const systemPrompt = `You are a cultural anthropologist and media analyst specializing in influencer marketing.
 Your task is to analyze a social media creator and produce a structured cultural profile using the Connex F.I.T. framework.
 
-CRITICAL INSTRUCTION — CONTENT OVER BIO:
-You will receive REAL, SCRAPED evidence including the creator's bio AND their actual video titles/hashtags.
-The bio is a SELF-REPORTED personal label. The video titles are OBJECTIVE CONTENT EVIDENCE.
-You MUST prioritize the video titles and hashtags over the bio when determining the creator's niche and archetype.
+CRITICAL INSTRUCTION — TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL:
+You will receive evidence that may include SPOKEN TRANSCRIPTS from the creator's actual videos.
+If transcripts are present in the evidence (marked as PRIMARY EVIDENCE), treat them as GROUND TRUTH.
+Transcripts reveal what the creator literally says — their vocabulary, topics, personality, and values.
+This is more reliable than any other signal.
+
+HIERARCHY OF EVIDENCE (highest to lowest):
+1. SPOKEN TRANSCRIPTS — what the creator literally says in their videos (most reliable)
+2. VIDEO TITLES / CAPTIONS — what they post (reliable)
+3. HASHTAGS / KEYWORDS — how they tag content (reliable)
+4. BIO / SIGNATURE — self-reported personal label (least reliable, often misleading)
 
 Examples of correct behavior:
-- Bio says "father of 5" but videos are all food reviews → classify as FOOD CREATOR, not family/parenting
-- Bio says "entrepreneur" but videos are all comedy skits → classify as COMEDY CREATOR, not business
-- Bio says "musician" and videos are music performances → classify as MUSICIAN (bio matches content)
+- Transcripts show food reviews and restaurant visits → classify as FOOD CREATOR regardless of bio
+- Bio says "father of 5" but transcripts are all food reviews → FOOD CREATOR, not family/parenting
+- Bio says "entrepreneur" but transcripts are comedy skits → COMEDY CREATOR, not business
+- Bio says "musician" and transcripts are music performances → MUSICIAN (bio matches content)
 
-NEVER let a personal bio override clear content evidence. The creator's professional identity is what they CREATE, not what they say about themselves in their bio.
-Be rigorous, specific, and grounded in the video content evidence. Use the exact terminology specified.`;
+NEVER let a personal bio override transcript or video content evidence.
+The creator's professional identity is what they CREATE and SAY, not what they write in their bio.
+Be rigorous, specific, and grounded in the evidence. Use the exact terminology specified.`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`

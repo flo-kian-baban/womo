@@ -40,27 +40,27 @@ export const appRouter = router({
           totalViews?: number; avgViews?: number; engagementRate?: number;
           location?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
           topHashtags?: string[]; recentVideoTitles?: string[];
+          transcriptCount?: number; transcriptExcerpts?: string;
         } | undefined;
-        try {
-          const research = await researchCreator(input.handleOrUrl, input.platform);
-          evidenceSummary = research.evidenceSummary;
-          researchedProfileUrl = research.profileUrl;
-          researchData = {
-            followerCount: research.followerCount || undefined,
-            totalLikes: research.totalLikes || undefined,
-            videoCount: research.videoCount || undefined,
-            totalViews: research.totalViews || undefined,
-            avgViews: research.avgViews || undefined,
-            engagementRate: research.engagementRate || undefined,
-            location: research.location || undefined,
-            rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
-            contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
-            topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
-            recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
-          };
-        } catch (err) {
-          console.warn("[creator.analyze] Web research failed, proceeding without evidence:", err);
-        }
+        // Research layer throws TRPCError for insufficient data — let it propagate to the client
+        const research = await researchCreator(input.handleOrUrl, input.platform);
+        evidenceSummary = research.evidenceSummary;
+        researchedProfileUrl = research.profileUrl;
+        researchData = {
+          followerCount: research.followerCount || undefined,
+          totalLikes: research.totalLikes || undefined,
+          videoCount: research.videoCount || undefined,
+          totalViews: research.totalViews || undefined,
+          avgViews: research.avgViews || undefined,
+          engagementRate: research.engagementRate || undefined,
+          location: research.location || undefined,
+          rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+          contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+          topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+          recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+          transcriptCount: research.transcriptCount ?? 0,
+          transcriptExcerpts: research.transcriptExcerpts || undefined,
+        };
 
         // Step 2: AI extraction grounded in real evidence
         const extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, evidenceSummary);
@@ -104,6 +104,8 @@ export const appRouter = router({
           contentThemeLabels: researchData?.contentThemeLabels ?? undefined,
           topHashtags: researchData?.topHashtags ?? undefined,
           recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
+          transcriptCount: researchData?.transcriptCount ?? 0,
+          transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
         });
         // Get the inserted ID
         const profiles = await listCreatorProfiles(undefined, extracted.handle);
