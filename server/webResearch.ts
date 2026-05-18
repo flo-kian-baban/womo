@@ -243,7 +243,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Step 1: TikTok Data API — user info
   try {
-    const userResponse = await callDataApi("Tiktok/get_user_info", {
+    const userResponse = await callDataApi("TikTok/get_user_info", {
       query: { uniqueId: handle },
     }) as Record<string, unknown>;
 
@@ -292,11 +292,14 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   const videoViewCounts: number[] = [];
   if (secUid) {
     try {
-      const postsResponse = await callDataApi("Tiktok/get_user_popular_posts", {
+      // Note: count must be a number (not string) for this endpoint
+      const postsResponse = await callDataApi("TikTok/get_user_popular_posts", {
         query: { secUid, count: "20" },
       }) as Record<string, unknown>;
 
-      const itemList = ((postsResponse?.data as Record<string, unknown>)?.itemList as unknown[]) ?? [];
+      // Response can be nested under .data or directly at root
+      const dataBlock = (postsResponse?.data as Record<string, unknown>) ?? postsResponse;
+      const itemList = (dataBlock?.itemList as unknown[]) ?? [];
       for (const item of itemList) {
         const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
         const stats = ((item as Record<string, unknown>)?.stats as Record<string, unknown>) ?? {};
@@ -309,21 +312,24 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     }
   }
 
-  // Step 4: TikTok search for additional context
+  // Step 4: YouTube search as supplementary source for TikTok creators
+  // This is critical — YouTube search returns real video titles even for TikTok-primary creators
   try {
-    const searchResponse = await callDataApi("Tiktok/search_tiktok_video_general", {
-      query: { keyword: handle },
+    const ytResponse = await callDataApi("Youtube/search", {
+      query: { q: `${handle} tiktok`, hl: "en", gl: "US" },
     }) as Record<string, unknown>;
-    const items = (searchResponse?.data as unknown[]) ?? [];
-    for (const item of items) {
-      const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
-      const authorId = (((item as Record<string, unknown>)?.author as Record<string, unknown>)?.uniqueId as string) ?? "";
-      if (authorId.toLowerCase() === handle.toLowerCase() && desc.trim()) {
-        videoTitles.push(desc.trim());
+    const contents = (ytResponse?.contents as unknown[]) ?? [];
+    for (const item of contents.slice(0, 20)) {
+      const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
+      if (videoData) {
+        const title = (videoData?.title as string) ?? "";
+        const desc = (videoData?.descriptionSnippet as string) ?? "";
+        if (title) videoTitles.push(title);
+        if (desc) videoTitles.push(desc);
       }
     }
   } catch (err) {
-    console.warn("[webResearch] TikTok search failed:", err);
+    console.warn("[webResearch] TikTok YouTube supplementary search failed:", err);
   }
 
   // Compute derived stats
@@ -623,10 +629,26 @@ ${topHashtags.slice(0, 15).join(", ")}
 ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled):
 ${videoTitles.slice(0, 15).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
 
-INSTRUCTIONS FOR ANALYSIS:
-You are analyzing a REAL creator. The data above is scraped directly from their public profile.
-Base your entire cultural analysis on this evidence. Do NOT contradict the evidence.
-The bio, video titles, keywords, and themes are ground truth. Analyze them carefully.
+CRITICAL ANALYSIS INSTRUCTIONS:
+⚠️  CONTENT IS PRIMARY — BIO IS SECONDARY AND MUST BE CHALLENGED
+
+The creator's bio/signature is a SELF-REPORTED label. People often describe themselves by
+their personal identity ("father", "mom", "entrepreneur") rather than their content niche.
+You MUST analyze what they actually CREATE, not what they say about themselves.
+
+RULE 1: If the video titles show a clear content niche (e.g., food reviews, comedy, music),
+         that niche IS the creator's professional identity — regardless of what the bio says.
+
+RULE 2: The bio should only influence the analysis if it MATCHES the video content evidence.
+         If the bio says "father" but all videos are about food — this creator is a FOOD CREATOR.
+
+RULE 3: Archetype, niche, and values must be derived from the VIDEO TITLES and HASHTAGS,
+         not from the bio. The bio is context, not identity.
+
+RULE 4: If you see 10+ food-related video titles, the creator's primary identity is food.
+         Do NOT classify them as "family" or "lifestyle" just because the bio mentions family.
+
+Analyze the ACTUAL CONTENT EVIDENCE above and derive the cultural profile from it.
 `.trim();
 }
 

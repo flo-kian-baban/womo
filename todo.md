@@ -105,7 +105,21 @@
 - [x] Update export (JSON) to include all new fields
 - [x] Explore additional Google/web data sources for brand research enrichment (YouTube search used)
 
-## Backlog / Future Enhancements (intentionally deferred)
+## Enhancement: Video Transcript Analysis & Content-First Profiling
+- [x] Probe TikTok Data API for video transcript/caption endpoints (none available in API hub)
+- [x] Probe YouTube Data API for video captions/transcripts (none available in API hub)
+- [x] Build best-available alternative: YouTube search returns 20+ real video titles for any creator
+- [x] TikTok research now uses YouTube search as supplementary source (returns real video titles)
+- [x] Store all video title evidence before AI analysis (up to 25 titles per creator)
+- [x] Rebalance AI extraction prompt: bio is a secondary signal, video content is primary
+- [x] Add explicit instruction to challenge/override bio claims with content evidence
+- [x] Added concrete examples in system prompt ("bio says father but videos are food = food creator")
+- [x] Evidence summary rewritten with 4 explicit RULES prioritizing content over bio
+- [x] Test with @alkhussein: YouTube search returns 'NATIONAL SHAWARMA DAY', 'Best Shawarma', 'Toronto Food Court' etc.
+- [x] Added 8 unit tests in webResearch.test.ts verifying content-first logic, food keyword dominance, and evidence summary structure
+- [x] All 27 tests pass (fitEngine x18, auth x1, webResearch x8)
+
+## Backlog / Future Enhancements (intentionally deferred — not in current scope)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands
 - [ ] Historical score tracking and trend charts

@@ -42,10 +42,19 @@ export async function extractCreatorProfile(
 ): Promise<CreatorExtractionResult> {
   const systemPrompt = `You are a cultural anthropologist and media analyst specializing in influencer marketing.
 Your task is to analyze a social media creator and produce a structured cultural profile using the Connex F.I.T. framework.
-You will be provided with REAL, SCRAPED evidence from the creator's public profile — including their bio, actual video titles, hashtags, and content themes.
-You MUST base your analysis on this evidence. Do NOT contradict the evidence. Do NOT invent a niche or persona that is not supported by the data.
-If the evidence shows a food reviewer, analyze them as a food reviewer. If the evidence shows a fitness creator, analyze them as a fitness creator.
-Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.`;
+
+CRITICAL INSTRUCTION — CONTENT OVER BIO:
+You will receive REAL, SCRAPED evidence including the creator's bio AND their actual video titles/hashtags.
+The bio is a SELF-REPORTED personal label. The video titles are OBJECTIVE CONTENT EVIDENCE.
+You MUST prioritize the video titles and hashtags over the bio when determining the creator's niche and archetype.
+
+Examples of correct behavior:
+- Bio says "father of 5" but videos are all food reviews → classify as FOOD CREATOR, not family/parenting
+- Bio says "entrepreneur" but videos are all comedy skits → classify as COMEDY CREATOR, not business
+- Bio says "musician" and videos are music performances → classify as MUSICIAN (bio matches content)
+
+NEVER let a personal bio override clear content evidence. The creator's professional identity is what they CREATE, not what they say about themselves in their bio.
+Be rigorous, specific, and grounded in the video content evidence. Use the exact terminology specified.`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
