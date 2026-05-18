@@ -365,12 +365,42 @@ async function fetchTikTokVideoTranscript(
  * 3. Fetch transcript for each video
  * 4. Return all successful transcripts
  */
+// ─── Computed Engagement Signals ─────────────────────────────────────────────
+
+export interface EngagementSignals {
+  // Per-video rate averages (0.0–1.0 fractions, multiply by 100 for %)
+  avgCommentRate: number;    // comments / plays
+  avgSaveRate: number;       // saves / plays
+  avgShareRate: number;      // shares / plays
+  avgLikeRate: number;       // likes / plays (true engagement rate)
+  // Content production signals
+  originalAudioRate: number; // fraction of videos with creator-original audio
+  remixEnablementRate: number; // fraction with duet OR stitch enabled
+  adTagRate: number;         // fraction tagged as ads
+  avgDurationSeconds: number; // average video duration in seconds
+  // Temporal buckets
+  recentVideos: TemporalVideoEntry[];   // < 3 months old
+  midVideos: TemporalVideoEntry[];      // 3–12 months old
+  olderVideos: TemporalVideoEntry[];    // > 12 months old
+  totalSampled: number;
+}
+
+export interface TemporalVideoEntry {
+  caption: string;
+  dateStr: string;   // YYYY-MM-DD
+  views: number;
+  likes: number;
+  comments: number;
+  saves: number;
+}
+
 async function fetchTikTokTranscripts(handle: string): Promise<{
   transcripts: TranscriptEntry[];
   videoTitles: string[];
   hashtags: string[];
   viewCounts: number[];
   musicTitles: string[];
+  engagementSignals: EngagementSignals;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -381,7 +411,23 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   const seen = new Set<string>();
 
   // Collect video IDs from TikTok search — author-filtered
-  const videoItems: Array<{ id: string; caption: string; views: number }> = [];
+  // Each item carries the full engagement snapshot needed for temporal analysis
+  interface VideoItem {
+    id: string;
+    caption: string;
+    views: number;
+    likes: number;
+    comments: number;
+    saves: number;
+    shares: number;
+    createTime: number;      // Unix timestamp (seconds)
+    musicOriginal: boolean;  // true = creator made original audio
+    duetEnabled: boolean;
+    stitchEnabled: boolean;
+    isAd: boolean;
+    durationMs: number;      // video duration in milliseconds
+  }
+  const videoItems: VideoItem[] = [];
 
   // Run two targeted searches: handle alone + handle with a broad keyword
   const queries = [handle, `@${handle}`];
@@ -418,7 +464,33 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
         const desc = (v?.desc as string) ?? "";
         const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
-        const views = Number(statsObj?.playCount ?? statsObj?.play_count ?? 0);
+        const views    = Number(statsObj?.playCount   ?? statsObj?.play_count    ?? 0);
+        const likes    = Number(statsObj?.diggCount   ?? statsObj?.digg_count    ?? 0);
+        const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
+        const saves    = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
+        const shares   = Number(statsObj?.shareCount  ?? statsObj?.share_count   ?? 0);
+        const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
+
+        // Music signals
+        const music = (v?.music as Record<string, unknown>) ?? {};
+        const musicTitle  = (music?.title      as string) ?? "";
+        const musicAuthor = (music?.authorName as string) ?? "";
+        const musicOriginal = Boolean(music?.original ?? false);
+        if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
+          if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
+        }
+        if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
+          if (!musicTitles.includes(`[original audio by @${handle}]`)) {
+            musicTitles.push(`[original audio by @${handle}]`);
+          }
+        }
+
+        // Interaction flags
+        const duetEnabled   = Boolean(v?.duetEnabled   ?? v?.duet_enabled   ?? false);
+        const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
+        const isAd          = Boolean(v?.isAd          ?? v?.is_ad          ?? false);
+        const videoObj      = (v?.video as Record<string, unknown>) ?? {};
+        const durationMs    = Number(videoObj?.duration ?? 0);
 
         // Collect hashtags from challenges and textExtra
         const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
@@ -436,23 +508,13 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
           hashtags.push(...inlineTags);
         }
 
-        // Collect music signals
-        const music = (v?.music as Record<string, unknown>) ?? {};
-        const musicTitle = (music?.title as string) ?? "";
-        const musicAuthor = (music?.authorName as string) ?? "";
-        if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
-          if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
-        }
-        if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
-          if (!musicTitles.includes(`[original audio by @${handle}]`)) {
-            musicTitles.push(`[original audio by @${handle}]`);
-          }
-        }
-
         if (views > 0) viewCounts.push(views);
         if (desc) videoTitles.push(desc);
 
-        videoItems.push({ id: videoId, caption: desc, views });
+        videoItems.push({
+          id: videoId, caption: desc, views, likes, comments, saves, shares,
+          createTime, musicOriginal, duetEnabled, stitchEnabled, isAd, durationMs,
+        });
       }
     } catch (err) {
       console.warn(`[webResearch] TikTok search "${q}" failed:`, err);
@@ -482,7 +544,62 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
   console.log(`[webResearch] @${handle}: ${transcripts.length} transcripts fetched out of ${videoItems.length} videos`);
 
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles };
+  // ─── Compute engagement signals from all collected videoItems ───────────────
+  const nowSec = Math.floor(Date.now() / 1000);
+  const threeMonthsSec  = 90  * 24 * 3600;
+  const twelveMonthsSec = 365 * 24 * 3600;
+
+  const recentVideos: TemporalVideoEntry[] = [];
+  const midVideos:    TemporalVideoEntry[] = [];
+  const olderVideos:  TemporalVideoEntry[] = [];
+
+  let sumCommentRate = 0, sumSaveRate = 0, sumShareRate = 0, sumLikeRate = 0;
+  let sumOriginalAudio = 0, sumRemixEnabled = 0, sumIsAd = 0, sumDurationSec = 0;
+  let rateCount = 0;
+
+  for (const vi of videoItems) {
+    const entry: TemporalVideoEntry = {
+      caption: vi.caption.slice(0, 80) || "(no caption)",
+      dateStr: vi.createTime > 0 ? new Date(vi.createTime * 1000).toISOString().slice(0, 10) : "unknown",
+      views: vi.views, likes: vi.likes, comments: vi.comments, saves: vi.saves,
+    };
+    if (vi.createTime > 0) {
+      const ageSec = nowSec - vi.createTime;
+      if (ageSec < threeMonthsSec)       recentVideos.push(entry);
+      else if (ageSec < twelveMonthsSec) midVideos.push(entry);
+      else                               olderVideos.push(entry);
+    }
+
+    if (vi.views > 0) {
+      sumCommentRate += vi.comments / vi.views;
+      sumSaveRate    += vi.saves    / vi.views;
+      sumShareRate   += vi.shares   / vi.views;
+      sumLikeRate    += vi.likes    / vi.views;
+      rateCount++;
+    }
+    sumOriginalAudio  += vi.musicOriginal ? 1 : 0;
+    sumRemixEnabled   += (vi.duetEnabled || vi.stitchEnabled) ? 1 : 0;
+    sumIsAd           += vi.isAd ? 1 : 0;
+    sumDurationSec    += vi.durationMs > 0 ? vi.durationMs / 1000 : 0;
+  }
+
+  const n = videoItems.length || 1;
+  const engagementSignals: EngagementSignals = {
+    avgCommentRate:      rateCount > 0 ? sumCommentRate / rateCount : 0,
+    avgSaveRate:         rateCount > 0 ? sumSaveRate    / rateCount : 0,
+    avgShareRate:        rateCount > 0 ? sumShareRate   / rateCount : 0,
+    avgLikeRate:         rateCount > 0 ? sumLikeRate    / rateCount : 0,
+    originalAudioRate:   sumOriginalAudio  / n,
+    remixEnablementRate: sumRemixEnabled   / n,
+    adTagRate:           sumIsAd           / n,
+    avgDurationSeconds:  sumDurationSec    / n,
+    recentVideos, midVideos, olderVideos,
+    totalSampled: videoItems.length,
+  };
+
+  console.log(`[webResearch] @${handle} engagement signals: commentRate=${(engagementSignals.avgCommentRate*100).toFixed(3)}% saveRate=${(engagementSignals.avgSaveRate*100).toFixed(3)}% originalAudio=${(engagementSignals.originalAudioRate*100).toFixed(0)}%`);
+
+  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -774,12 +891,13 @@ function buildCreatorEvidenceSummary(data: {
   rawKeywords: string[]; contentThemeLabels: string[]; contentThemes: string[];
   musicSignals?: string[];
   transcripts?: TranscriptEntry[];
+  engagementSignals?: EngagementSignals;
 }): string {
   const {
     handle, platform, displayName, bio, followerCount, videoCount, totalLikes,
     totalViews, avgViews, engagementRate, location, videoTitles, topHashtags,
     rawKeywords, contentThemeLabels, contentThemes, musicSignals = [],
-    transcripts = [],
+    transcripts = [], engagementSignals,
   } = data;
 
   // Build combined transcript text for creator type detection
@@ -792,6 +910,117 @@ function buildCreatorEvidenceSummary(data: {
         `  [Video ${i + 1}] "${t.caption.slice(0, 60) || "(no caption)"}" — ${t.wordCount} words spoken\n  TRANSCRIPT: ${t.transcript.slice(0, 500)}${t.transcript.length > 500 ? "..." : ""}`
       ).join("\n\n")
     : "  [No transcripts available — analysis based on video titles and profile metadata]";
+
+  // ─── Build engagement signals block ───────────────────────────────────────────────────────────
+  let engagementBlock = "";
+  let temporalBlock = "";
+  if (engagementSignals && engagementSignals.totalSampled > 0) {
+    const sig = engagementSignals;
+    const pct = (v: number) => (v * 100).toFixed(3) + "%";
+    const pct1 = (v: number) => (v * 100).toFixed(1) + "%";
+    const secs = (s: number) => s > 0 ? `${Math.round(s)}s (${s >= 60 ? (s/60).toFixed(1)+"min" : "short-form"})` : "unknown";
+
+    // Parasocial bond interpretation
+    const commentPct = sig.avgCommentRate * 100;
+    const bondLabel =
+      commentPct >= 0.5  ? "5.0 — Deep parasocial bond (audience treats creator as a close friend)" :
+      commentPct >= 0.25 ? "4.0 — Strong bond (regular emotional engagement)" :
+      commentPct >= 0.10 ? "3.0 — Moderate bond (engaged but professional distance)" :
+      commentPct >= 0.05 ? "2.0 — Weak bond (passive audience, low interaction)" :
+                           "1.0 — Transactional / informational (minimal emotional connection)";
+
+    // Audience relationship interpretation
+    const savePct = sig.avgSaveRate * 100;
+    const relLabel =
+      savePct >= 1.0 ? "Authority / Expert (audience saves content as a reference resource)" :
+      savePct >= 0.4 ? "Mentor (audience saves for future use — high utility value)" :
+                       "Friend / Entertainer (audience watches but does not save — entertainment-first)";
+
+    // Cultural capital interpretation
+    const origAudio = sig.originalAudioRate;
+    const sharePct  = sig.avgShareRate * 100;
+    const capitalLabel =
+      origAudio >= 0.5 && sharePct >= 0.3 ? "PRODUCE — Creator originates culture (original audio + high share rate)" :
+      origAudio >= 0.3                    ? "PRODUCE (leaning) — Creates original audio but limited cultural spread" :
+      sharePct >= 0.5                     ? "RELAY (amplifier) — Spreads existing culture widely" :
+                                            "RELAY — Participates in existing trends, does not originate";
+
+    // Remix signal
+    const remixLabel = sig.remixEnablementRate >= 0.5
+      ? `HIGH (${pct1(sig.remixEnablementRate)} of videos allow duet/stitch — community remix culture)`
+      : sig.remixEnablementRate > 0
+      ? `LOW (${pct1(sig.remixEnablementRate)} allow remix — selective openness)`
+      : "NONE (all duet/stitch disabled — closed content strategy)";
+
+    // Brand saturation
+    const adLabel = sig.adTagRate >= 0.3
+      ? `HIGH (${pct1(sig.adTagRate)} of videos tagged as ads — significant commercial activity)`
+      : sig.adTagRate > 0
+      ? `MODERATE (${pct1(sig.adTagRate)} ad-tagged)`
+      : "NONE detected in sampled videos";
+
+    engagementBlock = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPUTED ENGAGEMENT SIGNALS (from ${sig.totalSampled} sampled videos — DATA-DRIVEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RATE METRICS (avg per video):
+  Like Rate (true engagement):  ${pct(sig.avgLikeRate)} of views → use this as engagementRate
+  Comment Rate (parasocial):    ${pct(sig.avgCommentRate)} of views
+  Save Rate (utility/reference): ${pct(sig.avgSaveRate)} of views
+  Share Rate (cultural spread): ${pct(sig.avgShareRate)} of views
+  Avg Video Duration:           ${secs(sig.avgDurationSeconds)}
+
+DERIVED SOCIOLOGICAL SIGNALS:
+  ▶ PARASOCIAL BOND STRENGTH: ${bondLabel}
+    (Comment rate ${pct(sig.avgCommentRate)} → use this number, do not re-derive)
+
+  ▶ AUDIENCE RELATIONSHIP TYPE: ${relLabel}
+    (Save rate ${pct(sig.avgSaveRate)} → use this number, do not re-derive)
+
+  ▶ CULTURAL CAPITAL: ${capitalLabel}
+    (Original audio: ${pct1(origAudio)}, Share rate: ${pct(sig.avgShareRate)})
+
+  ▶ REMIX RATE / COMMUNITY OPENNESS: ${remixLabel}
+
+  ▶ BRAND SATURATION: ${adLabel}
+
+⚠️  INSTRUCTION: The above signals are COMPUTED FROM RAW DATA. You MUST use these
+    values directly when setting parasocialBondStrength, audienceRelationshipType,
+    culturalCapitalType, and remixRate. Do NOT override them with your own estimate.`;
+
+    // Build temporal content table
+    const fmtBucket = (label: string, items: TemporalVideoEntry[]) => {
+      if (items.length === 0) return `${label}: [no videos in this period]`;
+      return `${label} (${items.length} videos):\n` +
+        items.slice(0, 5).map(v =>
+          `  [${v.dateStr}] ${v.caption.slice(0, 60)} | ${formatNum(v.views)} plays, ${formatNum(v.likes)} likes, ${formatNum(v.comments)} comments, ${formatNum(v.saves)} saves`
+        ).join("\n");
+    };
+
+    const hasTemporalData = sig.recentVideos.length + sig.midVideos.length + sig.olderVideos.length > 0;
+    if (hasTemporalData) {
+      temporalBlock = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEMPORAL CONTENT ANALYSIS (for Drift Signal + Goffman Stage Test)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${fmtBucket("RECENT (last 90 days)", sig.recentVideos)}
+
+${fmtBucket("MID-PERIOD (3–12 months ago)", sig.midVideos)}
+
+${fmtBucket("OLDER (12+ months ago)", sig.olderVideos)}
+
+INSTRUCTION: Compare the topic/tone/style across time periods to assess:
+  • DRIFT SIGNAL: Zero Change / Minor Drift / Significant Drift / Full Pivot
+  • GOFFMAN STAGE TEST: Consistent / Minor Gap / Significant Gap
+  If only one time period has data, set Drift Signal to "Zero Change" (insufficient history).`;
+    }
+  }
+
+  const personalityNote = (creatorType.includes("PERSONALITY") || creatorType.includes("COMEDY")) ? `
+⚠️  PERSONALITY CREATOR NOTE: This creator uses minimal captions. Their identity comes from
+    their PRESENCE, STYLE, and AUDIENCE RELATIONSHIP — not from descriptive post titles.
+    Use follower count, avg views, bio tone, music choices, and any transcript content to infer archetype.
+` : "";
 
   return `
 CREATOR RESEARCH EVIDENCE — @${handle} (${platform})
@@ -809,12 +1038,7 @@ STATS:
   Avg Views per Video: ${formatNum(avgViews)}
   Engagement Rate: ${engagementRate}%
 
-DETECTED CREATOR TYPE: ${creatorType}
-${creatorType.includes("PERSONALITY") || creatorType.includes("COMEDY") ? `
-⚠️  PERSONALITY CREATOR NOTE: This creator uses minimal captions. Their identity comes from
-    their PRESENCE, STYLE, and AUDIENCE RELATIONSHIP — not from descriptive post titles.
-    Use follower count, avg views, bio tone, music choices, and any transcript content to infer archetype.
-` : ""}
+DETECTED CREATOR TYPE: ${creatorType}${personalityNote}${engagementBlock}${temporalBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PRIMARY EVIDENCE — SPOKEN TRANSCRIPTS (${transcripts.length} videos)
@@ -905,7 +1129,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals } = transcriptData;
 
   // Step 3: HTML scrape for additional video titles (profile page)
   const htmlTitles: string[] = [];
@@ -975,9 +1199,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   const avgViews = viewCounts.length > 0
     ? Math.round(viewCounts.reduce((a, b) => a + b, 0) / viewCounts.length)
     : 0;
-  const engagementRate = followerCount > 0 && avgViews > 0
-    ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
-    : 0;
+  // FIXED engagement rate: use (likes + comments) / plays, not views/followers
+  // This is the true interaction rate and will never exceed 100%
+  const engagementRate = engagementSignals.avgLikeRate > 0
+    ? Math.round((engagementSignals.avgLikeRate + engagementSignals.avgCommentRate) * 100 * 100) / 100
+    : (followerCount > 0 && avgViews > 0
+      ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+      : 0);
 
   const allHashtagSources = [...searchHashtags, ...allTitles, bio];
   const topHashtags = extractHashtags(allHashtagSources);
@@ -1006,7 +1234,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
     totalLikes, totalViews, avgViews, engagementRate, location,
     videoTitles: allTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
-    musicSignals: musicTitles, transcripts,
+    musicSignals: musicTitles, transcripts, engagementSignals,
   });
 
   return {

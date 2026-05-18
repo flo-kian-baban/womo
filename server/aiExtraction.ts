@@ -51,19 +51,34 @@ This is more reliable than any other signal.
 
 HIERARCHY OF EVIDENCE (highest to lowest):
 1. SPOKEN TRANSCRIPTS — what the creator literally says in their videos (most reliable)
-2. VIDEO TITLES / CAPTIONS — what they post (reliable)
-3. HASHTAGS / KEYWORDS — how they tag content (reliable)
-4. BIO / SIGNATURE — self-reported personal label (least reliable, often misleading)
+2. COMPUTED ENGAGEMENT SIGNALS — data-driven metrics derived from raw API data (use these directly, do not re-derive)
+3. TEMPORAL CONTENT ANALYSIS — time-bucketed video history (use for Drift Signal and Goffman)
+4. VIDEO TITLES / CAPTIONS — what they post (reliable)
+5. HASHTAGS / KEYWORDS — how they tag content (reliable)
+6. BIO / SIGNATURE — self-reported personal label (least reliable, often misleading)
 
 Examples of correct behavior:
 - Transcripts show food reviews and restaurant visits → classify as FOOD CREATOR regardless of bio
 - Bio says "father of 5" but transcripts are all food reviews → FOOD CREATOR, not family/parenting
 - Bio says "entrepreneur" but transcripts are comedy skits → COMEDY CREATOR, not business
 - Bio says "musician" and transcripts are music performances → MUSICIAN (bio matches content)
+- Evidence shows comment rate 0.35% → parasocialBondStrength = 4.0 (use the computed label, do not guess)
+- Evidence shows save rate 0.8% → audienceRelationshipType = "Mentor" (use the computed label)
+- Evidence shows original audio 60% + high share rate → culturalCapital = "Produce"
 
 NEVER let a personal bio override transcript or video content evidence.
 The creator's professional identity is what they CREATE and SAY, not what they write in their bio.
-Be rigorous, specific, and grounded in the evidence. Use the exact terminology specified.`;
+Be rigorous, specific, and grounded in the evidence. Use the exact terminology specified.
+
+KEYWORD AND THEME EXTRACTION INSTRUCTION:
+When identifying keywords and recurring themes, prioritize words and phrases that reveal:
+- Beliefs and values (e.g. "halal", "authentic", "community", "self-made", "grind", "faith")
+- Emotional drivers (e.g. "nostalgia", "pride", "belonging", "aspiration", "comfort")
+- Identity claims (e.g. "immigrant", "diaspora", "first-gen", "Muslim", "Black-owned", "queer")
+- Status markers (e.g. "exclusive", "underground", "mainstream", "viral", "local gem")
+- Motivations (e.g. "inspire", "educate", "entertain", "connect", "represent")
+- Social capital signals (e.g. "in-the-know", "early adopter", "community leader")
+These are more anthropologically revealing than topic nouns alone.`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
@@ -81,26 +96,49 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "platform": "TikTok" | "YouTube" | "Multi",
   "displayName": "their display name",
   "archetype": ONE OF EXACTLY: "The Sage" | "The Hero" | "The Outlaw" | "The Explorer" | "The Magician" | "The Ruler" | "The Caregiver" | "The Lover" | "The Jester" | "The Innocent" | "The Everyman" | "The Creator",
-  "recurringThemes": ["theme1", "theme2", "theme3"] (3-4 specific recurring content topics/formats),
+  "recurringThemes": ["theme1", "theme2", "theme3"] (3-4 specific recurring content topics/formats — be anthropologically specific, e.g. "Halal Street Food Reviews" not "Food", "Diaspora Identity Storytelling" not "Culture"),
   "toneRegister": "2-3 words describing their emotional register and communication style",
-  "parasocialBondStrength": number between 1.0 and 5.0 (depth of audience emotional relationship),
-  "audienceRelationshipType": "Friend" | "Mentor" | "Authority",
-  "barthesMyth": "This creator makes it feel obvious that [complete the sentence with their core cultural myth]",
-  "culturalCapital": "Produce" | "Relay" (do they produce original cultural content or relay/curate existing culture?),
-  "goffmanStageConsistency": "Consistent" | "Minor Gap" | "Significant Gap" (how consistent is their persona across produced vs unscripted content?),
-  "driftSignal": "Zero Change" | "Minor Drift" | "Significant Drift" | "Full Pivot" (identity/tone shift over last 6 months),
-  "stuartHallDecoding": "Dominant" | "Negotiated" | "Oppositional" (how does their audience decode branded content?),
-  "nicheTopicNode": "specific niche name (e.g. 'slow fitness' not 'fitness')",
+  "parasocialBondStrength": number between 1.0 and 5.0.
+    RULE: If the evidence includes a PARASOCIAL BOND STRENGTH label in COMPUTED ENGAGEMENT SIGNALS,
+    extract the numeric value from that label (e.g. "4.0 — Strong bond" means use 4.0).
+    Only estimate independently if no computed signal is present.
+    Estimation rubric: 5.0=deep friend bond (comment rate >=0.5%), 4.0=strong engagement (>=0.25%),
+    3.0=moderate/professional distance (>=0.10%), 2.0=weak/passive (>=0.05%), 1.0=transactional (<0.05%),
+  "audienceRelationshipType": "Friend" | "Mentor" | "Authority".
+    RULE: If the evidence includes an AUDIENCE RELATIONSHIP TYPE label in COMPUTED ENGAGEMENT SIGNALS,
+    use that value directly. Only estimate if absent.
+    Estimation rubric: Authority=save rate >=1.0%, Mentor=save rate >=0.4%, Friend=save rate <0.4%,
+  "barthesMyth": "This creator makes it feel obvious that [complete the sentence with their core cultural myth — the unspoken belief their content naturalizes for their audience]",
+  "culturalCapital": "Produce" | "Relay".
+    RULE: If the evidence includes a CULTURAL CAPITAL label in COMPUTED ENGAGEMENT SIGNALS,
+    use Produce if the label starts with PRODUCE, Relay if it starts with RELAY.
+    Estimation rubric: Produce=creates original formats/audio/ideas, Relay=participates in existing trends,
+  "goffmanStageConsistency": "Consistent" | "Minor Gap" | "Significant Gap".
+    RULE: If the evidence includes a TEMPORAL CONTENT ANALYSIS section, compare the tone and topic
+    of RECENT vs OLDER content. Consistent=same style throughout, Minor Gap=slight tone shift,
+    Significant Gap=clear difference between public persona and older/unscripted content.
+    Default to Consistent if only one time period has data or no temporal data is present,
+  "driftSignal": "Zero Change" | "Minor Drift" | "Significant Drift" | "Full Pivot".
+    RULE: If the evidence includes a TEMPORAL CONTENT ANALYSIS section, compare the NICHE/TOPIC of
+    RECENT vs OLDER content. Zero Change=same niche throughout, Minor Drift=same niche with slight
+    evolution, Significant Drift=clear topic shift, Full Pivot=completely different niche.
+    Default to Zero Change if only one time period has data or no temporal data is present,
+  "stuartHallDecoding": "Dominant" | "Negotiated" | "Oppositional" (how does their audience decode branded content? Dominant=accepts brand message at face value, Negotiated=accepts partially with own filter, Oppositional=audience rejects or subverts brand messaging),
+  "nicheTopicNode": "specific niche name — be precise and anthropologically specific (e.g. 'halal street food reviews in the diaspora' not 'food content')",
   "undergroundDensity": true | false (is this niche still alive in tight non-mainstream communities?),
-  "mainstreamBleed": true | false (is this niche crossing into mass media?),
-  "remixRate": true | false (is the community reinterpreting/reinventing niche content?),
-  "brandSaturation": true | false (have brands already activated in this niche?),
-  "rogersAdopterStage": "Innovators" | "Early Adopters" | "Early Majority" | "Late Majority" | "Laggards" (where does this NICHE sit on the adoption curve?),
-  "creatorNichePosition": "Ahead" | "Consistent" | "Behind" (where does THIS CREATOR sit relative to the niche?),
+  "mainstreamBleed": true | false (is this niche crossing into mass media / mainstream awareness?),
+  "remixRate": true | false.
+    RULE: If the evidence includes a REMIX RATE / COMMUNITY OPENNESS label in COMPUTED ENGAGEMENT SIGNALS,
+    set true if the label says HIGH, false if LOW or NONE. Only estimate if absent,
+  "brandSaturation": true | false.
+    RULE: If the evidence includes a BRAND SATURATION label in COMPUTED ENGAGEMENT SIGNALS,
+    set true if the label says HIGH or MODERATE, false if NONE. Only estimate if absent,
+  "rogersAdopterStage": "Innovators" | "Early Adopters" | "Early Majority" | "Late Majority" | "Laggards" (where does this NICHE sit on the Rogers adoption curve — not the creator's follower count),
+  "creatorNichePosition": "Ahead" | "Consistent" | "Behind" (where does THIS CREATOR sit relative to where the niche is heading?),
   "lifecyclePhase": "Emergence" | "Growth" | "Maturity" | "Decline" (current lifecycle phase of the niche),
   "barthesNicheMeaning": "This niche used to mean [X] — it is now starting to mean [Y]." OR "No meaning shift detected — core belief remains stable.",
   "turnerLiminalPhase": "Pre-Liminal" | "Liminal" | "Post-Liminal Reintegration" (is this niche community in identity transition?),
-  "aiSummary": "A 2-3 sentence cultural analyst summary of this creator's symbolic position, cultural authority, and brand partnership potential."
+  "aiSummary": "A 2-3 sentence cultural analyst summary covering: (1) this creator's symbolic position and what cultural identity they represent, (2) the nature of their audience relationship and parasocial dynamic grounded in the engagement data, (3) their brand partnership potential and any cultural risks or sensitivities."
 }
 
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
@@ -119,28 +157,28 @@ Be specific and evidence-based. Every field must be populated. Output only valid
           type: "object",
           properties: {
             handle: { type: "string" },
-            platform: { type: "string", enum: ["TikTok", "Instagram", "YouTube", "Multi"] },
+            platform: { type: "string" },
             displayName: { type: "string" },
             archetype: { type: "string" },
             recurringThemes: { type: "array", items: { type: "string" } },
             toneRegister: { type: "string" },
             parasocialBondStrength: { type: "number" },
-            audienceRelationshipType: { type: "string", enum: ["Friend", "Mentor", "Authority"] },
+            audienceRelationshipType: { type: "string" },
             barthesMyth: { type: "string" },
-            culturalCapital: { type: "string", enum: ["Produce", "Relay"] },
-            goffmanStageConsistency: { type: "string", enum: ["Consistent", "Minor Gap", "Significant Gap"] },
-            driftSignal: { type: "string", enum: ["Zero Change", "Minor Drift", "Significant Drift", "Full Pivot"] },
-            stuartHallDecoding: { type: "string", enum: ["Dominant", "Negotiated", "Oppositional"] },
+            culturalCapital: { type: "string" },
+            goffmanStageConsistency: { type: "string" },
+            driftSignal: { type: "string" },
+            stuartHallDecoding: { type: "string" },
             nicheTopicNode: { type: "string" },
             undergroundDensity: { type: "boolean" },
             mainstreamBleed: { type: "boolean" },
             remixRate: { type: "boolean" },
             brandSaturation: { type: "boolean" },
-            rogersAdopterStage: { type: "string", enum: ["Innovators", "Early Adopters", "Early Majority", "Late Majority", "Laggards"] },
-            creatorNichePosition: { type: "string", enum: ["Ahead", "Consistent", "Behind"] },
-            lifecyclePhase: { type: "string", enum: ["Emergence", "Growth", "Maturity", "Decline"] },
+            rogersAdopterStage: { type: "string" },
+            creatorNichePosition: { type: "string" },
+            lifecyclePhase: { type: "string" },
             barthesNicheMeaning: { type: "string" },
-            turnerLiminalPhase: { type: "string", enum: ["Pre-Liminal", "Liminal", "Post-Liminal Reintegration"] },
+            turnerLiminalPhase: { type: "string" },
             aiSummary: { type: "string" },
           },
           required: [
@@ -149,7 +187,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             "barthesMyth", "culturalCapital", "goffmanStageConsistency", "driftSignal",
             "stuartHallDecoding", "nicheTopicNode", "undergroundDensity", "mainstreamBleed",
             "remixRate", "brandSaturation", "rogersAdopterStage", "creatorNichePosition",
-            "lifecyclePhase", "barthesNicheMeaning", "turnerLiminalPhase", "aiSummary"
+            "lifecyclePhase", "barthesNicheMeaning", "turnerLiminalPhase", "aiSummary",
           ],
           additionalProperties: false,
         },
@@ -158,8 +196,14 @@ Be specific and evidence-based. Every field must be populated. Output only valid
   });
 
   const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI extraction");
-  return JSON.parse(content as string) as CreatorExtractionResult;
+  if (!content) throw new Error("LLM returned no content for creator extraction");
+
+  const raw = JSON.parse(content as string) as CreatorExtractionResult;
+
+  // Clamp parasocialBondStrength to valid range
+  raw.parasocialBondStrength = Math.max(1.0, Math.min(5.0, raw.parasocialBondStrength));
+
+  return raw;
 }
 
 // ─── Brand Extraction ─────────────────────────────────────────────────────────
@@ -180,7 +224,7 @@ export interface BrandExtractionResult {
 
 export async function extractBrandProfile(
   brandNameOrUrl: string,
-  evidenceSummary?: string  // Real scraped evidence from webResearch.ts
+  evidenceSummary?: string
 ): Promise<BrandExtractionResult> {
   const brandTypeOptions = [
     "Retail — Local Boutique", "Retail — E-Commerce / DTC Product", "Retail — Seasonal / Holiday Campaign",
@@ -198,7 +242,7 @@ export async function extractBrandProfile(
     "Fashion — Heritage / Luxury", "Fashion — Trend-First / Streetwear", "Fashion — Accessible / Mid-Market",
     "Long-Term Ambassador", "Product Launch",
     "Restaurant — Casual Dining", "Restaurant — Fine Dining / Experiential", "Restaurant — QSR / Fast Food",
-    "Restaurant — QSR / Limited-Time Activation"
+    "Restaurant — QSR / Limited-Time Activation",
   ];
 
   const systemPrompt = `You are a brand strategist and cultural analyst specializing in influencer marketing.
@@ -261,7 +305,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
           },
           required: [
             "brandName", "category", "archetype", "emotionalPromise", "visualLanguage",
-            "audienceTribe", "culturalTension", "barthesMyth", "brandType", "campaignType", "aiSummary"
+            "audienceTribe", "culturalTension", "barthesMyth", "brandType", "campaignType", "aiSummary",
           ],
           additionalProperties: false,
         },
@@ -271,6 +315,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from AI extraction");
+
   return JSON.parse(content as string) as BrandExtractionResult;
 }
 
@@ -312,7 +357,6 @@ You write precise, insightful F.I.T. Score narrative reports that explain the cu
 Your writing is sophisticated, uses the correct sociological terminology, and provides actionable strategic insight.`;
 
   const userPrompt = `Generate a F.I.T. Score narrative report for the following match:
-
 Creator: ${input.creatorHandle} (Archetype: ${input.creatorArchetype})
 Brand: ${input.brandName} (Archetype: ${input.brandArchetype})
 F.I.T. Score: ${input.fitScore}/10 — ${input.fitStatus}
@@ -376,5 +420,6 @@ Output a JSON object with:
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from narrative generation");
+
   return JSON.parse(content as string) as NarrativeResult;
 }

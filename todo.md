@@ -183,3 +183,19 @@
 - [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content
 - [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content
 - [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
+
+## Engagement Signal Architecture Upgrade
+- [ ] Extract createTime from every video → bucket into Old (>12mo), Mid (3-12mo), Recent (<3mo)
+- [ ] Extract commentCount, collectCount (saves), shareCount, diggCount per video
+- [ ] Extract music.original flag per video → compute originalAudioRate
+- [ ] Extract duetEnabled, stitchEnabled per video → compute remixEnablementRate
+- [ ] Extract isAd flag per video → compute adTagRate
+- [ ] Extract video.duration per video → compute avgDurationSeconds
+- [ ] Compute avgCommentRate = avg(commentCount/playCount) across all videos
+- [ ] Compute avgSaveRate = avg(collectCount/playCount) across all videos
+- [ ] Compute avgShareRate = avg(shareCount/playCount) across all videos
+- [ ] Fix engagement rate bug: use (diggCount+commentCount)/playCount not avgViews/followerCount
+- [ ] Build temporal content table: per-bucket video list with title, date, plays, likes, comments, saves
+- [ ] Pass computed signals block to AI evidence summary
+- [ ] Update AI extraction prompt: explicit rubrics for Parasocial Bond, Audience Relationship, Cultural Capital, Drift Signal, Brand Saturation, Remix Rate
+- [ ] Run all tests and TypeScript check after changes
