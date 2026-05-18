@@ -1188,12 +1188,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Merge all video titles
   const allTitles = Array.from(new Set([...searchTitles, ...htmlTitles, ...popularTitles])).slice(0, 30);
 
-  // Check if we have enough data — hard error if insufficient
-  const hasEnoughData = transcripts.length >= 3 || allTitles.length >= 3;
-  if (!hasEnoughData) {
+  // Check if we have enough data — only hard-error when we have NOTHING at all
+  // A single title or transcript is enough to attempt a low-confidence analysis
+  const hasAnyData = transcripts.length > 0 || allTitles.length > 0 || followerCount > 0 || bio.length > 0;
+  if (!hasAnyData) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: `Not enough public content found for @${handle}. TikTok does not expose this creator's videos through the available APIs. Please verify the handle is correct, or try a creator with more public content.`,
+      message: `No public content found for @${handle}. TikTok does not expose this creator's profile through the available APIs. Please verify the handle is correct and that the account is public.`,
     });
   }
 
