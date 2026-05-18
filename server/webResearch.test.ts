@@ -43,16 +43,18 @@ describe("webResearch evidence summary", () => {
     expect(source).toContain("NEVER let a personal bio override");
   });
 
-  it("TikTok research includes YouTube supplementary search step", async () => {
+  it("TikTok research uses multi-query TikTok search as primary source", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const filePath = path.resolve(__dirname, "webResearch.ts");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Verify YouTube supplementary search is included in TikTok research
-    expect(source).toContain("YouTube search as supplementary source for TikTok creators");
-    expect(source).toContain("tiktok");
-    expect(source).toContain("Youtube/search");
+    // Verify the multi-query TikTok search function exists
+    expect(source).toContain("collectTikTokVideosViaSearch");
+    expect(source).toContain("TikTok/search_tiktok_video_general");
+    // Verify YouTube is only used as a last-resort fallback for large creators
+    expect(source).toContain("DISABLED for small creators");
+    expect(source).toContain("followerCount >= 50000");
   });
 
   it("evidence summary builder includes video titles section", async () => {

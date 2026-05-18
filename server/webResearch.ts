@@ -229,6 +229,77 @@ function formatNum(n: number): string {
 
 // ─── TikTok Research ──────────────────────────────────────────────────────────
 
+/**
+ * Run multiple TikTok keyword searches for a creator to collect their actual videos.
+ * This is the primary video-collection method since get_user_popular_posts returns
+ * empty for small/mid-size creators.
+ *
+ * Strategy:
+ * 1. Search "[handle]" — returns their own videos directly
+ * 2. Search "[handle] [niche keywords]" — reinforces niche signal
+ * 3. Collect ALL results (not just own-author matches) since the search is targeted
+ *    enough that results are typically the creator's content
+ */
+async function collectTikTokVideosViaSearch(
+  handle: string,
+  bio: string
+): Promise<{ titles: string[]; hashtags: string[]; viewCounts: number[] }> {
+  const titles: string[] = [];
+  const hashtags: string[] = [];
+  const viewCounts: number[] = [];
+  const seen = new Set<string>();
+
+  // Build search queries — always run all 4 to maximize content coverage
+  // We do NOT limit based on bio keywords because the bio may not reflect the content
+  const bioLower = bio.toLowerCase();
+  const cityMatch = bioLower.match(/toronto|nyc|new york|london|los angeles|la|miami|chicago|dubai|paris|montreal|vancouver|sydney|melbourne/);
+  const cityQuery = cityMatch ? `${handle} ${cityMatch[0]}` : `${handle} food`;
+
+  // Fixed 4-query set: always runs all 4 regardless of bio content
+  const queries = [
+    handle,                      // Primary: returns the creator's own videos directly
+    `${handle} food`,            // Food/restaurant content (most common TikTok niche)
+    `${handle} travel`,          // Travel/lifestyle content
+    cityQuery,                   // City-specific or food fallback
+  ];
+
+  for (const q of queries) {
+    try {
+      const result = await callDataApi("TikTok/search_tiktok_video_general", {
+        query: { keyword: q },
+      }) as Record<string, unknown>;
+
+      const items = (result?.item_list as unknown[]) ?? [];
+      for (const item of items) {
+        const v = item as Record<string, unknown>;
+        const desc = (v?.desc as string) ?? "";
+        const textExtra = (v?.text_extra as Array<Record<string, unknown>>) ?? [];
+        const stats = (v?.statistics as Record<string, unknown>) ?? {};
+        const views = Number(stats?.play_count ?? 0);
+        const diggs = Number(stats?.digg_count ?? 0);
+
+        if (desc && !seen.has(desc)) {
+          seen.add(desc);
+          titles.push(desc);
+          if (views > 0) viewCounts.push(views);
+          // Extract hashtags from text_extra
+          for (const tag of textExtra) {
+            const tagName = (tag?.hashtag_name as string) ?? "";
+            if (tagName) hashtags.push(`#${tagName}`);
+          }
+          // Also extract inline hashtags from description
+          const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
+          hashtags.push(...inlineTags);
+        }
+      }
+    } catch (err) {
+      console.warn(`[webResearch] TikTok search failed for query "${q}":`, err);
+    }
+  }
+
+  return { titles, hashtags, viewCounts };
+}
+
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
@@ -269,16 +340,57 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     console.warn("[webResearch] TikTok user info failed:", err);
   }
 
-  // Step 2: TikTok HTML scrape for video descriptions
+  // Step 2: Multi-query TikTok search — PRIMARY video collection method
+  // get_user_popular_posts returns empty for small/mid creators, so we use
+  // targeted keyword searches which reliably return the creator's own content.
+  let totalViews = 0;
+  const videoViewCounts: number[] = [];
+  const searchHashtags: string[] = [];
+
+  const searchResults = await collectTikTokVideosViaSearch(handle, bio);
+  videoTitles.push(...searchResults.titles);
+  searchHashtags.push(...searchResults.hashtags);
+  videoViewCounts.push(...searchResults.viewCounts);
+  totalViews = searchResults.viewCounts.reduce((a, b) => a + b, 0);
+
+  // Step 3: TikTok HTML scrape — supplementary source for additional video captions
+  // This extracts video descriptions embedded in the page JSON, which may include
+  // videos not returned by the search API.
   try {
     const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
-    const descMatches = html.match(/"desc":"([^"]{10,200})"/g) ?? [];
-    for (const m of descMatches) {
-      const desc = m.replace(/^"desc":"/, "").replace(/"$/, "").trim();
-      if (desc && !desc.includes("Followers") && !desc.includes("Watch awesome")) {
-        videoTitles.push(desc);
+
+    // Extract from __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON
+    const jsonMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+    if (jsonMatch) {
+      try {
+        const pageData = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
+        const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+        const userDetail = (defaultScope?.["webapp.user-detail"] as Record<string, unknown>) ?? {};
+        const itemList = (userDetail?.itemList as unknown[]) ?? [];
+        for (const item of itemList) {
+          const v = item as Record<string, unknown>;
+          const desc = (v?.desc as string) ?? "";
+          if (desc && !videoTitles.includes(desc)) videoTitles.push(desc);
+          const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? [];
+          for (const tag of textExtra) {
+            const tagName = (tag?.hashtagName as string) ?? "";
+            if (tagName) searchHashtags.push(`#${tagName}`);
+          }
+        }
+      } catch { /* JSON parse failed, continue */ }
+    }
+
+    // Fallback: extract desc fields from raw HTML
+    if (videoTitles.length < 5) {
+      const descMatches = html.match(/"desc":"([^"]{10,200})"/g) ?? [];
+      for (const m of descMatches) {
+        const desc = m.replace(/^"desc":"/, "").replace(/"$/, "").trim();
+        if (desc && !desc.includes("Followers") && !desc.includes("Watch awesome") && !videoTitles.includes(desc)) {
+          videoTitles.push(desc);
+        }
       }
     }
+
     if (!bio) {
       const sigMatch = html.match(/"signature":"([^"]+)"/);
       if (sigMatch) bio = sigMatch[1].replace(/\\n/g, " ").replace(/\\u[0-9a-fA-F]{4}/g, "").trim();
@@ -287,49 +399,47 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     console.warn("[webResearch] TikTok HTML scrape failed:", err);
   }
 
-  // Step 3: Popular posts via Data API
-  let totalViews = 0;
-  const videoViewCounts: number[] = [];
+  // Step 4: Popular posts via Data API (works for large creators only)
+  // Keep as a supplementary source — adds view counts and extra titles for big accounts
   if (secUid) {
     try {
-      // Note: count must be a number (not string) for this endpoint
       const postsResponse = await callDataApi("TikTok/get_user_popular_posts", {
         query: { secUid, count: "20" },
       }) as Record<string, unknown>;
 
-      // Response can be nested under .data or directly at root
       const dataBlock = (postsResponse?.data as Record<string, unknown>) ?? postsResponse;
       const itemList = (dataBlock?.itemList as unknown[]) ?? [];
       for (const item of itemList) {
         const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
         const stats = ((item as Record<string, unknown>)?.stats as Record<string, unknown>) ?? {};
         const views = Number(stats?.playCount ?? 0);
-        if (desc.trim()) videoTitles.push(desc.trim());
+        if (desc.trim() && !videoTitles.includes(desc.trim())) videoTitles.push(desc.trim());
         if (views > 0) { videoViewCounts.push(views); totalViews += views; }
       }
     } catch (err) {
-      console.warn("[webResearch] TikTok popular posts failed:", err);
+      console.warn("[webResearch] TikTok popular posts failed (expected for small creators):", err);
     }
   }
 
-  // Step 4: YouTube search as supplementary source for TikTok creators
-  // This is critical — YouTube search returns real video titles even for TikTok-primary creators
-  try {
-    const ytResponse = await callDataApi("Youtube/search", {
-      query: { q: `${handle} tiktok`, hl: "en", gl: "US" },
-    }) as Record<string, unknown>;
-    const contents = (ytResponse?.contents as unknown[]) ?? [];
-    for (const item of contents.slice(0, 20)) {
-      const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
-      if (videoData) {
-        const title = (videoData?.title as string) ?? "";
-        const desc = (videoData?.descriptionSnippet as string) ?? "";
-        if (title) videoTitles.push(title);
-        if (desc) videoTitles.push(desc);
+  // Step 5: YouTube search ONLY as last-resort fallback for large verified creators
+  // DISABLED for small creators (< 50k followers) to prevent content contamination.
+  // For large creators, YouTube search reliably returns their own content.
+  if (videoTitles.length < 5 && followerCount >= 50000) {
+    try {
+      const ytResponse = await callDataApi("Youtube/search", {
+        query: { q: `${handle} tiktok`, hl: "en", gl: "US" },
+      }) as Record<string, unknown>;
+      const contents = (ytResponse?.contents as unknown[]) ?? [];
+      for (const item of contents.slice(0, 10)) {
+        const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
+        if (videoData) {
+          const title = (videoData?.title as string) ?? "";
+          if (title) videoTitles.push(title);
+        }
       }
+    } catch (err) {
+      console.warn("[webResearch] TikTok YouTube fallback search failed:", err);
     }
-  } catch (err) {
-    console.warn("[webResearch] TikTok YouTube supplementary search failed:", err);
   }
 
   // Compute derived stats
@@ -340,8 +450,10 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
     : 0;
 
-  const uniqueVideoTitles = Array.from(new Set(videoTitles)).slice(0, 25);
-  const topHashtags = extractHashtags([...uniqueVideoTitles, bio]);
+  const uniqueVideoTitles = Array.from(new Set(videoTitles)).slice(0, 30);
+  // Merge hashtags from search results + extracted from titles
+  const allHashtagSources = [...searchHashtags, ...uniqueVideoTitles, bio];
+  const topHashtags = extractHashtags(allHashtagSources);
   const rawKeywords = extractKeywords([...uniqueVideoTitles, bio]);
   const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio);
   const contentThemes = inferContentThemes(uniqueVideoTitles, topHashtags, bio);
@@ -626,8 +738,8 @@ ${rawKeywords.slice(0, 20).join(", ")}
 TOP HASHTAGS:
 ${topHashtags.slice(0, 15).join(", ")}
 
-ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled):
-${videoTitles.slice(0, 15).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
+ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled from TikTok search + profile):
+${videoTitles.slice(0, 20).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
 
 CRITICAL ANALYSIS INSTRUCTIONS:
 ⚠️  CONTENT IS PRIMARY — BIO IS SECONDARY AND MUST BE CHALLENGED

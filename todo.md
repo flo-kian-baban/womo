@@ -119,6 +119,19 @@
 - [x] Added 8 unit tests in webResearch.test.ts verifying content-first logic, food keyword dominance, and evidence summary structure
 - [x] All 27 tests pass (fitEngine x18, auth x1, webResearch x8)
 
+## Fix: Deep TikTok Data + Remove YouTube Contamination for Small Creators
+- [x] Probe ALL available TikTok API endpoints for @kaylee.nhi: user info, popular posts, video list, search, comments
+- [x] Fix YouTube supplementary search: disabled for creators <50k followers, only fallback for large creators
+- [x] Built collectTikTokVideosViaSearch(): multi-query TikTok search as PRIMARY video collection method
+- [x] Multi-query strategy: always runs all 4 queries (handle, handle+food, handle+travel, handle+city) regardless of bio content
+- [x] Pull TikTok video hashtags from text_extra field in each search result
+- [x] Extract video descriptions (caption text) from TikTok search results AND HTML scrape
+- [x] HTML scrape now parses __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON for structured video data
+- [x] TikTok-first evidence pipeline: search results → HTML scrape → popular posts → YouTube (50k+ only)
+- [x] Test with @kaylee.nhi: search returns 'Le Sélect Bistro', 'torched sushi', 'banh mi', 'pho', 'fried chicken'
+- [x] Added follower-count guard: YouTube fallback only for creators with 50k+ followers
+- [x] All 27 tests pass with updated test for new multi-query TikTok strategy
+
 ## Backlog / Future Enhancements (intentionally deferred — not in current scope)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands
