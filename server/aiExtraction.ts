@@ -454,35 +454,43 @@ export interface NarrativeResult {
 }
 
 export async function generateFITNarrative(input: NarrativeInput): Promise<NarrativeResult> {
-  const systemPrompt = `You are a senior cultural strategist at Connex, an AI-native influencer marketing platform. 
-You write precise, insightful F.I.T. Score narrative reports that explain the cultural alignment between creators and brands.
-Your writing is sophisticated, uses the correct sociological terminology, and provides actionable strategic insight.
-IMPORTANT: Always use the creator's stated pronouns throughout the narrative. If pronouns are 'not specified', use 'they/them' as a neutral default. Never assume pronouns.`;
+  const systemPrompt = `You are a plain-talking influencer marketing strategist writing a match report for a business owner or junior marketer.
+Your job is to explain whether this creator and brand are a good match in clear, simple language that anyone can understand.
 
-  const userPrompt = `Generate a F.I.T. Score narrative report for the following match:
-Creator: ${input.creatorHandle} (Archetype: ${input.creatorArchetype}, Pronouns: ${input.creatorPronouns ?? "not specified"})
-Brand: ${input.brandName} (Archetype: ${input.brandArchetype})
+IMPORTANT WRITING RULES:
+- Write like you are explaining this to a smart business owner who has never studied marketing theory.
+- NO academic jargon. Do NOT use: archetype, Barthes myth, Barthesian, symbolic capital, liminality, Bourdieu, Goffman, Stuart Hall, parasocial, semiotics, psychographic, decoding, signifier, or any similar academic term.
+- Replace "archetype" with "personality type" or "the kind of person/brand they come across as".
+- Replace "myth" or "Barthes myth" with "what they stand for" or "the story they tell".
+- Replace "psychographic overlap" with "shared values" or "the same kind of people".
+- Replace "cultural momentum" with "trending" or "what is popular right now".
+- Replace "identity stability" with "how consistent they are" or "how reliable their content is".
+- Write in short, direct sentences. No filler phrases. No hedging language.
+- Use the creator's stated pronouns throughout. If pronouns are 'not specified', use 'they/them'. Never assume pronouns.
+- The tone should feel like honest advice from someone who knows the industry well.`;
+
+  const userPrompt = `Write a match report for this creator-brand pairing:
+Creator: ${input.creatorHandle} (Personality type: ${input.creatorArchetype}, Pronouns: ${input.creatorPronouns ?? "not specified"})
+Brand: ${input.brandName} (Personality type: ${input.brandArchetype})
 F.I.T. Score: ${input.fitScore}/10 — ${input.fitStatus}
-Alignment Score (α): ${input.alignmentRaw.toFixed(1)}/10
-Pulse Score (β): ${input.pulseRaw.toFixed(1)}/10  
-Stability Score (γ): ${input.stabilityRaw.toFixed(1)}/10
-Radar Warnings: ${input.radarWarnings.length > 0 ? input.radarWarnings.join(", ") : "None"}
-Creator Myth: ${input.creatorBarthesMyth}
-Brand Myth: ${input.brandBarthesMyth}
-Creator Audience Relationship: ${input.creatorAudienceRelationship}
-Brand Audience Tribe: ${input.brandAudienceTribe}
-Weight Priority: ${input.weightPriority}
+Alignment: ${input.alignmentRaw.toFixed(1)}/10 | Momentum: ${input.pulseRaw.toFixed(1)}/10 | Consistency: ${input.stabilityRaw.toFixed(1)}/10
+Flags: ${input.radarWarnings.length > 0 ? input.radarWarnings.join(", ") : "None"}
+Creator story: ${input.creatorBarthesMyth}
+Brand story: ${input.brandBarthesMyth}
+Creator audience: ${input.creatorAudienceRelationship}
+Brand target customer: ${input.brandAudienceTribe}
+Key scoring priority: ${input.weightPriority}
 
 Output a JSON object with:
 {
-  "narrativeSummary": "A 3-4 sentence executive summary of this match. Lead with the F.I.T. Score interpretation, explain the key cultural alignment or tension, and close with a strategic recommendation. Use precise sociological language (Symbolic Capital, Archetype compatibility, Barthesian myth alignment, etc.).",
+  "narrativeSummary": "3-4 plain sentences summarizing this match for a business owner. Start with whether this is a good match and why. Mention the most important strength or concern. End with a clear recommendation. No jargon.",
   "alignmentNotes": {
-    "archetypeAnalysis": "1-2 sentences on archetype compatibility or tension between ${input.creatorArchetype} and ${input.brandArchetype}.",
-    "mythAlignment": "1-2 sentences on whether the creator and brand myths point to the same underlying cultural belief.",
-    "audienceOverlap": "1-2 sentences on the psychographic overlap between the creator's audience and the brand's target tribe.",
-    "culturalMomentum": "1-2 sentences on the niche's current cultural momentum and timing for brand activation.",
-    "identityStability": "1-2 sentences on the creator's identity consistency and what it means for brand safety.",
-    "recommendation": "1-2 sentences of concrete strategic recommendation — proceed, proceed with conditions, or do not proceed, and why."
+    "archetypeAnalysis": "1-2 plain sentences explaining whether ${input.creatorHandle} and ${input.brandName} come across as the same kind of people/brand to an audience, and whether that helps or hurts the partnership.",
+    "mythAlignment": "1-2 plain sentences on whether the creator and brand are telling the same story to their audiences — do they stand for the same things?",
+    "audienceOverlap": "1-2 plain sentences on whether the creator's followers are the same kind of people the brand wants to reach, and how strong that overlap is.",
+    "culturalMomentum": "1-2 plain sentences on whether this type of content is popular right now and whether the timing is good for this partnership.",
+    "identityStability": "1-2 plain sentences on how consistent the creator's content is and what that means for the brand — is this a safe, predictable partner?",
+    "recommendation": "1-2 plain sentences of direct advice — should the brand move forward, move forward with conditions, or pass? Say exactly why in plain language."
   }
 }`;
 
