@@ -3,10 +3,20 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight } from "lucide-react";
+import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import BrandProfileCard from "@/components/BrandProfileCard";
 import { ApiStatusPanel } from "@/components/ApiStatusPanel";
@@ -34,6 +44,12 @@ const ANALYSIS_STEPS = [
 export default function AnalyzeBrand() {
   const [result, setResult] = useState<{ profile: BrandProfile } | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
+
+  const { data: apiStatus } = trpc.system.apiStatus.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -51,7 +67,7 @@ export default function AnalyzeBrand() {
     },
   });
 
-  const onSubmit = (values: FormValues) => {
+  const runAnalysis = (values: FormValues) => {
     setResult(null);
     setStepIndex(0);
     const interval = setInterval(() => {
@@ -61,6 +77,16 @@ export default function AnalyzeBrand() {
       });
     }, 1800);
     analyzeMutation.mutate(values);
+  };
+
+  const onSubmit = (values: FormValues) => {
+    // If any research source is down, show a confirmation warning first
+    const downSources = apiStatus?.sources.filter(s => s.status === "down") ?? [];
+    if (downSources.length > 0) {
+      setPendingValues(values);
+      return;
+    }
+    runAnalysis(values);
   };
 
   return (
@@ -201,6 +227,55 @@ export default function AnalyzeBrand() {
           ) : null}
         </div>
       </div>
+
+      {/* ─── Partial-Run Warning Dialog ────────────────────────────────────── */}
+      <AlertDialog open={!!pendingValues} onOpenChange={(open) => { if (!open) setPendingValues(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+              Some research sources are offline
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  The following sources are currently unavailable and will be skipped during this analysis:
+                </p>
+                <ul className="space-y-1">
+                  {(apiStatus?.sources ?? []).filter(s => s.status === "down").map(s => (
+                    <li key={s.name} className="flex items-start gap-2 text-sm">
+                      <span className="mt-0.5 w-2 h-2 rounded-full bg-red-400 shrink-0" />
+                      <span>
+                        <strong>{s.name}</strong> — {s.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-muted-foreground text-sm">
+                  The analysis will still run using available sources, but the brand profile may be less detailed — particularly the Audience Perception and Brand Symbol Decoder sections.
+                </p>
+                <p className="text-muted-foreground text-sm">
+                  You can wait until the sources recover and try again, or proceed now with a partial run.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingValues(null)}>
+              Wait — try later
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingValues) runAnalysis(pendingValues);
+                setPendingValues(null);
+              }}
+              className="bg-amber-500 hover:bg-amber-600 text-white"
+            >
+              Proceed with partial run
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
