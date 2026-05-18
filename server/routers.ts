@@ -11,6 +11,7 @@ import {
 import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from "./aiExtraction";
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { invokeLLM } from "./_core/llm";
+import { researchCreator, researchBrand } from "./webResearch";
 
 export const appRouter = router({
   system: systemRouter,
@@ -31,12 +32,24 @@ export const appRouter = router({
         platform: z.enum(["TikTok", "Instagram", "YouTube", "Multi"]),
       }))
       .mutation(async ({ input }) => {
-        const extracted = await extractCreatorProfile(input.handleOrUrl, input.platform);
+        // Step 1: Gather real evidence from the platform before AI analysis
+        let evidenceSummary: string | undefined;
+        let researchedProfileUrl: string | undefined;
+        try {
+          const research = await researchCreator(input.handleOrUrl, input.platform);
+          evidenceSummary = research.evidenceSummary;
+          researchedProfileUrl = research.profileUrl;
+        } catch (err) {
+          console.warn("[creator.analyze] Web research failed, proceeding without evidence:", err);
+        }
+
+        // Step 2: AI extraction grounded in real evidence
+        const extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, evidenceSummary);
         const weights = getBrandWeights("Retail — Local Boutique"); // default, not used here
         const insertResult = await createCreatorProfile({
           handle: extracted.handle,
           platform: extracted.platform,
-          profileUrl: input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined,
+          profileUrl: researchedProfileUrl ?? (input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined),
           displayName: extracted.displayName,
           archetype: extracted.archetype,
           recurringThemes: extracted.recurringThemes,
@@ -94,7 +107,17 @@ export const appRouter = router({
     analyze: publicProcedure
       .input(z.object({ brandNameOrUrl: z.string().min(1) }))
       .mutation(async ({ input }) => {
-        const extracted = await extractBrandProfile(input.brandNameOrUrl);
+        // Step 1: Gather real evidence from the brand's website/web presence
+        let brandEvidenceSummary: string | undefined;
+        try {
+          const brandResearch = await researchBrand(input.brandNameOrUrl);
+          brandEvidenceSummary = brandResearch.evidenceSummary;
+        } catch (err) {
+          console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
+        }
+
+        // Step 2: AI extraction grounded in real evidence
+        const extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
         const weights = getBrandWeights(extracted.brandType);
         await createBrandProfile({
           brandName: extracted.brandName,

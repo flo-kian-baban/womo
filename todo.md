@@ -77,7 +77,15 @@
 - [x] Vitest: auth logout test — 1 test passing
 - [x] TypeScript check: 0 errors
 
-## Backlog / Future Enhancements
+## Bug Fix: Real Web Research Layer
+- [x] Build webResearch.ts server module that fetches real public data before LLM extraction
+- [x] For TikTok/Instagram: fetch profile page HTML + search web for recent posts/bio
+- [x] For brands: fetch brand website + search for brand description, mission, audience
+- [x] Pass scraped evidence text to AI extraction prompt instead of just the handle string
+- [x] Update creator.analyze and brand.analyze routes to use the research layer
+- [x] Test with @alkhussein and verify correct niche (local food, not travel)
+
+## Backlog / Future Enhancements (intentionally deferred)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands
 - [ ] Historical score tracking and trend charts

@@ -37,19 +37,26 @@ export interface CreatorExtractionResult {
 
 export async function extractCreatorProfile(
   handleOrUrl: string,
-  platform: string
+  platform: string,
+  evidenceSummary?: string  // Real scraped evidence from webResearch.ts
 ): Promise<CreatorExtractionResult> {
-  const systemPrompt = `You are a cultural anthropologist and media analyst specializing in influencer marketing. 
+  const systemPrompt = `You are a cultural anthropologist and media analyst specializing in influencer marketing.
 Your task is to analyze a social media creator and produce a structured cultural profile using the Connex F.I.T. framework.
-You must research the creator thoroughly based on their public presence and output a JSON object matching the exact schema provided.
-Be rigorous, specific, and grounded in observable evidence. Use the exact terminology specified.`;
+You will be provided with REAL, SCRAPED evidence from the creator's public profile — including their bio, actual video titles, hashtags, and content themes.
+You MUST base your analysis on this evidence. Do NOT contradict the evidence. Do NOT invent a niche or persona that is not supported by the data.
+If the evidence shows a food reviewer, analyze them as a food reviewer. If the evidence shows a fitness creator, analyze them as a fitness creator.
+Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.`;
 
-  const userPrompt = `Analyze the following social media creator and produce a complete Connex F.I.T. cultural profile.
+  const evidenceBlock = evidenceSummary
+    ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
+    : `\n\nNote: No scraped evidence available. Use your knowledge of this creator if they are publicly known, but be conservative and note uncertainty.`;
 
-Creator: ${handleOrUrl}
+  const userPrompt = `Analyze the following social media creator and produce a complete Connex F.I.T. cultural profile.${evidenceBlock}
+
+Creator Handle: ${handleOrUrl}
 Platform: ${platform}
 
-Research this creator's public content, audience engagement patterns, content history, and cultural positioning. Then output a JSON object with EXACTLY these fields:
+Based on the evidence above, output a JSON object with EXACTLY these fields:
 
 {
   "handle": "their @handle (without @)",
@@ -154,7 +161,8 @@ export interface BrandExtractionResult {
 }
 
 export async function extractBrandProfile(
-  brandNameOrUrl: string
+  brandNameOrUrl: string,
+  evidenceSummary?: string  // Real scraped evidence from webResearch.ts
 ): Promise<BrandExtractionResult> {
   const brandTypeOptions = [
     "Retail — Local Boutique", "Retail — E-Commerce / DTC Product", "Retail — Seasonal / Holiday Campaign",
@@ -175,16 +183,22 @@ export async function extractBrandProfile(
     "Restaurant — QSR / Limited-Time Activation"
   ];
 
-  const systemPrompt = `You are a brand strategist and cultural analyst specializing in influencer marketing. 
+  const systemPrompt = `You are a brand strategist and cultural analyst specializing in influencer marketing.
 Your task is to analyze a brand or business and produce a structured cultural profile using the Connex F.I.T. framework.
-Research the brand thoroughly based on their public presence, marketing materials, and cultural positioning.
-Output a JSON object matching the exact schema provided. Be rigorous and specific.`;
+You will be provided with REAL, SCRAPED evidence from the brand's public website and web presence.
+You MUST base your analysis on this evidence. Do NOT contradict the evidence.
+If the evidence shows a local restaurant, analyze it as a local restaurant. If the evidence shows a luxury brand, analyze it as luxury.
+Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.`;
 
-  const userPrompt = `Analyze the following brand and produce a complete Connex F.I.T. cultural brand profile.
+  const evidenceBlock = evidenceSummary
+    ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
+    : `\n\nNote: No scraped evidence available. Use your knowledge of this brand if it is publicly known, but be conservative.`;
+
+  const userPrompt = `Analyze the following brand and produce a complete Connex F.I.T. cultural brand profile.${evidenceBlock}
 
 Brand: ${brandNameOrUrl}
 
-Research this brand's public presence, visual identity, audience, messaging, and cultural positioning. Then output a JSON object with EXACTLY these fields:
+Based on the evidence above, output a JSON object with EXACTLY these fields:
 
 {
   "brandName": "official brand name",
