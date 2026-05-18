@@ -142,22 +142,22 @@
 - [x] All 27 tests still pass after all changes
 
 ## CRITICAL FIX: TikTok Search Author Contamination
-- [ ] Filter collectTikTokVideosViaSearch results to ONLY include videos where author.uniqueId matches the target handle
-- [ ] Promote HTML scrape to PRIMARY source (runs first, extracts video data from page JSON)
-- [ ] Use TikTok search as SECONDARY source (only keep results where author matches)
-- [ ] Add author-match guard: normalize both handles (lowercase, strip dots/underscores) for comparison
-- [ ] If 0 matching videos found from search, use HTML scrape data only
-- [ ] Add evidence summary field showing how many videos were from confirmed author vs search
+- [x] Filter collectTikTokVideosViaSearch results to ONLY include videos where author.uniqueId matches the target handle
+- [x] Promote HTML scrape to PRIMARY source (runs first, extracts video data from page JSON)
+- [x] Use TikTok search as SECONDARY source (only keep results where author matches)
+- [x] Add author-match guard: normalize both handles (lowercase, strip dots/underscores) for comparison
+- [x] If 0 matching videos found from search, use HTML scrape data only
+- [x] Add evidence summary field showing how many videos were from confirmed author vs search
 - [ ] Test with @malik.the.prince19: verify only his videos are used
 - [ ] Test with @alkhussein and @kaylee.nhi: verify no regression
 
 ## CRITICAL FIX: Remove YouTube Fallback + Hard Error on Insufficient TikTok Data
-- [ ] Remove ALL YouTube fallback/supplementary search from TikTok research pipeline
-- [ ] If TikTok returns < 3 confirmed video titles, throw a structured TRPCError with user-facing message
-- [ ] Error message: "Not enough public data found for @handle. TikTok does not expose this creator's content through available APIs. Please try a creator with more public content, or verify the handle is correct."
-- [ ] Show error as a styled error card in the UI (not a spinner or empty state)
-- [ ] Keep YouTube research pipeline intact for YouTube platform (it works correctly)
-- [ ] Update webResearch tests to reflect the new hard-error behavior
+- [x] Remove ALL YouTube fallback/supplementary search from TikTok research pipeline
+- [x] If TikTok returns < 3 confirmed video titles, throw a structured TRPCError with user-facing message
+- [x] Error message: "Not enough public data found for @handle. TikTok does not expose this creator's content through available APIs. Please try a creator with more public content, or verify the handle is correct."
+- [x] Show error as a styled error card in the UI (not a spinner or empty state)
+- [x] Keep YouTube research pipeline intact for YouTube platform (it works correctly)
+- [x] Update webResearch tests to reflect the new hard-error behavior
 
 ## Backlog / Future Enhancements (intentionally deferred — not in current scope)
 - [ ] PDF export using server-side rendering
@@ -179,31 +179,45 @@
 - [x] Update creator.analyze route: save transcriptCount and transcriptExcerpts from research data
 - [x] Update CreatorProfileCard UI: show 'Analyzed from X video transcripts' badge
 - [x] Show transcript excerpts in profile card evidence panel
-- [ ] Update JSON export to include transcriptCount and transcriptExcerpts
+- [x] Update JSON export to include transcriptCount and transcriptExcerpts (auto-included via full profile JSON.stringify)
 - [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content
 - [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content
 - [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
 
 ## Engagement Signal Architecture Upgrade
-- [ ] Extract createTime from every video → bucket into Old (>12mo), Mid (3-12mo), Recent (<3mo)
-- [ ] Extract commentCount, collectCount (saves), shareCount, diggCount per video
-- [ ] Extract music.original flag per video → compute originalAudioRate
-- [ ] Extract duetEnabled, stitchEnabled per video → compute remixEnablementRate
-- [ ] Extract isAd flag per video → compute adTagRate
-- [ ] Extract video.duration per video → compute avgDurationSeconds
-- [ ] Compute avgCommentRate = avg(commentCount/playCount) across all videos
-- [ ] Compute avgSaveRate = avg(collectCount/playCount) across all videos
-- [ ] Compute avgShareRate = avg(shareCount/playCount) across all videos
-- [ ] Fix engagement rate bug: use (diggCount+commentCount)/playCount not avgViews/followerCount
-- [ ] Build temporal content table: per-bucket video list with title, date, plays, likes, comments, saves
-- [ ] Pass computed signals block to AI evidence summary
-- [ ] Update AI extraction prompt: explicit rubrics for Parasocial Bond, Audience Relationship, Cultural Capital, Drift Signal, Brand Saturation, Remix Rate
-- [ ] Run all tests and TypeScript check after changes
+- [x] Extract createTime from every video → bucket into Old (>12mo), Mid (3-12mo), Recent (<3mo)
+- [x] Extract commentCount, collectCount (saves), shareCount, diggCount per video
+- [x] Extract music.original flag per video → compute originalAudioRate
+- [x] Extract duetEnabled, stitchEnabled per video → compute remixEnablementRate
+- [x] Extract isAd flag per video → compute adTagRate
+- [x] Extract video.duration per video → compute avgDurationSeconds
+- [x] Compute avgCommentRate = avg(commentCount/playCount) across all videos
+- [x] Compute avgSaveRate = avg(collectCount/playCount) across all videos
+- [x] Compute avgShareRate = avg(shareCount/playCount) across all videos
+- [x] Fix engagement rate bug: use (diggCount+commentCount)/playCount not avgViews/followerCount
+- [x] Build temporal content table: per-bucket video list with title, date, plays, likes, comments, saves
+- [x] Pass computed signals block to AI evidence summary
+- [x] Update AI extraction prompt: explicit rubrics for Parasocial Bond, Audience Relationship, Cultural Capital, Drift Signal, Brand Saturation, Remix Rate
+- [x] Run all tests and TypeScript check after changes
 
 ## Symbol Decoder Pipeline
-- [ ] Write server/symbolDecoder.ts: LLM pass over all creator-authored text (titles, transcripts, bio, hashtags) extracting IdentityClaims, StatusSignals, CommunityReferences, AspirationDrivers
-- [ ] Inject DECODED CULTURAL SIGNALS block into buildCreatorEvidenceSummary in webResearch.ts
-- [ ] Update AI extraction system prompt to reference decoded signals for Archetype, BarthesMyth, AudienceRelationshipType, ParasocialBondStrength, NicheTopicNode, StuartHallDecoding, GoffmanStageConsistency
-- [ ] Update TranscriptPanel UI to show decoded signal chips alongside transcript excerpts
-- [ ] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
-- [ ] Save checkpoint
+- [x] Write server/symbolDecoder.ts: LLM pass over all creator-authored text (titles, transcripts, bio, hashtags) extracting IdentityClaims, StatusSignals, CommunityReferences, AspirationDrivers
+- [x] Inject DECODED CULTURAL SIGNALS block into buildCreatorEvidenceSummary in webResearch.ts
+- [x] Update AI extraction system prompt to reference decoded signals for Archetype, BarthesMyth, AudienceRelationshipType, ParasocialBondStrength, NicheTopicNode, StuartHallDecoding, GoffmanStageConsistency
+- [x] Update TranscriptPanel UI to show decoded signal chips alongside transcript excerpts
+- [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
+- [x] Save checkpoint
+
+## Field Explainer: Contextual Breakdowns for Sociological Fields
+- [x] Build FieldExplainer component: shows "What this measures", "How it was determined", "Why it matters" for each field
+- [x] Wire FieldExplainer into Cultural Capital field in profile card
+- [x] Wire FieldExplainer into Stage Test (Goffman) field
+- [x] Wire FieldExplainer into Drift Signal field
+- [x] Wire FieldExplainer into Decoding Audit (Stuart Hall) field
+- [x] Wire FieldExplainer into Rogers Adopter Stage field
+- [x] Wire FieldExplainer into Creator Niche Position field
+- [x] Wire FieldExplainer into Lifecycle Phase field
+- [x] Wire FieldExplainer into Liminal Phase (Turner) field
+- [x] Wire FieldExplainer into Meaning Check (Barthes Niche) field
+- [x] Run TypeScript check and all tests
+- [x] Save checkpoint

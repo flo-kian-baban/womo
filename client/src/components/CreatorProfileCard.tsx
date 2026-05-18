@@ -2,6 +2,7 @@ import { Separator } from "@/components/ui/separator";
 import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic } from "lucide-react";
 import type { CreatorProfile } from "../../../drizzle/schema";
 import TranscriptPanel from "./TranscriptPanel";
+import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
 
 interface CreatorProfileCardProps {
   profile: CreatorProfile;
@@ -374,10 +375,18 @@ export default function CreatorProfileCard({ profile, compact = false }: Creator
               <div className="space-y-3">
                 {section.fields.map((field) => {
                   const value = profile[field.key as keyof CreatorProfile];
+                  const hasExplainer = EXPLAINED_FIELD_KEYS.has(field.key);
                   return (
-                    <div key={field.key} className="grid grid-cols-[1fr_1.5fr] gap-4 items-start py-2 border-b border-border/30 last:border-0">
-                      <span className="text-xs text-muted-foreground pt-0.5">{field.label}</span>
-                      <FieldValue fieldKey={field.key} value={value} type={field.type} />
+                    <div key={field.key} className="py-2 border-b border-border/30 last:border-0">
+                      <div className="grid grid-cols-[1fr_1.5fr] gap-4 items-start">
+                        <span className="text-xs text-muted-foreground pt-0.5">{field.label}</span>
+                        <FieldValue fieldKey={field.key} value={value} type={field.type} />
+                      </div>
+                      {hasExplainer && (
+                        <div className="mt-1 pl-0">
+                          <FieldExplainer fieldKey={field.key} value={value !== null && value !== undefined ? String(value) : null} />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
