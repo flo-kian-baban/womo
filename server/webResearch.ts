@@ -728,11 +728,18 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   channelKeywords: string[];
   videoTitles: string[];
   videoViewCounts: number[];
+  quotaExhausted: boolean;
 }> {
   let channelId = "";
   let displayName = handle;
   let bio = "";
   let followerCount = 0;
+  let ytQuotaExhausted = false;
+
+  const isQuotaErr = (err: unknown) => {
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
+  };
   let videoCount = 0;
   let totalViews = 0;
   let location = "";
@@ -759,6 +766,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
       }
     }
   } catch (err) {
+    if (isQuotaErr(err)) ytQuotaExhausted = true;
     console.warn("[webResearch] YouTube channel search failed:", err);
   }
 
@@ -784,6 +792,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
         channelKeywords = kws.slice(0, 20);
       }
     } catch (err) {
+      if (isQuotaErr(err)) ytQuotaExhausted = true;
       console.warn("[webResearch] YouTube channel details failed:", err);
     }
 
@@ -808,6 +817,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
         }
       }
     } catch (err) {
+      if (isQuotaErr(err)) ytQuotaExhausted = true;
       console.warn("[webResearch] YouTube channel videos failed:", err);
     }
 
@@ -844,6 +854,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
         }
       }
     } catch (err) {
+      if (isQuotaErr(err)) ytQuotaExhausted = true;
       console.warn("[webResearch] YouTube video search fallback failed:", err);
     }
   }
@@ -853,6 +864,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   return {
     transcripts, channelId, displayName, bio, followerCount, videoCount,
     totalViews, location, channelKeywords, videoTitles, videoViewCounts,
+    quotaExhausted: ytQuotaExhausted,
   };
 }
 
@@ -1304,7 +1316,24 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
   const {
     transcripts, channelId, displayName, bio, followerCount, videoCount,
     totalViews, location, channelKeywords, videoTitles, videoViewCounts,
+    quotaExhausted: ytQuotaExhausted,
   } = ytData;
+
+  const hasAnyYtData = transcripts.length > 0 || videoTitles.length > 0 || followerCount > 0 || bio.length > 0;
+
+  if (ytQuotaExhausted && !hasAnyYtData) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `The YouTube data API is temporarily rate-limited. Please wait 1–2 minutes and try again. (@${handle})`,
+    });
+  }
+
+  if (!hasAnyYtData) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `No public content found for @${handle}. Please verify the YouTube handle or channel URL is correct and that the channel is public.`,
+    });
+  }
 
   const avgViews = videoViewCounts.length > 0
     ? Math.round(videoViewCounts.reduce((a, b) => a + b, 0) / videoViewCounts.length)

@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Users, Loader2, Sparkles, CheckCircle2, ArrowRight } from "lucide-react";
+import { Users, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,8 +50,8 @@ export default function AnalyzeInfluencer() {
         toast.success("Cultural profile extracted successfully");
       }
     },
-    onError: (err) => {
-      toast.error(`Analysis failed: ${err.message}`);
+    onError: () => {
+      // Error is shown inline — no toast needed
     },
   });
 
@@ -179,6 +179,37 @@ export default function AnalyzeInfluencer() {
               </div>
             </div>
           )}
+
+          {/* Inline error card */}
+          {analyzeMutation.isError && !analyzeMutation.isPending && (() => {
+            const msg = analyzeMutation.error?.message ?? "";
+            const isRateLimit = msg.toLowerCase().includes("rate-limited") || msg.toLowerCase().includes("usage exhausted") || msg.toLowerCase().includes("too many requests");
+            return (
+              <div className={`mt-4 rounded-xl p-5 border animate-fade-in-up ${
+                isRateLimit
+                  ? "bg-amber-500/10 border-amber-500/30"
+                  : "bg-destructive/10 border-destructive/30"
+              }`}>
+                <div className="flex items-start gap-3">
+                  {isRateLimit
+                    ? <Clock className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    : <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`text-sm font-semibold mb-1 ${
+                      isRateLimit ? "text-amber-400" : "text-destructive"
+                    }`}>
+                      {isRateLimit ? "API Rate Limit — Please Retry" : "Analysis Failed"}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {isRateLimit
+                        ? "The data API is temporarily rate-limited from recent activity. Wait 1–2 minutes, then click \"Extract Cultural Profile\" again."
+                        : msg}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Quick action after result */}
           {result && (
