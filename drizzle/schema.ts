@@ -142,6 +142,17 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   weightGamma: float("weightGamma"),
   weightPriority: text("weightPriority"),
 
+  // Audience Perception — review data from Yelp and Google Maps
+  yelpRating: float("yelpRating"),
+  yelpReviewCount: int("yelpReviewCount"),
+  yelpReviewExcerpts: text("yelpReviewExcerpts"),
+  googleRating: float("googleRating"),
+  googleReviewCount: int("googleReviewCount"),
+  googleReviewExcerpts: text("googleReviewExcerpts"),
+  combinedReviewText: text("combinedReviewText"),
+  overallRating: float("overallRating"),
+  totalReviews: int("totalReviews").default(0),
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),

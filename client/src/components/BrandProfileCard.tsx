@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { BrandProfile } from "../../../drizzle/schema";
 
 interface BrandProfileCardProps {
@@ -75,6 +76,154 @@ function FieldValue({ value, type }: { value: unknown; type: string }) {
   return <span className="text-sm text-foreground">{String(value)}</span>;
 }
 
+/** Render a star rating as filled/empty dots */
+function StarRating({ rating, max = 5 }: { rating: number; max?: number }) {
+  const full = Math.round(rating);
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of ${max}`}>
+      {Array.from({ length: max }, (_, i) => (
+        <span
+          key={i}
+          className={`text-xs ${i < full ? "text-amber-400" : "text-muted-foreground/30"}`}
+        >
+          ★
+        </span>
+      ))}
+      <span className="ml-1 text-xs font-mono text-foreground/70">{rating.toFixed(1)}</span>
+    </span>
+  );
+}
+
+/** Parse review excerpts string back into individual entries */
+function parseReviewExcerpts(raw: string | null | undefined): Array<{ rating: number; author: string; text: string }> {
+  if (!raw) return [];
+  return raw.split("\n\n").slice(0, 5).map(block => {
+    const ratingMatch = block.match(/^\[(\d+)★\]/);
+    const authorMatch = block.match(/^\[\d+★\] ([^:]+):/);
+    const textMatch = block.match(/"([\s\S]+)"$/);
+    return {
+      rating: ratingMatch ? parseInt(ratingMatch[1]) : 0,
+      author: authorMatch ? authorMatch[1].trim() : "Reviewer",
+      text: textMatch ? textMatch[1] : block.replace(/^\[.*?\].*?:/, "").replace(/^"|"$/g, "").trim(),
+    };
+  }).filter(r => r.text.length > 10);
+}
+
+/** Audience Perception panel showing Yelp + Google Maps review data */
+function AudiencePerceptionPanel({ profile }: { profile: BrandProfile }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const hasYelp = profile.yelpRating !== null && profile.yelpRating !== undefined;
+  const hasGoogle = profile.googleRating !== null && profile.googleRating !== undefined;
+
+  if (!hasYelp && !hasGoogle) return null;
+
+  const yelpReviews = parseReviewExcerpts(profile.yelpReviewExcerpts);
+  const googleReviews = parseReviewExcerpts(profile.googleReviewExcerpts);
+  const allReviews = [...yelpReviews, ...googleReviews];
+  const totalReviews = (profile.totalReviews ?? 0);
+  const overallRating = profile.overallRating;
+
+  return (
+    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-amber-500/10 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-md bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-amber-400 text-xs">★</span>
+          </div>
+          <div>
+            <div className="text-xs font-semibold tracking-[0.1em] uppercase text-amber-400/80">
+              Audience Perception
+            </div>
+            <div className="text-xs text-muted-foreground/60 mt-0.5">
+              {totalReviews > 0 ? `${totalReviews.toLocaleString()} reviews` : "Review data"} ·{" "}
+              {hasYelp && hasGoogle ? "Yelp + Google Maps" : hasYelp ? "Yelp" : "Google Maps"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {overallRating !== null && overallRating !== undefined && (
+            <StarRating rating={overallRating} />
+          )}
+          <span className="text-muted-foreground/40 text-xs">{expanded ? "▲" : "▼"}</span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-amber-500/10">
+          {/* Platform ratings */}
+          <div className="grid grid-cols-2 gap-3 pt-3">
+            {hasYelp && (
+              <div className="p-3 rounded-lg bg-background/50 border border-border/50">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-1.5">
+                  Yelp
+                </div>
+                <StarRating rating={profile.yelpRating!} />
+                {profile.yelpReviewCount && (
+                  <div className="text-xs text-muted-foreground/60 mt-1">
+                    {profile.yelpReviewCount.toLocaleString()} reviews
+                  </div>
+                )}
+              </div>
+            )}
+            {hasGoogle && (
+              <div className="p-3 rounded-lg bg-background/50 border border-border/50">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-1.5">
+                  Google Maps
+                </div>
+                <StarRating rating={profile.googleRating!} />
+                {profile.googleReviewCount && (
+                  <div className="text-xs text-muted-foreground/60 mt-1">
+                    {profile.googleReviewCount.toLocaleString()} reviews
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Review excerpts */}
+          {allReviews.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground">
+                What Customers Say
+              </div>
+              {allReviews.slice(0, 5).map((review, i) => (
+                <div key={i} className="p-3 rounded-lg bg-background/40 border border-border/30">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-medium text-foreground/70">{review.author}</span>
+                    {review.rating > 0 && (
+                      <span className="text-xs text-amber-400">{"★".repeat(review.rating)}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed italic">
+                    "{review.text.slice(0, 280)}{review.text.length > 280 ? "…" : ""}"
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sociological note */}
+          <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/15">
+            <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-amber-400/70 mb-1">
+              Stuart Hall Decoding Note
+            </div>
+            <p className="text-xs text-muted-foreground/70 leading-relaxed">
+              Review language represents how the audience <em>actually decodes</em> this brand —
+              distinct from the brand's self-presentation. Patterns in this data directly inform
+              the Barthes Myth, Audience Tribe, and Goffman Stage Gap fields above.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BrandProfileCard({ profile, compact = false }: BrandProfileCardProps) {
   return (
     <div className="space-y-6">
@@ -129,6 +278,9 @@ export default function BrandProfileCard({ profile, compact = false }: BrandProf
               })}
             </div>
           </div>
+
+          {/* Audience Perception Panel */}
+          <AudiencePerceptionPanel profile={profile} />
 
           {/* Weight Configuration */}
           <div>

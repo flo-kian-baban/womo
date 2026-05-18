@@ -29,6 +29,7 @@ import { callDataApi } from "./_core/dataApi";
 import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
+import { fetchBrandReviews } from "./reviewResearch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,16 @@ export interface BrandResearchResult {
   description: string;
   searchSnippets: string[];
   evidenceSummary: string;
+  // Review data
+  yelpRating: number | null;
+  yelpReviewCount: number | null;
+  yelpReviewExcerpts: string;
+  googleRating: number | null;
+  googleReviewCount: number | null;
+  googleReviewExcerpts: string;
+  combinedReviewText: string;
+  overallRating: number | null;
+  totalReviews: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1448,21 +1459,68 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     }
   }
 
-  const evidenceSummary = `
-BRAND RESEARCH EVIDENCE
-=======================
-Brand Name: ${brandName}
-Website: ${isUrl ? brandNameOrUrl : "Not provided"}
-${description ? `Website Content:\n${description}` : ""}
-${snippets.length > 0 ? `\nKey Snippets:\n${snippets.slice(0, 8).join("\n")}` : ""}
+  // Fetch audience perception data from Yelp and Google Maps (non-fatal)
+  let reviewResult = {
+    sources: [] as import("./reviewResearch").ReviewSource[],
+    combinedReviewText: "",
+    overallRating: null as number | null,
+    totalReviews: 0,
+    audiencePerceptionBlock: "",
+  };
+  try {
+    reviewResult = await fetchBrandReviews(brandName, isUrl ? brandNameOrUrl : "");
+  } catch (err) {
+    console.warn("[webResearch] Review fetch failed (non-fatal):", err);
+  }
 
-INSTRUCTIONS FOR ANALYSIS:
-Based on the above evidence, extract the brand's cultural profile. If the website content is limited,
-use your knowledge of this brand/business name to supplement, but clearly ground your analysis in
-what the evidence shows. Do NOT invent a brand identity that contradicts the evidence.
-`.trim();
+  // Extract per-platform data
+  const yelpSource = reviewResult.sources.find(s => s.platform === "Yelp") ?? null;
+  const googleSource = reviewResult.sources.find(s => s.platform === "Google Maps") ?? null;
 
-  return { brandName, websiteUrl: isUrl ? brandNameOrUrl : "", description, searchSnippets: snippets, evidenceSummary };
+  const yelpRating = yelpSource?.rating ?? null;
+  const yelpReviewCount = yelpSource?.reviewCount ?? null;
+  const yelpReviewExcerpts = yelpSource?.reviews
+    .map(r => `[${r.rating}\u2605] ${r.author}: "${r.text.slice(0, 300)}"`)
+    .join("\n\n") ?? "";
+  const googleRating = googleSource?.rating ?? null;
+  const googleReviewCount = googleSource?.reviewCount ?? null;
+  const googleReviewExcerpts = googleSource?.reviews
+    .map(r => `[${r.rating}\u2605] ${r.author}: "${r.text.slice(0, 300)}"`)
+    .join("\n\n") ?? "";
+
+  const evidenceSummary = [
+    "BRAND RESEARCH EVIDENCE",
+    "=======================",
+    `Brand Name: ${brandName}`,
+    `Website: ${isUrl ? brandNameOrUrl : "Not provided"}`,
+    description ? `Website Content:\n${description}` : "",
+    snippets.length > 0 ? `\nKey Snippets:\n${snippets.slice(0, 8).join("\n")}` : "",
+    reviewResult.audiencePerceptionBlock ? `\n\n${reviewResult.audiencePerceptionBlock}` : "",
+    "",
+    "INSTRUCTIONS FOR ANALYSIS:",
+    "Based on the above evidence, extract the brand's cultural profile. If the website content is limited,",
+    "use your knowledge of this brand/business name to supplement, but clearly ground your analysis in",
+    "what the evidence shows. Do NOT invent a brand identity that contradicts the evidence.",
+    "Pay special attention to the AUDIENCE PERCEPTION section — review language reveals how customers",
+    "actually decode the brand, which may differ from the brand's self-presentation.",
+  ].filter(Boolean).join("\n").trim();
+
+  return {
+    brandName,
+    websiteUrl: isUrl ? brandNameOrUrl : "",
+    description,
+    searchSnippets: snippets,
+    evidenceSummary,
+    yelpRating,
+    yelpReviewCount,
+    yelpReviewExcerpts,
+    googleRating,
+    googleReviewCount,
+    googleReviewExcerpts,
+    combinedReviewText: reviewResult.combinedReviewText,
+    overallRating: reviewResult.overallRating,
+    totalReviews: reviewResult.totalReviews,
+  };
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────

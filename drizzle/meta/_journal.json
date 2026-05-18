@@ -36,6 +36,13 @@
       "when": 1779124216400,
       "tag": "0004_jittery_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1779128712940,
+      "tag": "0005_furry_rocket_raccoon",
+      "breakpoints": true
     }
   ]
 }

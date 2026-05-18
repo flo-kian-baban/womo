@@ -144,11 +144,33 @@ export const appRouter = router({
     analyze: publicProcedure
       .input(z.object({ brandNameOrUrl: z.string().min(1) }))
       .mutation(async ({ input }) => {
-        // Step 1: Gather real evidence from the brand's website/web presence
+        // Step 1: Gather real evidence from the brand's website/web presence + review data
         let brandEvidenceSummary: string | undefined;
+        let reviewFields: {
+          yelpRating?: number | null;
+          yelpReviewCount?: number | null;
+          yelpReviewExcerpts?: string;
+          googleRating?: number | null;
+          googleReviewCount?: number | null;
+          googleReviewExcerpts?: string;
+          combinedReviewText?: string;
+          overallRating?: number | null;
+          totalReviews?: number;
+        } = {};
         try {
           const brandResearch = await researchBrand(input.brandNameOrUrl);
           brandEvidenceSummary = brandResearch.evidenceSummary;
+          reviewFields = {
+            yelpRating: brandResearch.yelpRating,
+            yelpReviewCount: brandResearch.yelpReviewCount,
+            yelpReviewExcerpts: brandResearch.yelpReviewExcerpts || undefined,
+            googleRating: brandResearch.googleRating,
+            googleReviewCount: brandResearch.googleReviewCount,
+            googleReviewExcerpts: brandResearch.googleReviewExcerpts || undefined,
+            combinedReviewText: brandResearch.combinedReviewText || undefined,
+            overallRating: brandResearch.overallRating,
+            totalReviews: brandResearch.totalReviews,
+          };
         } catch (err) {
           console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
         }
@@ -172,6 +194,7 @@ export const appRouter = router({
           weightBeta: weights.beta,
           weightGamma: weights.gamma,
           weightPriority: weights.priority,
+          ...reviewFields,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
         });

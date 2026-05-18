@@ -266,7 +266,16 @@ Your task is to analyze a brand or business and produce a structured cultural pr
 You will be provided with REAL, SCRAPED evidence from the brand's public website and web presence.
 You MUST base your analysis on this evidence. Do NOT contradict the evidence.
 If the evidence shows a local restaurant, analyze it as a local restaurant. If the evidence shows a luxury brand, analyze it as luxury.
-Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.`;
+Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.
+
+When the evidence includes an AUDIENCE PERCEPTION section with Yelp and/or Google Maps reviews:
+- Treat review language as the most authentic signal of how the brand is DECODED by its audience (Stuart Hall)
+- Look for the symbolic meaning customers assign to the brand (e.g. 'cultural anchor', 'status symbol', 'comfort food')
+- Identify any Goffman Stage Gap: does the brand's self-presentation match how customers actually experience it?
+- Note emotional drivers that bring customers to this brand (belonging, nostalgia, discovery, status)
+- Detect any in-group vs. out-group decoding split in the reviews
+- Flag cultural risks visible in negative reviews (inconsistency, unmet expectations, service gaps)
+- Let review evidence directly inform: audienceTribe, barthesMyth, emotionalPromise, culturalTension, and aiSummary`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`

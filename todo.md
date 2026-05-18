@@ -249,3 +249,15 @@
 - [x] Update test assertion to match new stronger wording
 - [x] Run TypeScript check and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## Yelp + Google Maps Review Pipeline for Brand Analysis
+- [x] Write fetchReviewData(brandName, city): search Yelp for brand listing, scrape review text, rating, and review count
+- [x] Write fetchGoogleMapsReviews(brandName, city): use Google Maps Places API (via built-in proxy) to get place details + reviews
+- [x] Add audiencePerceptionBlock to brand evidence summary: rating, review count, top positive themes, top critical themes, decoded cultural signals from review language
+- [x] Update brand AI extraction prompt: add Audience Perception section with explicit instructions to decode review language for symbolic capital, archetype confirmation, and Goffman gap signals
+- [x] Add yelpRating, yelpReviewCount, yelpReviewExcerpts, googleRating, googleReviewCount, googleReviewExcerpts, combinedReviewText, overallRating, totalReviews columns to brand_profiles DB schema
+- [x] Apply DB migration via webdev_execute_sql
+- [x] Update routers.ts brand.analyze route to save review data fields
+- [x] Update BrandProfileCard UI to show Audience Perception panel with review excerpts and decoded signals
+- [x] Run TypeScript check and all tests (27/27 pass)
+- [x] Save checkpoint
