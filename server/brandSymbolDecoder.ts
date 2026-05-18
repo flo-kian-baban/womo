@@ -72,11 +72,17 @@ export async function decodeBrandSymbols(input: {
 }): Promise<BrandDecodedSymbols | null> {
   const { brandName, websiteText, reviewText } = input;
 
+  // If no text at all, skip — caller already guards with combinedTextLength >= 80
   if (!websiteText && !reviewText) return null;
 
+  // Label the website block appropriately — if it's short (likely fallback/review text), note the source
+  const websiteBlockLabel = websiteText.length < 200 && reviewText.length > 0
+    ? "AVAILABLE BRAND TEXT (limited direct website access — sourced from search results and review platforms):"
+    : "BRAND-AUTHORED TEXT (website copy, taglines, about page, product descriptions):";
+
   const websiteBlock = websiteText
-    ? `BRAND-AUTHORED TEXT (website copy, taglines, about page, product descriptions):\n${websiteText.slice(0, 3000)}`
-    : "BRAND-AUTHORED TEXT: [not available]";
+    ? `${websiteBlockLabel}\n${websiteText.slice(0, 3000)}`
+    : "BRAND-AUTHORED TEXT: [website blocked or unavailable — decode from review text and brand name only]";
 
   const reviewBlock = reviewText
     ? `AUDIENCE-AUTHORED TEXT (Yelp + Google Maps reviews — how customers talk about this brand):\n${reviewText.slice(0, 2000)}`

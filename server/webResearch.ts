@@ -1512,16 +1512,38 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   ].filter(Boolean).join("\n").trim();
 
   // Run Brand Symbol Decoder on website text + review text (non-fatal)
+  // websiteText corpus: always include all available text sources (description, snippets, Yelp excerpts, Google excerpts)
+  // This ensures the decoder runs even when the direct HTML fetch is blocked by Cloudflare or other protection
   let brandDecodedSymbols: BrandDecodedSymbols | null = null;
-  const websiteText = [description, ...snippets].filter(Boolean).join("\n");
+  const websiteTextParts = [
+    description,
+    ...snippets,
+  ].filter(Boolean);
+
+  // If direct website fetch yielded very little text (<150 chars), supplement with review excerpts in the website corpus
+  // so the decoder has enough signal to work with
+  const directWebTextLength = websiteTextParts.join(" ").length;
+  if (directWebTextLength < 150) {
+    // Add Yelp and Google snippets as supplementary brand text
+    if (yelpReviewExcerpts) websiteTextParts.push(`Yelp customer reviews: ${yelpReviewExcerpts.slice(0, 800)}`);
+    if (googleReviewExcerpts) websiteTextParts.push(`Google Maps customer reviews: ${googleReviewExcerpts.slice(0, 800)}`);
+    console.log(`[webResearch] Direct web text too short (${directWebTextLength} chars) — using review text as website corpus fallback for Symbol Decoder`);
+  }
+
+  const websiteText = websiteTextParts.join("\n");
   const reviewText = reviewResult.combinedReviewText;
+
+  // Minimum viable text: need at least 80 chars combined to run the decoder meaningfully
+  const combinedTextLength = websiteText.length + reviewText.length;
   try {
-    if (websiteText || reviewText) {
+    if (combinedTextLength >= 80) {
       brandDecodedSymbols = await decodeBrandSymbols({
         brandName,
         websiteText,
         reviewText,
       });
+    } else {
+      console.warn(`[webResearch] Brand Symbol Decoder skipped — insufficient text (${combinedTextLength} chars) for ${brandName}`);
     }
   } catch (err) {
     console.warn("[webResearch] Brand Symbol Decoder failed (non-fatal):", err);

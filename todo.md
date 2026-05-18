@@ -286,3 +286,11 @@
 - [x] Update BrandProfileCard UI: add Brand Symbol Decoder collapsible panel with symbolic summary, cultural themes, symbolic vocabulary, raw keywords, and all 5 signal groups (identity, status, community, aspiration, audience)
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## Fix: Brand Symbol Decoder — Cloudflare-Protected Sites (e.g. cleareyedoctors.com)
+- [x] Diagnose: cleareyedoctors.com returns Cloudflare challenge page (5KB, "Just a moment...") — direct HTML fetch yields no usable text
+- [x] Update researchBrand() websiteText corpus: when directWebTextLength < 150 chars, inject Yelp + Google review excerpts into websiteTextParts as fallback corpus
+- [x] Add minimum-text guard: if combinedTextLength < 80 chars, skip Symbol Decoder gracefully with console.warn instead of running LLM on empty input
+- [x] Update decodeBrandSymbols(): adaptive block label — when website text is short, label it as "limited direct website access" so LLM understands the source
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint
