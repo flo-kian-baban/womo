@@ -119,7 +119,7 @@
 - [x] Added 8 unit tests in webResearch.test.ts verifying content-first logic, food keyword dominance, and evidence summary structure
 - [x] All 27 tests pass (fitEngine x18, auth x1, webResearch x8)
 
-## Fix: Deep TikTok Data + Remove YouTube Contamination for Small Creators
+## Fix: Deep TikTok Data + Personality Creator Detection + Stats Field Fix
 - [x] Probe ALL available TikTok API endpoints for @kaylee.nhi: user info, popular posts, video list, search, comments
 - [x] Fix YouTube supplementary search: disabled for creators <50k followers, only fallback for large creators
 - [x] Built collectTikTokVideosViaSearch(): multi-query TikTok search as PRIMARY video collection method
@@ -131,6 +131,15 @@
 - [x] Test with @kaylee.nhi: search returns 'Le Sélect Bistro', 'torched sushi', 'banh mi', 'pho', 'fried chicken'
 - [x] Added follower-count guard: YouTube fallback only for creators with 50k+ followers
 - [x] All 27 tests pass with updated test for new multi-query TikTok strategy
+- [x] CRITICAL FIX: TikTok API uses 'stats' not 'statistics' — fixed stats field name in collectTikTokVideosViaSearch
+- [x] Added music/audio signal extraction: named songs + original sounds by creator captured from each video
+- [x] Added challenges array extraction for hashtags (more reliable than textExtra for TikTok search results)
+- [x] Built detectCreatorType(): classifies creator as PERSONALITY/COMEDY/FOOD/TRAVEL/GENERAL from available signals
+- [x] Personality creator detection: empty captions + original sounds + high views = PERSONALITY CREATOR flag
+- [x] Evidence summary now shows DETECTED CREATOR TYPE and personality creator warning note
+- [x] Evidence summary now shows MUSIC / AUDIO SIGNALS section (key for caption-sparse creators like @camfant)
+- [x] @camfant: 4.2M followers, avg views 5M+, original sounds, minimal captions → correctly flagged as PERSONALITY CREATOR
+- [x] All 27 tests still pass after all changes
 
 ## Backlog / Future Enhancements (intentionally deferred — not in current scope)
 - [ ] PDF export using server-side rendering

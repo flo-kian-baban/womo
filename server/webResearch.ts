@@ -243,24 +243,25 @@ function formatNum(n: number): string {
 async function collectTikTokVideosViaSearch(
   handle: string,
   bio: string
-): Promise<{ titles: string[]; hashtags: string[]; viewCounts: number[] }> {
+): Promise<{ titles: string[]; hashtags: string[]; viewCounts: number[]; musicTitles: string[]; avgViews: number }> {
   const titles: string[] = [];
   const hashtags: string[] = [];
   const viewCounts: number[] = [];
+  const musicTitles: string[] = [];
   const seen = new Set<string>();
 
   // Build search queries — always run all 4 to maximize content coverage
   // We do NOT limit based on bio keywords because the bio may not reflect the content
   const bioLower = bio.toLowerCase();
   const cityMatch = bioLower.match(/toronto|nyc|new york|london|los angeles|la|miami|chicago|dubai|paris|montreal|vancouver|sydney|melbourne/);
-  const cityQuery = cityMatch ? `${handle} ${cityMatch[0]}` : `${handle} food`;
+  const cityQuery = cityMatch ? `${handle} ${cityMatch[0]}` : `${handle} lifestyle`;
 
   // Fixed 4-query set: always runs all 4 regardless of bio content
   const queries = [
     handle,                      // Primary: returns the creator's own videos directly
-    `${handle} food`,            // Food/restaurant content (most common TikTok niche)
+    `${handle} food`,            // Food/restaurant content
     `${handle} travel`,          // Travel/lifestyle content
-    cityQuery,                   // City-specific or food fallback
+    cityQuery,                   // City-specific or lifestyle fallback
   ];
 
   for (const q of queries) {
@@ -273,21 +274,47 @@ async function collectTikTokVideosViaSearch(
       for (const item of items) {
         const v = item as Record<string, unknown>;
         const desc = (v?.desc as string) ?? "";
-        const textExtra = (v?.text_extra as Array<Record<string, unknown>>) ?? [];
-        const stats = (v?.statistics as Record<string, unknown>) ?? {};
-        const views = Number(stats?.play_count ?? 0);
-        const diggs = Number(stats?.digg_count ?? 0);
 
+        // CRITICAL FIX: TikTok API uses 'stats' not 'statistics'
+        const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
+        const views = Number(statsObj?.playCount ?? statsObj?.play_count ?? 0);
+
+        // Extract hashtags from challenges array (most reliable source)
+        const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
+        for (const c of challenges) {
+          const tagName = (c?.title as string) ?? (c?.name as string) ?? "";
+          if (tagName) hashtags.push(`#${tagName}`);
+        }
+
+        // Extract hashtags from textExtra
+        const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? (v?.text_extra as Array<Record<string, unknown>>) ?? [];
+        for (const tag of textExtra) {
+          const tagName = (tag?.hashtagName as string) ?? (tag?.hashtag_name as string) ?? "";
+          if (tagName) hashtags.push(`#${tagName}`);
+        }
+
+        // Extract music/audio title — key signal for personality/comedy creators
+        const music = (v?.music as Record<string, unknown>) ?? {};
+        const musicTitle = (music?.title as string) ?? "";
+        const musicAuthor = (music?.authorName as string) ?? "";
+        if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
+          // Named songs reveal content mood/genre
+          if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
+        }
+        // Original sounds by the creator themselves are a strong signal
+        if (musicTitle.startsWith("original sound") && musicAuthor === handle) {
+          if (!musicTitles.includes(`[original audio by @${handle}]`)) {
+            musicTitles.push(`[original audio by @${handle}]`);
+          }
+        }
+
+        if (views > 0) viewCounts.push(views);
+
+        // Only add non-empty descriptions to titles
         if (desc && !seen.has(desc)) {
           seen.add(desc);
           titles.push(desc);
-          if (views > 0) viewCounts.push(views);
-          // Extract hashtags from text_extra
-          for (const tag of textExtra) {
-            const tagName = (tag?.hashtag_name as string) ?? "";
-            if (tagName) hashtags.push(`#${tagName}`);
-          }
-          // Also extract inline hashtags from description
+          // Extract inline hashtags from description
           const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
           hashtags.push(...inlineTags);
         }
@@ -297,7 +324,11 @@ async function collectTikTokVideosViaSearch(
     }
   }
 
-  return { titles, hashtags, viewCounts };
+  const avgViews = viewCounts.length > 0
+    ? Math.round(viewCounts.reduce((a, b) => a + b, 0) / viewCounts.length)
+    : 0;
+
+  return { titles, hashtags, viewCounts, musicTitles, avgViews };
 }
 
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
@@ -352,6 +383,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   searchHashtags.push(...searchResults.hashtags);
   videoViewCounts.push(...searchResults.viewCounts);
   totalViews = searchResults.viewCounts.reduce((a, b) => a + b, 0);
+  const musicSignals: string[] = searchResults.musicTitles ?? [];
 
   // Step 3: TikTok HTML scrape — supplementary source for additional video captions
   // This extracts video descriptions embedded in the page JSON, which may include
@@ -469,6 +501,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
     totalLikes, totalViews, avgViews, engagementRate, location,
     videoTitles: uniqueVideoTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
+    musicSignals,
   });
 
   return {
@@ -478,6 +511,34 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     recentVideoTitles: uniqueVideoTitles, topHashtags, rawKeywords,
     contentThemeLabels, contentThemes, evidenceSummary,
   };
+}
+
+// Detect if this is a personality/comedy creator based on available signals
+function detectCreatorType(videoTitles: string[], musicSignals: string[], bio: string, followerCount: number, avgViews: number): string {
+  const allText = [...videoTitles, bio].join(" ").toLowerCase();
+  const hasNicheKeywords = [
+    "food","restaurant","review","recipe","travel","fitness","fashion","makeup",
+    "tutorial","how to","tech","gaming","business","finance","education","news"
+  ].some(kw => allText.includes(kw));
+
+  // Personality signal: many empty captions + original sounds + high views
+  const emptyRatio = videoTitles.length === 0 ? 1 : (videoTitles.filter(t => t.trim().length < 5).length / videoTitles.length);
+  const hasOriginalSounds = musicSignals.some(m => m.includes("original audio"));
+  const isViral = avgViews > 500_000;
+
+  if (!hasNicheKeywords && (emptyRatio > 0.5 || hasOriginalSounds) && (isViral || followerCount > 500_000)) {
+    return "PERSONALITY / COMEDY CREATOR";
+  }
+  if (allText.includes("comedy") || allText.includes("comedian") || allText.includes("funny") || allText.includes("skit")) {
+    return "COMEDY CREATOR";
+  }
+  if (allText.includes("food") || allText.includes("restaurant") || allText.includes("eat")) {
+    return "FOOD CREATOR";
+  }
+  if (allText.includes("travel") || allText.includes("explore") || allText.includes("trip")) {
+    return "TRAVEL CREATOR";
+  }
+  return "GENERAL CONTENT CREATOR";
 }
 
 // ─── YouTube Research ─────────────────────────────────────────────────────────
@@ -703,12 +764,15 @@ function buildCreatorEvidenceSummary(data: {
   totalViews: number; avgViews: number; engagementRate: number;
   location: string; videoTitles: string[]; topHashtags: string[];
   rawKeywords: string[]; contentThemeLabels: string[]; contentThemes: string[];
+  musicSignals?: string[];
 }): string {
   const {
     handle, platform, displayName, bio, followerCount, videoCount, totalLikes,
     totalViews, avgViews, engagementRate, location, videoTitles, topHashtags,
-    rawKeywords, contentThemeLabels, contentThemes,
+    rawKeywords, contentThemeLabels, contentThemes, musicSignals = [],
   } = data;
+
+  const creatorType = detectCreatorType(videoTitles, musicSignals, bio, followerCount, avgViews);
 
   return `
 CREATOR RESEARCH EVIDENCE — @${handle} (${platform})
@@ -738,8 +802,18 @@ ${rawKeywords.slice(0, 20).join(", ")}
 TOP HASHTAGS:
 ${topHashtags.slice(0, 15).join(", ")}
 
-ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled from TikTok search + profile):
-${videoTitles.slice(0, 20).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
+DETECTED CREATOR TYPE: ${creatorType}
+${creatorType.includes("PERSONALITY") || creatorType.includes("COMEDY") ? `
+⚠️  PERSONALITY CREATOR NOTE: This creator uses minimal captions. Their identity comes from
+    their PRESENCE, STYLE, and AUDIENCE RELATIONSHIP — not from descriptive post titles.
+    Use follower count, avg views, bio tone, and music choices to infer their archetype.
+    Do NOT default to a niche topic just because captions are sparse.
+` : ""}
+ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled):
+${videoTitles.length > 0 ? videoTitles.slice(0, 20).map((t, i) => `  ${i + 1}. ${t}`).join("\n") : "  [No descriptive captions found — this creator uses minimal text in their posts]"}
+
+MUSIC / AUDIO SIGNALS (${musicSignals.length} tracks — reveals content mood and style):
+${musicSignals.length > 0 ? musicSignals.slice(0, 10).map((m) => `  • ${m}`).join("\n") : "  [No named audio tracks extracted]"}
 
 CRITICAL ANALYSIS INSTRUCTIONS:
 ⚠️  CONTENT IS PRIMARY — BIO IS SECONDARY AND MUST BE CHALLENGED
