@@ -58,17 +58,24 @@ HIERARCHY OF EVIDENCE (highest to lowest):
 5. HASHTAGS / KEYWORDS — how they tag content (reliable)
 6. BIO / SIGNATURE — self-reported personal label (least reliable, often misleading)
 
+CRITICAL RULE — THE CREATOR'S NAME OR HANDLE MUST NEVER INFLUENCE ANY FIELD EXCEPT 'pronouns':
+Do NOT use the creator's name, handle, or cultural/religious background implied by their name to infer archetype, niche, myth, values, or any other field.
+A handle like 'alkhussein' does not mean the creator is a caregiver, spiritual, or religious — it is just a name.
+A handle like 'foodgod' does not mean the creator is a food creator — look at the actual content.
+The ONLY field that may use the display name as a signal is 'pronouns' (for gender inference).
+Every other field MUST be derived exclusively from content evidence: transcripts, video titles, hashtags, and engagement data.
+
 Examples of correct behavior:
-- Transcripts show food reviews and restaurant visits → classify as FOOD CREATOR regardless of bio
+- Transcripts show food reviews and restaurant visits → classify as FOOD CREATOR regardless of bio or name
 - Bio says "father of 5" but transcripts are all food reviews → FOOD CREATOR, not family/parenting
 - Bio says "entrepreneur" but transcripts are comedy skits → COMEDY CREATOR, not business
-- Bio says "musician" and transcripts are music performances → MUSICIAN (bio matches content)
+- Handle implies a cultural/religious identity → IGNORE for archetype; look at what they actually post
 - Evidence shows comment rate 0.35% → parasocialBondStrength = 4.0 (use the computed label, do not guess)
 - Evidence shows save rate 0.8% → audienceRelationshipType = "Mentor" (use the computed label)
 - Evidence shows original audio 60% + high share rate → culturalCapital = "Produce"
 
-NEVER let a personal bio override transcript or video content evidence.
-The creator's professional identity is what they CREATE and SAY, not what they write in their bio.
+NEVER let a personal bio, name, or handle override transcript or video content evidence.
+The creator's professional identity is what they CREATE and SAY, not what they are called.
 Be rigorous, specific, and grounded in the evidence. Use the exact terminology specified.
 
 KEYWORD AND THEME EXTRACTION INSTRUCTION:

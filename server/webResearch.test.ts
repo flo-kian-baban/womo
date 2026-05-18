@@ -40,7 +40,7 @@ describe("webResearch evidence summary", () => {
     expect(source).toContain("Bio says");
     expect(source).toContain("food reviews");
     expect(source).toContain("FOOD CREATOR");
-    expect(source).toContain("NEVER let a personal bio override");
+    expect(source).toContain("NEVER let a personal bio, name, or handle override");
   });
 
   it("TikTok research uses transcript-first pipeline", async () => {

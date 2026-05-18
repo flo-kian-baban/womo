@@ -230,3 +230,22 @@
 - [x] Update generateFITNarrative prompt: use extracted pronouns throughout the narrative text
 - [x] Run TypeScript check and all tests
 - [x] Save checkpoint
+
+## Fix: Quota Exhaustion Detection (TikTok + YouTube)
+- [x] Track quota errors across all YouTube API calls in fetchYouTubeTranscripts
+- [x] Throw TOO_MANY_REQUESTS TRPCError with clear retry message when YouTube quota exhausted + no data
+- [x] Throw NOT_FOUND TRPCError when YouTube returns no data and quota is not the cause
+- [x] Replace toast-only error on AnalyzeInfluencer page with persistent inline error card
+- [x] Amber card with retry instructions for rate-limit errors; red card for other failures
+- [x] Run TypeScript check and all tests (27/27 pass)
+- [x] Save checkpoint
+
+## Fix: Pronoun Detection Regression — Transcript-First Priority Broken
+- [x] Read aiExtraction.ts to find where pronoun detection is causing bio over-weighting
+- [x] Isolate pronoun detection to ONLY use bio + display name + self-referential transcript words — NOT archetype signals
+- [x] Add explicit rule: handle/name MUST NOT influence any field except pronouns
+- [x] Add example: 'Handle implies cultural/religious identity → IGNORE for archetype; look at actual content'
+- [x] Restore transcript-first evidence hierarchy in extraction prompt: transcripts > titles > hashtags > bio
+- [x] Update test assertion to match new stronger wording
+- [x] Run TypeScript check and all tests (27/27 pass)
+- [x] Save checkpoint
