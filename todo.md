@@ -85,6 +85,14 @@
 - [x] Update creator.analyze and brand.analyze routes to use the research layer
 - [x] Test with @alkhussein and verify correct niche (local food, not travel)
 
+## Bug Fix: Instagram Research (Instagram blocks HTTP scraping)
+- [x] Replace Instagram HTTP scraping with multi-source research: YouTube search + channel search
+- [x] Use YouTube Data API to search for creator name and extract video titles/descriptions
+- [x] Parse Instagram handle from URL and search YouTube for "[handle] instagram" content
+- [x] YouTube channel search provides channel description and subscriber count as additional evidence
+- [x] Instagram direct fetch kept as best-effort fallback (logs at debug level when blocked)
+- [x] Verify @mrdavehill correctly identified as comedian/musician via YouTube evidence (integration test PASS: comedy=['comedian','comedy','standup'], music=['guitar','album'], finance=[])
+
 ## Backlog / Future Enhancements (intentionally deferred)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands

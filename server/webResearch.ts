@@ -248,76 +248,103 @@ async function researchInstagramCreator(
 ): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
-  // Instagram: fetch public profile page via HTTP
+  // Instagram blocks direct HTTP scraping. Instead, we use a multi-source research strategy:
+  // 1. YouTube search for the creator (most reliable — returns real titles, descriptions, channel info)
+  // 2. YouTube channel search to find their channel description
+  // 3. Attempt Instagram page fetch as a best-effort fallback (often blocked but worth trying)
+
   let bio = "";
   let displayName = handle;
   let followerCount = 0;
-  let videoCount = 0;
-  let totalLikes = 0;
+  const videoCount = 0;
+  const totalLikes = 0;
   const videoTitles: string[] = [];
+  let location = "";
 
+  // Step 1: Primary — YouTube video search for this creator
+  // This is the most reliable source: YouTube returns real titles, descriptions, and channel names
   try {
-    const { default: axios } = await import("axios");
-    const response = await axios.get(`https://www.instagram.com/${handle}/`, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      timeout: 12000,
-    });
+    const ytVideoResponse = await callDataApi("Youtube/search", {
+      query: { q: `${handle} instagram`, hl: "en", gl: "US" },
+    }) as Record<string, unknown>;
+    const contents = (ytVideoResponse?.contents as unknown[]) ?? [];
+    for (const item of contents.slice(0, 10)) {
+      const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
+      if (videoData) {
+        const title = (videoData?.title as string) ?? "";
+        const desc = (videoData?.descriptionSnippet as string) ?? "";
+        const channelName = ((videoData?.author as Record<string, unknown>)?.title as string) ?? "";
+        if (title) videoTitles.push(title);
+        if (desc) videoTitles.push(desc);
+        // If the channel name matches the handle, use it as display name
+        if (channelName && channelName.toLowerCase().includes(handle.toLowerCase().replace(/[^a-z0-9]/g, ""))) {
+          displayName = channelName;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[webResearch] Instagram/YouTube video search failed:", err);
+  }
 
-    const html = response.data as string;
+  // Step 2: YouTube channel search — gets the creator's channel description and subscriber count
+  try {
+    const ytChannelResponse = await callDataApi("Youtube/search", {
+      query: { q: handle, type: "channel", hl: "en", gl: "US" },
+    }) as Record<string, unknown>;
+    const channelContents = (ytChannelResponse?.contents as unknown[]) ?? [];
+    for (const item of channelContents.slice(0, 3)) {
+      const channelData = ((item as Record<string, unknown>)?.channel as Record<string, unknown>);
+      if (channelData) {
+        const channelTitle = (channelData?.title as string) ?? "";
+        const channelDesc = (channelData?.descriptionSnippet as string) ?? "";
+        const subs = (channelData?.subscriberCountText as string) ?? "";
+        if (channelTitle && !displayName.includes(" ")) displayName = channelTitle;
+        if (channelDesc) { bio = channelDesc; videoTitles.push(channelDesc); }
+        if (subs) {
+          const subMatch = subs.match(/([\d.]+[KkMm]?)/);
+          if (subMatch) {
+            const raw = subMatch[1];
+            if (raw.endsWith("K") || raw.endsWith("k")) followerCount = parseFloat(raw) * 1000;
+            else if (raw.endsWith("M") || raw.endsWith("m")) followerCount = parseFloat(raw) * 1000000;
+            else followerCount = parseInt(raw, 10);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[webResearch] YouTube channel search failed:", err);
+  }
 
-    // Extract meta description (contains bio snippet)
+  // Step 3: Best-effort Instagram page fetch (often blocked, but try anyway)
+  try {
+    const html = await fetchHtml(`https://www.instagram.com/${handle}/`);
     const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
-    if (metaDesc) bio = metaDesc;
-
-    // Extract display name
+    if (metaDesc && !bio) bio = metaDesc;
     const titleMatch = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
-    if (titleMatch) {
+    if (titleMatch && displayName === handle) {
       displayName = titleMatch.split("•")[0].split("(")[0].trim() || handle;
     }
-
     // Extract follower count from meta
     const followerMatch = metaDesc.match(/([\d,.]+[KkMm]?)\s*Followers/i);
-    if (followerMatch) {
+    if (followerMatch && followerCount === 0) {
       const raw = followerMatch[1].replace(/,/g, "");
       if (raw.endsWith("K") || raw.endsWith("k")) followerCount = parseFloat(raw) * 1000;
       else if (raw.endsWith("M") || raw.endsWith("m")) followerCount = parseFloat(raw) * 1000000;
       else followerCount = parseInt(raw, 10);
     }
-
-    // Extract alt text from images (often contains post captions)
-    const alts = html.match(/alt="([^"]{15,200})"/g) ?? [];
-    for (const alt of alts.slice(0, 20)) {
-      const text = alt.replace(/alt="|"/g, "").trim();
-      if (text && !text.includes("profile picture") && !text.includes("Instagram")) {
-        videoTitles.push(text);
-      }
-    }
   } catch (err) {
-    console.warn("[webResearch] Instagram fetch failed:", err);
+    // Expected to fail — Instagram blocks bots. Log at debug level only.
+    console.log("[webResearch] Instagram direct fetch blocked (expected):", (err as Error).message?.slice(0, 80));
   }
 
-  // Fallback: search YouTube for the creator to get additional content context
-  if (videoTitles.length < 3) {
-    try {
-      const ytResponse = await callDataApi("Youtube/search", {
-        query: { q: `${handle} instagram creator`, hl: "en", gl: "US" },
-      }) as Record<string, unknown>;
-      const contents = (ytResponse?.contents as unknown[]) ?? [];
-      for (const item of contents) {
-        const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
-        if (videoData) {
-          const title = (videoData?.title as string) ?? "";
-          const desc = (videoData?.descriptionSnippet as string) ?? "";
-          if (title) videoTitles.push(title);
-          if (desc) videoTitles.push(desc);
-        }
-      }
-    } catch (err) {
-      console.warn("[webResearch] YouTube fallback search failed:", err);
-    }
+  // Extract location from all collected text
+  const allText = [bio, ...videoTitles].join(" ");
+  const locationPatterns = [
+    /\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Queens|Manhattan|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i,
+  ];
+  for (const pattern of locationPatterns) {
+    const match = allText.match(pattern);
+    if (match) { location = match[1]; break; }
   }
 
   const topHashtags = extractHashtags([...videoTitles, bio]);
@@ -331,7 +358,7 @@ async function researchInstagramCreator(
     followerCount,
     videoCount,
     totalLikes,
-    location: "",
+    location,
     videoTitles: videoTitles.slice(0, 20),
     topHashtags,
     contentThemes,
@@ -345,7 +372,7 @@ async function researchInstagramCreator(
     followerCount,
     videoCount,
     totalLikes,
-    location: "",
+    location,
     profileUrl: `https://www.instagram.com/${handle}/`,
     recentVideoTitles: videoTitles.slice(0, 20),
     topHashtags,
