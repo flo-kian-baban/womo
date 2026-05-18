@@ -15,6 +15,13 @@
       "when": 1779105794807,
       "tag": "0001_peaceful_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1779108926478,
+      "tag": "0002_striped_yellow_claw",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ const FEATURE_CARDS = [
     href: "/analyze/influencer",
     icon: Users,
     label: "Analyze Influencer",
-    description: "Extract a complete cultural profile from any TikTok or Instagram handle using AI and the F.I.T. framework.",
+    description: "Extract a complete cultural profile from any TikTok or YouTube handle using AI and the F.I.T. framework.",
     color: "oklch(0.65 0.15 240)",
     delay: "animate-stagger-1",
   },

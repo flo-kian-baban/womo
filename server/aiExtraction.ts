@@ -10,7 +10,7 @@ import { invokeLLM } from "./_core/llm";
 
 export interface CreatorExtractionResult {
   handle: string;
-  platform: "TikTok" | "Instagram" | "YouTube" | "Multi";
+  platform: "TikTok" | "Instagram" | "YouTube" | "Multi"; // Instagram kept for DB compat; not shown in UI
   displayName: string;
   archetype: string;
   recurringThemes: string[];
@@ -60,7 +60,7 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
 
 {
   "handle": "their @handle (without @)",
-  "platform": "TikTok" | "Instagram" | "YouTube" | "Multi",
+  "platform": "TikTok" | "YouTube" | "Multi",
   "displayName": "their display name",
   "archetype": ONE OF EXACTLY: "The Sage" | "The Hero" | "The Outlaw" | "The Explorer" | "The Magician" | "The Ruler" | "The Caregiver" | "The Lover" | "The Jester" | "The Innocent" | "The Everyman" | "The Creator",
   "recurringThemes": ["theme1", "theme2", "theme3"] (3-4 specific recurring content topics/formats),

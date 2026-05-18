@@ -33,6 +33,7 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
 
   // Identity
   handle: varchar("handle", { length: 255 }).notNull(),
+  // Note: Instagram kept in DB enum for data compatibility, but removed from UI and new analysis flows
   platform: mysqlEnum("platform", ["TikTok", "Instagram", "YouTube", "Multi"]).notNull(),
   profileUrl: text("profileUrl"),
   displayName: text("displayName"),
@@ -70,6 +71,21 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
     "Liminal",
     "Post-Liminal Reintegration",
   ]),
+
+  // Research metrics (from platform APIs)
+  followerCount: int("followerCount"),
+  totalLikes: int("totalLikes"),
+  videoCount: int("videoCount"),
+  totalViews: int("totalViews"),
+  avgViews: int("avgViews"),
+  engagementRate: float("engagementRate"), // percentage 0–100
+  location: text("location"),
+
+  // Keyword & theme intelligence
+  rawKeywords: json("rawKeywords"),        // string[] — all extracted keywords/hashtags
+  contentThemeLabels: json("contentThemeLabels"), // string[] — 3-5 named themes (LLM-translated)
+  topHashtags: json("topHashtags"),         // string[] — top hashtags
+  recentVideoTitles: json("recentVideoTitles"), // string[] — sampled video titles
 
   // Raw AI summary
   aiSummary: text("aiSummary"),

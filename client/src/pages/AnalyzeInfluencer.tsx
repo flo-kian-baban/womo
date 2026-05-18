@@ -15,7 +15,7 @@ import type { CreatorProfile } from "../../../drizzle/schema";
 
 const schema = z.object({
   handleOrUrl: z.string().min(1, "Enter a handle or URL"),
-  platform: z.enum(["TikTok", "Instagram", "YouTube", "Multi"]),
+  platform: z.enum(["TikTok", "YouTube", "Multi"]),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -82,9 +82,9 @@ export default function AnalyzeInfluencer() {
           </div>
         </div>
         <p className="text-muted-foreground text-sm max-w-xl leading-relaxed">
-          Enter a TikTok or Instagram handle and our AI will research the creator's public presence to extract
-          their Jungian archetype, Barthes myth, Goffman stage consistency, Stuart Hall decoding classification,
-          and full niche positioning.
+          Enter a TikTok or YouTube handle and our AI will research the creator's real public content — including
+          video titles, hashtags, stats, and bio — to extract their Jungian archetype, Barthes myth, Goffman stage
+          consistency, Stuart Hall decoding classification, and full niche positioning.
         </p>
       </div>
 
@@ -105,9 +105,8 @@ export default function AnalyzeInfluencer() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TikTok">TikTok</SelectItem>
-                  <SelectItem value="Instagram">Instagram</SelectItem>
                   <SelectItem value="YouTube">YouTube</SelectItem>
-                  <SelectItem value="Multi">Multi-Platform</SelectItem>
+                  <SelectItem value="Multi">Multi-Platform (TikTok + YouTube)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -118,7 +117,11 @@ export default function AnalyzeInfluencer() {
               </Label>
               <Input
                 {...register("handleOrUrl")}
-                placeholder={platform === "TikTok" ? "@username or tiktok.com/@username" : "@username or instagram.com/username"}
+                placeholder={
+                  platform === "TikTok" ? "@username or tiktok.com/@username" :
+                  platform === "YouTube" ? "@username or youtube.com/@username" :
+                  "@username (will search TikTok + YouTube)"
+                }
                 className="bg-secondary border-border placeholder:text-muted-foreground/40"
               />
               {errors.handleOrUrl && (

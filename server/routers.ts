@@ -29,16 +29,35 @@ export const appRouter = router({
     analyze: publicProcedure
       .input(z.object({
         handleOrUrl: z.string().min(1),
-        platform: z.enum(["TikTok", "Instagram", "YouTube", "Multi"]),
+        platform: z.enum(["TikTok", "YouTube", "Multi"]), // Instagram removed from UI
       }))
       .mutation(async ({ input }) => {
         // Step 1: Gather real evidence from the platform before AI analysis
         let evidenceSummary: string | undefined;
         let researchedProfileUrl: string | undefined;
+        let researchData: {
+          followerCount?: number; totalLikes?: number; videoCount?: number;
+          totalViews?: number; avgViews?: number; engagementRate?: number;
+          location?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
+          topHashtags?: string[]; recentVideoTitles?: string[];
+        } | undefined;
         try {
           const research = await researchCreator(input.handleOrUrl, input.platform);
           evidenceSummary = research.evidenceSummary;
           researchedProfileUrl = research.profileUrl;
+          researchData = {
+            followerCount: research.followerCount || undefined,
+            totalLikes: research.totalLikes || undefined,
+            videoCount: research.videoCount || undefined,
+            totalViews: research.totalViews || undefined,
+            avgViews: research.avgViews || undefined,
+            engagementRate: research.engagementRate || undefined,
+            location: research.location || undefined,
+            rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+            contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+            topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+            recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+          };
         } catch (err) {
           console.warn("[creator.analyze] Web research failed, proceeding without evidence:", err);
         }
@@ -73,6 +92,18 @@ export const appRouter = router({
           turnerLiminalPhase: extracted.turnerLiminalPhase,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
+          // Research metrics from platform APIs
+          followerCount: researchData?.followerCount ?? undefined,
+          totalLikes: researchData?.totalLikes ?? undefined,
+          videoCount: researchData?.videoCount ?? undefined,
+          totalViews: researchData?.totalViews ?? undefined,
+          avgViews: researchData?.avgViews ?? undefined,
+          engagementRate: researchData?.engagementRate ?? undefined,
+          location: researchData?.location ?? undefined,
+          rawKeywords: researchData?.rawKeywords ?? undefined,
+          contentThemeLabels: researchData?.contentThemeLabels ?? undefined,
+          topHashtags: researchData?.topHashtags ?? undefined,
+          recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
         });
         // Get the inserted ID
         const profiles = await listCreatorProfiles(undefined, extracted.handle);

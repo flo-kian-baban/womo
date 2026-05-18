@@ -4,13 +4,16 @@
  * anything to the LLM for cultural extraction. This prevents hallucination by
  * grounding every profile in actual public content.
  *
- * Strategy:
- * 1. TikTok/Instagram creators → TikTok Data API (user info + popular posts) +
- *    web search for recent video titles and context
- * 2. Brands → web search for brand description, mission, audience, and reviews
+ * Supported platforms:
+ * - TikTok: TikTok Data API (user info + popular posts) + HTML scrape for video descriptions
+ * - YouTube: YouTube Data API (channel details + channel videos) — full stats available
+ * - Multi: runs both TikTok and YouTube and merges results
+ *
+ * For brands: website HTML fetch + YouTube search for brand context
  */
 
 import { callDataApi } from "./_core/dataApi";
+import { invokeLLM } from "./_core/llm";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,12 +25,17 @@ export interface CreatorResearchResult {
   followerCount: number;
   videoCount: number;
   totalLikes: number;
+  totalViews: number;
+  avgViews: number;
+  engagementRate: number; // percentage 0–100
   location: string;
   profileUrl: string;
   recentVideoTitles: string[];
   topHashtags: string[];
-  contentThemes: string[];
-  evidenceSummary: string; // Plain-text evidence block passed to LLM
+  rawKeywords: string[];          // All extracted keywords (hashtags + title words)
+  contentThemeLabels: string[];   // LLM-translated named themes (3–5)
+  contentThemes: string[];        // Legacy rule-based themes (kept for evidence summary)
+  evidenceSummary: string;        // Plain-text evidence block passed to LLM
 }
 
 export interface BrandResearchResult {
@@ -41,8 +49,7 @@ export interface BrandResearchResult {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function extractHandle(handleOrUrl: string): string {
-  // Handle formats: @handle, handle, https://tiktok.com/@handle, https://instagram.com/handle
-  const urlMatch = handleOrUrl.match(/(?:tiktok\.com\/@?|instagram\.com\/)([^/?#\s]+)/i);
+  const urlMatch = handleOrUrl.match(/(?:tiktok\.com\/@?|youtube\.com\/(?:@|channel\/|user\/)|instagram\.com\/)([^/?#\s]+)/i);
   if (urlMatch) return urlMatch[1].replace(/^@/, "");
   return handleOrUrl.replace(/^@/, "").trim();
 }
@@ -58,29 +65,135 @@ function extractHashtags(texts: string[]): string[] {
   }
   return Object.entries(tagCounts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 15)
+    .slice(0, 20)
     .map(([tag]) => tag);
 }
 
-function inferContentThemes(
-  videoTitles: string[],
+/**
+ * Extract meaningful keywords from video titles and descriptions.
+ * Removes stop words, short tokens, and platform-generic terms.
+ */
+function extractKeywords(texts: string[]): string[] {
+  const stopWords = new Set([
+    "the","a","an","and","or","but","in","on","at","to","for","of","with","by",
+    "from","up","about","into","through","during","is","are","was","were","be",
+    "been","being","have","has","had","do","does","did","will","would","could",
+    "should","may","might","shall","can","i","my","me","we","our","you","your",
+    "he","she","it","they","them","this","that","these","those","what","which",
+    "who","how","when","where","why","all","each","every","both","few","more",
+    "most","other","some","such","no","not","only","same","so","than","too",
+    "very","just","also","new","get","got","let","like","make","know","think",
+    "see","look","come","go","take","give","use","find","want","need","day",
+    "time","year","way","part","place","case","week","company","number","group",
+    "problem","fact","video","watch","subscribe","follow","link","bio","check",
+    "click","here","now","today","back","first","last","next","own","old","big",
+    "high","long","great","little","good","bad","best","right","left","real",
+    "full","free","live","show","tell","feel","try","turn","ask","seem","leave",
+    "call","keep","put","set","run","move","play","pay","hear","help","talk",
+    "start","always","never","ever","still","already","again","once","often",
+  ]);
+
+  const wordCounts: Record<string, number> = {};
+  for (const text of texts) {
+    // Remove hashtags (handled separately), URLs, and special chars
+    const clean = text.replace(/#\w+/g, "").replace(/https?:\/\/\S+/g, "").toLowerCase();
+    const words = clean.match(/\b[a-z]{3,20}\b/g) ?? [];
+    for (const word of words) {
+      if (!stopWords.has(word)) {
+        wordCounts[word] = (wordCounts[word] ?? 0) + 1;
+      }
+    }
+  }
+  return Object.entries(wordCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 40)
+    .map(([word]) => word);
+}
+
+/**
+ * Use the LLM to translate raw keywords + hashtags into 3–5 named content themes.
+ * Falls back to rule-based themes if LLM fails.
+ */
+async function translateKeywordsToThemes(
+  keywords: string[],
   hashtags: string[],
+  videoTitles: string[],
   bio: string
-): string[] {
+): Promise<string[]> {
+  if (keywords.length === 0 && hashtags.length === 0) {
+    return ["General Content Creator"];
+  }
+
+  try {
+    const prompt = `You are a content analyst. Given the following keywords, hashtags, and video titles from a social media creator, identify 3–5 specific named content themes that best describe what this creator makes.
+
+Keywords (most frequent): ${keywords.slice(0, 25).join(", ")}
+Top hashtags: ${hashtags.slice(0, 15).join(", ")}
+Sample video titles: ${videoTitles.slice(0, 10).join(" | ")}
+Creator bio: ${bio}
+
+Rules:
+- Be specific (e.g., "Halal Food Reviews" not just "Food")
+- Use 2–4 word theme names
+- Return exactly 3–5 themes
+- Output ONLY a JSON array of strings, nothing else
+
+Example output: ["Halal Street Food Reviews", "Toronto Local Culture", "Family & Parenting", "Muslim Identity Content"]`;
+
+    const response = await invokeLLM({
+      messages: [
+        { role: "system", content: "You are a content analyst. Output only valid JSON arrays." },
+        { role: "user", content: prompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "content_themes",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              themes: { type: "array", items: { type: "string" } },
+            },
+            required: ["themes"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (content) {
+      const parsed = JSON.parse(content as string) as { themes: string[] };
+      if (Array.isArray(parsed.themes) && parsed.themes.length > 0) {
+        return parsed.themes.slice(0, 5);
+      }
+    }
+  } catch (err) {
+    console.warn("[webResearch] LLM theme translation failed, using rule-based fallback:", err);
+  }
+
+  // Rule-based fallback
+  return inferContentThemes(videoTitles, hashtags, bio);
+}
+
+function inferContentThemes(videoTitles: string[], hashtags: string[], bio: string): string[] {
   const allText = [...videoTitles, ...hashtags, bio].join(" ").toLowerCase();
   const themeMap: Record<string, string[]> = {
-    "Food & Restaurant Reviews": ["food", "restaurant", "review", "eat", "taste", "menu", "halal", "shawarma", "pizza", "chicken", "cooking", "recipe", "chef"],
-    "Local City Culture": ["toronto", "montreal", "nyc", "london", "city", "local", "street", "neighbourhood"],
-    "Street Interviews": ["interview", "street", "ask", "people", "random", "reaction"],
-    "Family & Parenting": ["father", "dad", "kids", "children", "family", "parenting", "single"],
-    "Comedy & Entertainment": ["funny", "comedy", "laugh", "prank", "challenge", "skit"],
-    "Lifestyle & Daily Life": ["day in", "vlog", "lifestyle", "daily", "routine"],
-    "Culture & Identity": ["arab", "muslim", "culture", "heritage", "middle eastern", "immigrant", "diaspora"],
-    "Fitness & Health": ["gym", "workout", "fitness", "health", "exercise", "training"],
-    "Fashion & Beauty": ["fashion", "outfit", "style", "beauty", "makeup", "skincare"],
-    "Travel": ["travel", "trip", "explore", "adventure", "visit", "destination"],
-    "Tech & Gaming": ["tech", "gaming", "game", "app", "software", "review"],
-    "Business & Finance": ["business", "money", "finance", "invest", "entrepreneur"],
+    "Food & Restaurant Reviews": ["food", "restaurant", "review", "eat", "taste", "menu", "halal", "shawarma", "pizza", "chicken", "cooking", "recipe", "chef", "burger", "sushi", "ramen"],
+    "Local City Culture": ["toronto", "montreal", "nyc", "london", "city", "local", "street", "neighbourhood", "downtown"],
+    "Street Interviews": ["interview", "street", "ask", "people", "random", "reaction", "public"],
+    "Comedy & Entertainment": ["funny", "comedian", "comedy", "laugh", "prank", "challenge", "skit", "standup", "humor"],
+    "Music & Performance": ["music", "musician", "guitar", "band", "album", "song", "rock", "perform", "concert", "gig"],
+    "Family & Parenting": ["father", "dad", "kids", "children", "family", "parenting", "single", "mom", "parent"],
+    "Lifestyle & Daily Life": ["day in", "vlog", "lifestyle", "daily", "routine", "morning", "night"],
+    "Culture & Identity": ["arab", "muslim", "culture", "heritage", "middle eastern", "immigrant", "diaspora", "identity"],
+    "Fitness & Health": ["gym", "workout", "fitness", "health", "exercise", "training", "wellness"],
+    "Fashion & Beauty": ["fashion", "outfit", "style", "beauty", "makeup", "skincare", "ootd"],
+    "Travel & Adventure": ["travel", "trip", "explore", "adventure", "visit", "destination", "abroad"],
+    "Tech & Gaming": ["tech", "gaming", "game", "app", "software", "review", "unboxing"],
+    "Business & Entrepreneurship": ["business", "entrepreneur", "startup", "brand", "marketing"],
+    "Education & Tutorials": ["tutorial", "how to", "learn", "teach", "tips", "guide", "explain"],
   };
 
   const matched: string[] = [];
@@ -88,7 +201,7 @@ function inferContentThemes(
     const score = keywords.filter((kw) => allText.includes(kw)).length;
     if (score >= 2) matched.push(theme);
   }
-  return matched.length > 0 ? matched : ["General Content Creator"];
+  return matched.length > 0 ? matched.slice(0, 5) : ["General Content Creator"];
 }
 
 // ─── HTTP Fetch Helper ────────────────────────────────────────────────────────
@@ -105,14 +218,20 @@ async function fetchHtml(url: string): Promise<string> {
   return response.data as string;
 }
 
+// ─── Number Formatter ─────────────────────────────────────────────────────────
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 // ─── TikTok Research ──────────────────────────────────────────────────────────
 
-async function researchTikTokCreator(
-  handleOrUrl: string
-): Promise<CreatorResearchResult> {
+async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
-  // Step 1: Get user info (bio, stats, secUid) from TikTok Data API
   let secUid = "";
   let displayName = handle;
   let bio = "";
@@ -120,7 +239,9 @@ async function researchTikTokCreator(
   let videoCount = 0;
   let totalLikes = 0;
   let location = "";
+  const videoTitles: string[] = [];
 
+  // Step 1: TikTok Data API — user info
   try {
     const userResponse = await callDataApi("Tiktok/get_user_info", {
       query: { uniqueId: handle },
@@ -137,9 +258,8 @@ async function researchTikTokCreator(
     videoCount = Number(stats?.videoCount ?? 0);
     totalLikes = Number(stats?.heartCount ?? 0);
 
-    // Extract location from bio
     const locationPatterns = [
-      /\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Calgary|Ottawa|Edmonton|Winnipeg|Quebec|Halifax)\b/i,
+      /\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Calgary|Ottawa|Edmonton|Winnipeg|Quebec|Halifax|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i,
     ];
     for (const pattern of locationPatterns) {
       const match = bio.match(pattern);
@@ -149,11 +269,9 @@ async function researchTikTokCreator(
     console.warn("[webResearch] TikTok user info failed:", err);
   }
 
-  // Step 2: Scrape TikTok profile page HTML for video descriptions
-  const videoTitles: string[] = [];
+  // Step 2: TikTok HTML scrape for video descriptions
   try {
     const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
-    // Extract video descriptions from JSON embedded in page
     const descMatches = html.match(/"desc":"([^"]{10,200})"/g) ?? [];
     for (const m of descMatches) {
       const desc = m.replace(/^"desc":"/, "").replace(/"$/, "").trim();
@@ -161,7 +279,6 @@ async function researchTikTokCreator(
         videoTitles.push(desc);
       }
     }
-    // Also extract signature if API failed
     if (!bio) {
       const sigMatch = html.match(/"signature":"([^"]+)"/);
       if (sigMatch) bio = sigMatch[1].replace(/\\n/g, " ").replace(/\\u[0-9a-fA-F]{4}/g, "").trim();
@@ -170,7 +287,9 @@ async function researchTikTokCreator(
     console.warn("[webResearch] TikTok HTML scrape failed:", err);
   }
 
-  // Step 3: Get popular posts via Data API (requires secUid)
+  // Step 3: Popular posts via Data API
+  let totalViews = 0;
+  const videoViewCounts: number[] = [];
   if (secUid) {
     try {
       const postsResponse = await callDataApi("Tiktok/get_user_popular_posts", {
@@ -180,19 +299,21 @@ async function researchTikTokCreator(
       const itemList = ((postsResponse?.data as Record<string, unknown>)?.itemList as unknown[]) ?? [];
       for (const item of itemList) {
         const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
+        const stats = ((item as Record<string, unknown>)?.stats as Record<string, unknown>) ?? {};
+        const views = Number(stats?.playCount ?? 0);
         if (desc.trim()) videoTitles.push(desc.trim());
+        if (views > 0) { videoViewCounts.push(views); totalViews += views; }
       }
     } catch (err) {
       console.warn("[webResearch] TikTok popular posts failed:", err);
     }
   }
 
-  // Step 4: TikTok search API for additional video context
+  // Step 4: TikTok search for additional context
   try {
     const searchResponse = await callDataApi("Tiktok/search_tiktok_video_general", {
       query: { keyword: handle },
     }) as Record<string, unknown>;
-
     const items = (searchResponse?.data as unknown[]) ?? [];
     for (const item of items) {
       const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
@@ -205,179 +326,178 @@ async function researchTikTokCreator(
     console.warn("[webResearch] TikTok search failed:", err);
   }
 
-  const uniqueVideoTitles = Array.from(new Set(videoTitles)).slice(0, 20);
+  // Compute derived stats
+  const avgViews = videoViewCounts.length > 0
+    ? Math.round(videoViewCounts.reduce((a, b) => a + b, 0) / videoViewCounts.length)
+    : 0;
+  const engagementRate = followerCount > 0 && avgViews > 0
+    ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+    : 0;
+
+  const uniqueVideoTitles = Array.from(new Set(videoTitles)).slice(0, 25);
   const topHashtags = extractHashtags([...uniqueVideoTitles, bio]);
+  const rawKeywords = extractKeywords([...uniqueVideoTitles, bio]);
+  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio);
   const contentThemes = inferContentThemes(uniqueVideoTitles, topHashtags, bio);
 
-  // Build the evidence summary — this is the key input to the LLM
+  // Extract location from all text if not found in bio
+  if (!location) {
+    const allText = [bio, ...uniqueVideoTitles].join(" ");
+    const locationMatch = allText.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
+    if (locationMatch) location = locationMatch[1];
+  }
+
   const evidenceSummary = buildCreatorEvidenceSummary({
-    handle,
-    platform: "TikTok",
-    displayName,
-    bio,
-    followerCount,
-    videoCount,
-    totalLikes,
-    location,
-    videoTitles: uniqueVideoTitles,
-    topHashtags,
-    contentThemes,
+    handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
+    totalLikes, totalViews, avgViews, engagementRate, location,
+    videoTitles: uniqueVideoTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
   });
 
   return {
-    handle,
-    platform: "TikTok",
-    displayName,
-    bio,
-    followerCount,
-    videoCount,
-    totalLikes,
-    location,
+    handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
+    totalLikes, totalViews, avgViews, engagementRate, location,
     profileUrl: `https://www.tiktok.com/@${handle}`,
-    recentVideoTitles: uniqueVideoTitles,
-    topHashtags,
-    contentThemes,
-    evidenceSummary,
+    recentVideoTitles: uniqueVideoTitles, topHashtags, rawKeywords,
+    contentThemeLabels, contentThemes, evidenceSummary,
   };
 }
 
-// ─── Instagram Research ───────────────────────────────────────────────────────
+// ─── YouTube Research ─────────────────────────────────────────────────────────
 
-async function researchInstagramCreator(
-  handleOrUrl: string
-): Promise<CreatorResearchResult> {
+async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
-  // Instagram blocks direct HTTP scraping. Instead, we use a multi-source research strategy:
-  // 1. YouTube search for the creator (most reliable — returns real titles, descriptions, channel info)
-  // 2. YouTube channel search to find their channel description
-  // 3. Attempt Instagram page fetch as a best-effort fallback (often blocked but worth trying)
-
-  let bio = "";
+  let channelId = "";
   let displayName = handle;
+  let bio = "";
   let followerCount = 0;
-  const videoCount = 0;
-  const totalLikes = 0;
-  const videoTitles: string[] = [];
+  let videoCount = 0;
+  let totalViews = 0;
   let location = "";
+  let channelKeywords: string[] = [];
+  const videoTitles: string[] = [];
+  const videoViewCounts: number[] = [];
 
-  // Step 1: Primary — YouTube video search for this creator
-  // This is the most reliable source: YouTube returns real titles, descriptions, and channel names
+  // Step 1: YouTube channel search to find the channel
   try {
-    const ytVideoResponse = await callDataApi("Youtube/search", {
-      query: { q: `${handle} instagram`, hl: "en", gl: "US" },
-    }) as Record<string, unknown>;
-    const contents = (ytVideoResponse?.contents as unknown[]) ?? [];
-    for (const item of contents.slice(0, 10)) {
-      const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
-      if (videoData) {
-        const title = (videoData?.title as string) ?? "";
-        const desc = (videoData?.descriptionSnippet as string) ?? "";
-        const channelName = ((videoData?.author as Record<string, unknown>)?.title as string) ?? "";
-        if (title) videoTitles.push(title);
-        if (desc) videoTitles.push(desc);
-        // If the channel name matches the handle, use it as display name
-        if (channelName && channelName.toLowerCase().includes(handle.toLowerCase().replace(/[^a-z0-9]/g, ""))) {
-          displayName = channelName;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("[webResearch] Instagram/YouTube video search failed:", err);
-  }
-
-  // Step 2: YouTube channel search — gets the creator's channel description and subscriber count
-  try {
-    const ytChannelResponse = await callDataApi("Youtube/search", {
+    const searchResponse = await callDataApi("Youtube/search", {
       query: { q: handle, type: "channel", hl: "en", gl: "US" },
     }) as Record<string, unknown>;
-    const channelContents = (ytChannelResponse?.contents as unknown[]) ?? [];
-    for (const item of channelContents.slice(0, 3)) {
+
+    const contents = (searchResponse?.contents as unknown[]) ?? [];
+    for (const item of contents.slice(0, 3)) {
       const channelData = ((item as Record<string, unknown>)?.channel as Record<string, unknown>);
       if (channelData) {
-        const channelTitle = (channelData?.title as string) ?? "";
-        const channelDesc = (channelData?.descriptionSnippet as string) ?? "";
-        const subs = (channelData?.subscriberCountText as string) ?? "";
-        if (channelTitle && !displayName.includes(" ")) displayName = channelTitle;
-        if (channelDesc) { bio = channelDesc; videoTitles.push(channelDesc); }
-        if (subs) {
-          const subMatch = subs.match(/([\d.]+[KkMm]?)/);
-          if (subMatch) {
-            const raw = subMatch[1];
-            if (raw.endsWith("K") || raw.endsWith("k")) followerCount = parseFloat(raw) * 1000;
-            else if (raw.endsWith("M") || raw.endsWith("m")) followerCount = parseFloat(raw) * 1000000;
-            else followerCount = parseInt(raw, 10);
-          }
-        }
+        channelId = (channelData?.channelId as string) ?? "";
+        displayName = (channelData?.title as string) ?? handle;
+        const desc = (channelData?.descriptionSnippet as string) ?? "";
+        if (desc) { bio = desc; videoTitles.push(desc); }
+        break; // Take the first match
       }
     }
   } catch (err) {
     console.warn("[webResearch] YouTube channel search failed:", err);
   }
 
-  // Step 3: Best-effort Instagram page fetch (often blocked, but try anyway)
-  try {
-    const html = await fetchHtml(`https://www.instagram.com/${handle}/`);
-    const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
-    if (metaDesc && !bio) bio = metaDesc;
-    const titleMatch = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
-    if (titleMatch && displayName === handle) {
-      displayName = titleMatch.split("•")[0].split("(")[0].trim() || handle;
+  // Step 2: Get full channel details (stats, keywords, description, country)
+  if (channelId) {
+    try {
+      const details = await callDataApi("Youtube/get_channel_details", {
+        query: { id: channelId },
+      }) as Record<string, unknown>;
+
+      if (details && !details.status) {
+        displayName = (details.title as string) ?? displayName;
+        const fullDesc = (details.description as string) ?? "";
+        if (fullDesc) bio = fullDesc.slice(0, 500);
+        location = (details.country as string) ?? "";
+
+        const statsData = (details.stats as Record<string, unknown>) ?? {};
+        followerCount = Number(statsData?.subscribers ?? 0);
+        videoCount = Number(statsData?.videos ?? 0);
+        totalViews = Number(statsData?.views ?? 0);
+
+        // Channel keywords are gold — they're what the creator self-tags
+        const kws = (details.keywords as string[]) ?? [];
+        channelKeywords = kws.slice(0, 20);
+        if (channelKeywords.length > 0) videoTitles.push(...channelKeywords);
+      }
+    } catch (err) {
+      console.warn("[webResearch] YouTube channel details failed:", err);
     }
-    // Extract follower count from meta
-    const followerMatch = metaDesc.match(/([\d,.]+[KkMm]?)\s*Followers/i);
-    if (followerMatch && followerCount === 0) {
-      const raw = followerMatch[1].replace(/,/g, "");
-      if (raw.endsWith("K") || raw.endsWith("k")) followerCount = parseFloat(raw) * 1000;
-      else if (raw.endsWith("M") || raw.endsWith("m")) followerCount = parseFloat(raw) * 1000000;
-      else followerCount = parseInt(raw, 10);
+
+    // Step 3: Get channel videos for titles and per-video view counts
+    try {
+      const videosResponse = await callDataApi("Youtube/get_channel_videos", {
+        query: { channelId, hl: "en", gl: "US" },
+      }) as Record<string, unknown>;
+
+      const contents = (videosResponse?.contents as unknown[]) ?? [];
+      for (const item of contents.slice(0, 20)) {
+        const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
+        if (videoData) {
+          const title = (videoData?.title as string) ?? "";
+          const videoStats = (videoData?.stats as Record<string, unknown>) ?? {};
+          const views = Number(videoStats?.views ?? 0);
+          if (title) videoTitles.push(title);
+          if (views > 0) videoViewCounts.push(views);
+        }
+      }
+    } catch (err) {
+      console.warn("[webResearch] YouTube channel videos failed:", err);
     }
-  } catch (err) {
-    // Expected to fail — Instagram blocks bots. Log at debug level only.
-    console.log("[webResearch] Instagram direct fetch blocked (expected):", (err as Error).message?.slice(0, 80));
   }
 
-  // Extract location from all collected text
-  const allText = [bio, ...videoTitles].join(" ");
-  const locationPatterns = [
-    /\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Queens|Manhattan|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i,
-  ];
-  for (const pattern of locationPatterns) {
-    const match = allText.match(pattern);
-    if (match) { location = match[1]; break; }
+  // Step 4: Fallback — YouTube video search if no channel found
+  if (videoTitles.length < 3) {
+    try {
+      const videoSearch = await callDataApi("Youtube/search", {
+        query: { q: `${handle} youtube`, hl: "en", gl: "US" },
+      }) as Record<string, unknown>;
+      const contents = (videoSearch?.contents as unknown[]) ?? [];
+      for (const item of contents.slice(0, 10)) {
+        const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
+        if (videoData) {
+          const title = (videoData?.title as string) ?? "";
+          const desc = (videoData?.descriptionSnippet as string) ?? "";
+          if (title) videoTitles.push(title);
+          if (desc) videoTitles.push(desc);
+        }
+      }
+    } catch (err) {
+      console.warn("[webResearch] YouTube video search fallback failed:", err);
+    }
   }
 
-  const topHashtags = extractHashtags([...videoTitles, bio]);
-  const contentThemes = inferContentThemes(videoTitles, topHashtags, bio);
+  // Compute derived stats
+  const avgViews = videoViewCounts.length > 0
+    ? Math.round(videoViewCounts.reduce((a, b) => a + b, 0) / videoViewCounts.length)
+    : totalViews > 0 && videoCount > 0 ? Math.round(totalViews / videoCount) : 0;
+  const engagementRate = followerCount > 0 && avgViews > 0
+    ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+    : 0;
+
+  const uniqueVideoTitles = Array.from(new Set(videoTitles)).slice(0, 25);
+  const topHashtags = extractHashtags([...uniqueVideoTitles, bio]);
+  const rawKeywords = Array.from(new Set([...channelKeywords, ...extractKeywords([...uniqueVideoTitles, bio])])).slice(0, 40);
+  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio);
+  const contentThemes = inferContentThemes(uniqueVideoTitles, topHashtags, bio);
+
+  const profileUrl = channelId
+    ? `https://www.youtube.com/channel/${channelId}`
+    : `https://www.youtube.com/@${handle}`;
 
   const evidenceSummary = buildCreatorEvidenceSummary({
-    handle,
-    platform: "Instagram",
-    displayName,
-    bio,
-    followerCount,
-    videoCount,
-    totalLikes,
-    location,
-    videoTitles: videoTitles.slice(0, 20),
-    topHashtags,
-    contentThemes,
+    handle, platform: "YouTube", displayName, bio, followerCount, videoCount,
+    totalLikes: 0, totalViews, avgViews, engagementRate, location,
+    videoTitles: uniqueVideoTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
   });
 
   return {
-    handle,
-    platform: "Instagram",
-    displayName,
-    bio,
-    followerCount,
-    videoCount,
-    totalLikes,
-    location,
-    profileUrl: `https://www.instagram.com/${handle}/`,
-    recentVideoTitles: videoTitles.slice(0, 20),
-    topHashtags,
-    contentThemes,
-    evidenceSummary,
+    handle, platform: "YouTube", displayName, bio, followerCount, videoCount,
+    totalLikes: 0, totalViews, avgViews, engagementRate, location,
+    profileUrl, recentVideoTitles: uniqueVideoTitles, topHashtags, rawKeywords,
+    contentThemeLabels, contentThemes, evidenceSummary,
   };
 }
 
@@ -396,36 +516,27 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   if (isUrl) {
     try {
       const html = await fetchHtml(brandNameOrUrl);
-
-      // Extract meta description
       const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
       if (metaDesc) snippets.push(`Website description: ${metaDesc}`);
-
-      // Extract title
       const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
       if (title) snippets.push(`Website title: ${title}`);
-
-      // Extract h1 and h2 tags
       const headings = html.match(/<h[12][^>]*>([^<]+)<\/h[12]>/gi) ?? [];
       for (const h of headings.slice(0, 5)) {
         const text = h.replace(/<[^>]+>/g, "").trim();
         if (text.length > 5) snippets.push(`Heading: ${text}`);
       }
-
-      // Extract about/mission text
       const aboutMatch = html.match(/(?:about|mission|vision|values)[^<]{0,50}<[^>]+>([^<]{30,300})/gi) ?? [];
       for (const m of aboutMatch.slice(0, 3)) {
         const text = m.replace(/<[^>]+>/g, "").trim();
         if (text.length > 20) snippets.push(`About: ${text}`);
       }
-
       description = snippets.join(" | ").slice(0, 1000);
     } catch (err) {
       console.warn("[webResearch] Brand website fetch failed:", err);
     }
   }
 
-  // For brand-name-only input (no URL), search YouTube for brand context
+  // YouTube search for brand context (works for both URL and name-only inputs)
   if (!isUrl || snippets.length < 2) {
     try {
       const ytResponse = await callDataApi("Youtube/search", {
@@ -449,7 +560,6 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     }
   }
 
-  // Build evidence summary
   const evidenceSummary = `
 BRAND RESEARCH EVIDENCE
 =======================
@@ -464,58 +574,51 @@ use your knowledge of this brand/business name to supplement, but clearly ground
 what the evidence shows. Do NOT invent a brand identity that contradicts the evidence.
 `.trim();
 
-  return {
-    brandName,
-    websiteUrl: isUrl ? brandNameOrUrl : "",
-    description,
-    searchSnippets: snippets,
-    evidenceSummary,
-  };
+  return { brandName, websiteUrl: isUrl ? brandNameOrUrl : "", description, searchSnippets: snippets, evidenceSummary };
 }
 
 // ─── Evidence Summary Builder ─────────────────────────────────────────────────
 
 function buildCreatorEvidenceSummary(data: {
-  handle: string;
-  platform: string;
-  displayName: string;
-  bio: string;
-  followerCount: number;
-  videoCount: number;
-  totalLikes: number;
-  location: string;
-  videoTitles: string[];
-  topHashtags: string[];
-  contentThemes: string[];
+  handle: string; platform: string; displayName: string; bio: string;
+  followerCount: number; videoCount: number; totalLikes: number;
+  totalViews: number; avgViews: number; engagementRate: number;
+  location: string; videoTitles: string[]; topHashtags: string[];
+  rawKeywords: string[]; contentThemeLabels: string[]; contentThemes: string[];
 }): string {
   const {
-    handle, platform, displayName, bio, followerCount, videoCount,
-    totalLikes, location, videoTitles, topHashtags, contentThemes,
+    handle, platform, displayName, bio, followerCount, videoCount, totalLikes,
+    totalViews, avgViews, engagementRate, location, videoTitles, topHashtags,
+    rawKeywords, contentThemeLabels, contentThemes,
   } = data;
-
-  const formatNum = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return String(n);
-  };
 
   return `
 CREATOR RESEARCH EVIDENCE — @${handle} (${platform})
 =====================================================
 Display Name: ${displayName}
 Platform: ${platform}
-Profile URL: https://www.${platform.toLowerCase()}.com/@${handle}
 Bio / Signature: "${bio}"
-Location: ${location || "Not specified in bio"}
-Followers: ${formatNum(followerCount)}
-Total Videos: ${videoCount}
-Total Likes: ${formatNum(totalLikes)}
+Location: ${location || "Not specified"}
 
-CONTENT THEMES DETECTED (from actual post analysis):
+STATS:
+  Followers / Subscribers: ${formatNum(followerCount)}
+  Total Videos: ${videoCount}
+  Total Likes / Hearts: ${formatNum(totalLikes)}
+  Total Views: ${formatNum(totalViews)}
+  Avg Views per Video: ${formatNum(avgViews)}
+  Engagement Rate: ${engagementRate}%
+
+CONTENT THEMES (LLM-translated from actual content):
+${contentThemeLabels.map((t) => `  • ${t}`).join("\n")}
+
+RULE-BASED THEMES (cross-reference):
 ${contentThemes.map((t) => `  • ${t}`).join("\n")}
 
-TOP HASHTAGS USED:
-${topHashtags.slice(0, 10).join(", ")}
+TOP KEYWORDS (from video titles/descriptions):
+${rawKeywords.slice(0, 20).join(", ")}
+
+TOP HASHTAGS:
+${topHashtags.slice(0, 15).join(", ")}
 
 ACTUAL VIDEO TITLES / DESCRIPTIONS (${videoTitles.length} posts sampled):
 ${videoTitles.slice(0, 15).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
@@ -523,8 +626,7 @@ ${videoTitles.slice(0, 15).map((t, i) => `  ${i + 1}. ${t}`).join("\n")}
 INSTRUCTIONS FOR ANALYSIS:
 You are analyzing a REAL creator. The data above is scraped directly from their public profile.
 Base your entire cultural analysis on this evidence. Do NOT contradict the evidence.
-For example, if the video titles show food reviews in Toronto, the creator is a food/local culture creator — NOT a travel creator.
-The bio, video titles, and hashtags are ground truth. Analyze them carefully.
+The bio, video titles, keywords, and themes are ground truth. Analyze them carefully.
 `.trim();
 }
 
@@ -536,18 +638,53 @@ export async function researchCreator(
 ): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
-  if (platform === "Instagram") {
-    return researchInstagramCreator(handle);
+  if (platform === "YouTube" || handleOrUrl.includes("youtube.com")) {
+    return researchYouTubeCreator(handle);
   }
 
-  // Default: TikTok (also handles TikTok URLs)
-  if (
-    platform === "TikTok" ||
-    handleOrUrl.includes("tiktok.com") ||
-    !handleOrUrl.includes("instagram.com")
-  ) {
-    return researchTikTokCreator(handle);
+  if (platform === "Multi") {
+    // Run both and merge — use TikTok as primary, supplement with YouTube
+    const [tiktokResult, youtubeResult] = await Promise.allSettled([
+      researchTikTokCreator(handle),
+      researchYouTubeCreator(handle),
+    ]);
+
+    const tiktok = tiktokResult.status === "fulfilled" ? tiktokResult.value : null;
+    const youtube = youtubeResult.status === "fulfilled" ? youtubeResult.value : null;
+
+    if (!tiktok && !youtube) return researchTikTokCreator(handle); // both failed, try again
+    if (!tiktok) return youtube!;
+    if (!youtube) return tiktok;
+
+    // Merge: combine video titles, keywords, hashtags; take best stats
+    const mergedTitles = Array.from(new Set([...tiktok.recentVideoTitles, ...youtube.recentVideoTitles])).slice(0, 30);
+    const mergedHashtags = Array.from(new Set([...tiktok.topHashtags, ...youtube.topHashtags])).slice(0, 20);
+    const mergedKeywords = Array.from(new Set([...tiktok.rawKeywords, ...youtube.rawKeywords])).slice(0, 40);
+    const mergedThemes = Array.from(new Set([...tiktok.contentThemeLabels, ...youtube.contentThemeLabels])).slice(0, 5);
+
+    const merged: CreatorResearchResult = {
+      handle,
+      platform: "Multi",
+      displayName: tiktok.displayName !== handle ? tiktok.displayName : youtube.displayName,
+      bio: tiktok.bio || youtube.bio,
+      followerCount: Math.max(tiktok.followerCount, youtube.followerCount),
+      videoCount: tiktok.videoCount + youtube.videoCount,
+      totalLikes: tiktok.totalLikes,
+      totalViews: tiktok.totalViews + youtube.totalViews,
+      avgViews: Math.max(tiktok.avgViews, youtube.avgViews),
+      engagementRate: Math.max(tiktok.engagementRate, youtube.engagementRate),
+      location: tiktok.location || youtube.location,
+      profileUrl: tiktok.profileUrl,
+      recentVideoTitles: mergedTitles,
+      topHashtags: mergedHashtags,
+      rawKeywords: mergedKeywords,
+      contentThemeLabels: mergedThemes,
+      contentThemes: Array.from(new Set([...tiktok.contentThemes, ...youtube.contentThemes])).slice(0, 5),
+      evidenceSummary: `${tiktok.evidenceSummary}\n\n--- YOUTUBE EVIDENCE ---\n${youtube.evidenceSummary}`,
+    };
+    return merged;
   }
 
-  return researchInstagramCreator(handle);
+  // Default: TikTok
+  return researchTikTokCreator(handle);
 }

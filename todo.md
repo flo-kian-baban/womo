@@ -93,6 +93,18 @@
 - [x] Instagram direct fetch kept as best-effort fallback (logs at debug level when blocked)
 - [x] Verify @mrdavehill correctly identified as comedian/musician via YouTube evidence (integration test PASS: comedy=['comedian','comedy','standup'], music=['guitar','album'], finance=[])
 
+## Enhancement: TikTok + YouTube Focus, Rich Stats, Keywords & Themes
+- [x] Remove Instagram from platform enum and all UI selectors
+- [x] Build dedicated YouTube research pipeline (channel info, video list, stats, keywords)
+- [x] Enrich TikTok research: capture avg views, engagement rate, top video stats
+- [x] Keyword extraction: pull raw keywords from all video titles/descriptions/hashtags
+- [x] Theme translation: map raw keywords → 3-5 named content themes using LLM
+- [x] Add new DB columns: rawKeywords (JSON array), contentThemeLabels (JSON array), avgViews, engagementRate, totalViews
+- [x] Update creator profile card UI to display stats bar (followers, avg views, engagement rate)
+- [x] Update creator profile card UI to display keyword cloud and theme badges
+- [x] Update export (JSON) to include all new fields
+- [x] Explore additional Google/web data sources for brand research enrichment (YouTube search used)
+
 ## Backlog / Future Enhancements (intentionally deferred)
 - [ ] PDF export using server-side rendering
 - [ ] Bulk comparison: one influencer vs. multiple brands
