@@ -403,6 +403,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   viewCounts: number[];
   musicTitles: string[];
   engagementSignals: EngagementSignals;
+  quotaExhausted: boolean;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -411,6 +412,12 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   const viewCounts: number[] = [];
   const musicTitles: string[] = [];
   const seen = new Set<string>();
+  let searchQuotaExhausted = false;
+
+  const isQuotaErr = (err: unknown) => {
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
+  };
 
   // Collect video IDs from TikTok search — author-filtered
   // Each item carries the full engagement snapshot needed for temporal analysis
@@ -519,6 +526,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
         });
       }
     } catch (err) {
+      if (isQuotaErr(err)) searchQuotaExhausted = true;
       console.warn(`[webResearch] TikTok search "${q}" failed:`, err);
     }
   }
@@ -601,7 +609,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
   console.log(`[webResearch] @${handle} engagement signals: commentRate=${(engagementSignals.avgCommentRate*100).toFixed(3)}% saveRate=${(engagementSignals.avgSaveRate*100).toFixed(3)}% originalAudio=${(engagementSignals.originalAudioRate*100).toFixed(0)}%`);
 
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals };
+  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -1106,6 +1114,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   let videoCount = 0;
   let totalLikes = 0;
   let location = "";
+  let quotaExhausted = false;
+
+  // Helper: detect quota exhaustion errors
+  const isQuotaError = (err: unknown): boolean => {
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
+  };
 
   // Step 1: TikTok user info (profile metadata)
   try {
@@ -1127,12 +1142,14 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     const locationMatch = bio.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Calgary|Ottawa|Edmonton|Winnipeg|Quebec|Halifax|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
     if (locationMatch) location = locationMatch[1];
   } catch (err) {
+    if (isQuotaError(err)) quotaExhausted = true;
     console.warn("[webResearch] TikTok user info failed:", err);
   }
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted } = transcriptData;
+  if (searchQuotaExhausted) quotaExhausted = true;
 
   // Step 3: HTML scrape for additional video titles (profile page)
   const htmlTitles: string[] = [];
@@ -1188,9 +1205,23 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Merge all video titles
   const allTitles = Array.from(new Set([...searchTitles, ...htmlTitles, ...popularTitles])).slice(0, 30);
 
-  // Check if we have enough data — only hard-error when we have NOTHING at all
-  // A single title or transcript is enough to attempt a low-confidence analysis
+  // Check if we have enough data to proceed
   const hasAnyData = transcripts.length > 0 || allTitles.length > 0 || followerCount > 0 || bio.length > 0;
+
+  // If quota was exhausted AND we have no data at all, surface a clear retry message
+  if (quotaExhausted && !hasAnyData) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `The TikTok data API is temporarily rate-limited. Please wait 1–2 minutes and try again. (@${handle})`,
+    });
+  }
+
+  // If quota was exhausted but we have some data (e.g. from HTML scrape), continue with what we have
+  if (quotaExhausted) {
+    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with partial data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
+  }
+
+  // Hard error only when truly nothing is available
   if (!hasAnyData) {
     throw new TRPCError({
       code: "NOT_FOUND",
