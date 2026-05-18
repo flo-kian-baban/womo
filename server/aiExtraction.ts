@@ -32,6 +32,7 @@ export interface CreatorExtractionResult {
   lifecyclePhase: "Emergence" | "Growth" | "Maturity" | "Decline";
   barthesNicheMeaning: string;
   turnerLiminalPhase: "Pre-Liminal" | "Liminal" | "Post-Liminal Reintegration";
+  pronouns: "she/her" | "he/him" | "they/them" | "not specified";
   aiSummary: string;
 }
 
@@ -138,7 +139,14 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "lifecyclePhase": "Emergence" | "Growth" | "Maturity" | "Decline" (current lifecycle phase of the niche),
   "barthesNicheMeaning": "This niche used to mean [X] — it is now starting to mean [Y]." OR "No meaning shift detected — core belief remains stable.",
   "turnerLiminalPhase": "Pre-Liminal" | "Liminal" | "Post-Liminal Reintegration" (is this niche community in identity transition?),
-  "aiSummary": "A 2-3 sentence cultural analyst summary covering: (1) this creator's symbolic position and what cultural identity they represent, (2) the nature of their audience relationship and parasocial dynamic grounded in the engagement data, (3) their brand partnership potential and any cultural risks or sensitivities."
+  "pronouns": "she/her" | "he/him" | "they/them" | "not specified".
+    RULE: Infer pronouns from all available evidence in this priority order:
+    1. Explicit self-identification in bio or transcripts (e.g. 'she/her in bio', 'I am a woman', 'as a guy')
+    2. Self-referential language in transcripts (e.g. 'as a girl', 'as a man', 'my boyfriend/girlfriend')
+    3. Display name gender signals (e.g. female-coded names like Sai, Christina, Aisha)
+    4. If no signal is available, use 'not specified'.
+    NEVER default to 'he/him' — if uncertain, use 'not specified'.,
+  "aiSummary": "A 2-3 sentence cultural analyst summary covering: (1) this creator's symbolic position and what cultural identity they represent, (2) the nature of their audience relationship and parasocial dynamic grounded in the engagement data, (3) their brand partnership potential and any cultural risks or sensitivities. Use the correct pronouns throughout."
 }
 
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
@@ -180,6 +188,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             barthesNicheMeaning: { type: "string" },
             turnerLiminalPhase: { type: "string" },
             aiSummary: { type: "string" },
+            pronouns: { type: "string", enum: ["she/her", "he/him", "they/them", "not specified"] },
           },
           required: [
             "handle", "platform", "displayName", "archetype", "recurringThemes",
@@ -187,7 +196,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             "barthesMyth", "culturalCapital", "goffmanStageConsistency", "driftSignal",
             "stuartHallDecoding", "nicheTopicNode", "undergroundDensity", "mainstreamBleed",
             "remixRate", "brandSaturation", "rogersAdopterStage", "creatorNichePosition",
-            "lifecyclePhase", "barthesNicheMeaning", "turnerLiminalPhase", "aiSummary",
+            "lifecyclePhase", "barthesNicheMeaning", "turnerLiminalPhase", "aiSummary", "pronouns",
           ],
           additionalProperties: false,
         },
@@ -337,6 +346,7 @@ export interface NarrativeInput {
   creatorAudienceRelationship: string;
   brandAudienceTribe: string;
   weightPriority: string;
+  creatorPronouns?: string;
 }
 
 export interface NarrativeResult {
@@ -354,10 +364,11 @@ export interface NarrativeResult {
 export async function generateFITNarrative(input: NarrativeInput): Promise<NarrativeResult> {
   const systemPrompt = `You are a senior cultural strategist at Connex, an AI-native influencer marketing platform. 
 You write precise, insightful F.I.T. Score narrative reports that explain the cultural alignment between creators and brands.
-Your writing is sophisticated, uses the correct sociological terminology, and provides actionable strategic insight.`;
+Your writing is sophisticated, uses the correct sociological terminology, and provides actionable strategic insight.
+IMPORTANT: Always use the creator's stated pronouns throughout the narrative. If pronouns are 'not specified', use 'they/them' as a neutral default. Never assume pronouns.`;
 
   const userPrompt = `Generate a F.I.T. Score narrative report for the following match:
-Creator: ${input.creatorHandle} (Archetype: ${input.creatorArchetype})
+Creator: ${input.creatorHandle} (Archetype: ${input.creatorArchetype}, Pronouns: ${input.creatorPronouns ?? "not specified"})
 Brand: ${input.brandName} (Archetype: ${input.brandArchetype})
 F.I.T. Score: ${input.fitScore}/10 — ${input.fitStatus}
 Alignment Score (α): ${input.alignmentRaw.toFixed(1)}/10

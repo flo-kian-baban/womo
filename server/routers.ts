@@ -92,6 +92,7 @@ export const appRouter = router({
           lifecyclePhase: extracted.lifecyclePhase,
           barthesNicheMeaning: extracted.barthesNicheMeaning,
           turnerLiminalPhase: extracted.turnerLiminalPhase,
+          pronouns: extracted.pronouns,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
           // Research metrics from platform APIs
@@ -309,6 +310,7 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorAudienceRelationship: creator.audienceRelationshipType ?? "",
           brandAudienceTribe: brand.audienceTribe ?? "",
           weightPriority: result.weightPriority,
+          creatorPronouns: creator.pronouns ?? "not specified",
         });
 
         // Save match record

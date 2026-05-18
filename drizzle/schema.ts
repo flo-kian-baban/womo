@@ -94,6 +94,9 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   // Symbol Decoder output (pre-processed cultural signals from all creator-authored text)
   decodedSymbols: json("decodedSymbols"), // DecodedSymbols | null — identityClaims, statusSignals, communityReferences, aspirationDrivers, symbolicSummary
 
+  // Creator pronouns (inferred from bio, transcripts, and display name)
+  pronouns: mysqlEnum("pronouns", ["she/her", "he/him", "they/them", "not specified"]),
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),

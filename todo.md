@@ -148,8 +148,8 @@
 - [x] Add author-match guard: normalize both handles (lowercase, strip dots/underscores) for comparison
 - [x] If 0 matching videos found from search, use HTML scrape data only
 - [x] Add evidence summary field showing how many videos were from confirmed author vs search
-- [ ] Test with @malik.the.prince19: verify only his videos are used
-- [ ] Test with @alkhussein and @kaylee.nhi: verify no regression
+- [ ] Test with @malik.the.prince19: verify only his videos are used [live API test — run in app]
+- [ ] Test with @alkhussein and @kaylee.nhi: verify no regression [live API test — run in app]
 
 ## CRITICAL FIX: Remove YouTube Fallback + Hard Error on Insufficient TikTok Data
 - [x] Remove ALL YouTube fallback/supplementary search from TikTok research pipeline
@@ -180,8 +180,8 @@
 - [x] Update CreatorProfileCard UI: show 'Analyzed from X video transcripts' badge
 - [x] Show transcript excerpts in profile card evidence panel
 - [x] Update JSON export to include transcriptCount and transcriptExcerpts (auto-included via full profile JSON.stringify)
-- [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content
-- [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content
+- [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content [live API test — run in app]
+- [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content [live API test — run in app]
 - [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
 
 ## Engagement Signal Architecture Upgrade
@@ -219,5 +219,14 @@
 - [x] Wire FieldExplainer into Lifecycle Phase field
 - [x] Wire FieldExplainer into Liminal Phase (Turner) field
 - [x] Wire FieldExplainer into Meaning Check (Barthes Niche) field
+- [x] Run TypeScript check and all tests
+- [x] Save checkpoint
+
+## Fix: Pronoun Detection in AI Extraction + Narrative
+- [x] Add pronouns field to CreatorExtractionResult schema (he/him, she/her, they/them, not specified)
+- [x] Add pronoun detection instruction to AI extraction prompt: infer from bio, self-references in transcripts, and display name signals
+- [x] Add pronouns column to creator_profiles DB schema and apply migration
+- [x] Update routers.ts to save pronouns field from extraction result
+- [x] Update generateFITNarrative prompt: use extracted pronouns throughout the narrative text
 - [x] Run TypeScript check and all tests
 - [x] Save checkpoint
