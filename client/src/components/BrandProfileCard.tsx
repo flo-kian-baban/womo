@@ -245,6 +245,194 @@ function AudiencePerceptionPanel({ profile }: { profile: BrandProfile }) {
   );
 }
 
+// ─── Brand Symbol Decoder Panel ─────────────────────────────────────────────
+
+interface DecodedSignal {
+  phrase: string;
+  meaning: string;
+  informs: string[];
+  source: "brand" | "audience";
+}
+
+interface BrandDecodedSymbolsData {
+  identityClaims: DecodedSignal[];
+  statusSignals: DecodedSignal[];
+  communityReferences: DecodedSignal[];
+  aspirationDrivers: DecodedSignal[];
+  audienceLanguage: DecodedSignal[];
+  rawKeywords: string[];
+  themeLabels: string[];
+  symbolicVocabulary: string[];
+  symbolicSummary: string;
+}
+
+function SignalGroup({ signals, label, color }: { signals: DecodedSignal[]; label: string; color: string }) {
+  if (!signals || signals.length === 0) return null;
+  return (
+    <div>
+      <div className={`text-[10px] font-semibold tracking-[0.1em] uppercase mb-2 ${color}`}>{label}</div>
+      <div className="space-y-2">
+        {signals.map((s, i) => (
+          <div key={i} className="p-2.5 rounded-lg bg-background/40 border border-border/30">
+            <div className="flex items-start gap-2 mb-1">
+              <span className="text-xs font-mono text-foreground/80 leading-snug flex-1">“{s.phrase}”</span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border flex-shrink-0 ${
+                s.source === "audience"
+                  ? "border-amber-400/30 bg-amber-400/10 text-amber-400/80"
+                  : "border-border/40 bg-secondary text-muted-foreground/60"
+              }`}>{s.source}</span>
+            </div>
+            <p className="text-xs text-muted-foreground/70 leading-relaxed">{s.meaning}</p>
+            {s.informs.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {s.informs.map((f, j) => (
+                  <span key={j} className="text-[9px] px-1.5 py-0.5 rounded bg-primary/10 text-primary/70 border border-primary/20">
+                    {f}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrandSymbolDecoderPanel({ profile }: { profile: BrandProfile }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const decoded = profile.brandDecodedSymbols as BrandDecodedSymbolsData | null;
+  const keywords = (profile.brandRawKeywords as string[] | null) ?? [];
+  const themes = (profile.brandThemeLabels as string[] | null) ?? [];
+  const vocab = (profile.brandSymbolicVocabulary as string[] | null) ?? [];
+
+  const hasData = decoded || keywords.length > 0 || themes.length > 0;
+  if (!hasData) return null;
+
+  const totalSignals = decoded
+    ? (decoded.identityClaims?.length ?? 0) +
+      (decoded.statusSignals?.length ?? 0) +
+      (decoded.communityReferences?.length ?? 0) +
+      (decoded.aspirationDrivers?.length ?? 0) +
+      (decoded.audienceLanguage?.length ?? 0)
+    : 0;
+
+  return (
+    <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-violet-500/10 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-md bg-violet-500/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-violet-400 text-xs">◆</span>
+          </div>
+          <div>
+            <div className="text-xs font-semibold tracking-[0.1em] uppercase text-violet-400/80">
+              Brand Symbol Decoder
+            </div>
+            <div className="text-xs text-muted-foreground/60 mt-0.5">
+              {themes.length > 0 ? themes.join(" · ") : `${totalSignals} cultural signals decoded`}
+            </div>
+          </div>
+        </div>
+        <span className="text-muted-foreground/40 text-xs">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-5 border-t border-violet-500/10">
+
+          {/* Symbolic Summary */}
+          {decoded?.symbolicSummary && (
+            <div className="pt-3">
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-violet-400/70 mb-1.5">
+                Symbolic Summary
+              </div>
+              <blockquote className="border-l-2 border-violet-400/40 pl-3 text-sm text-foreground/80 italic leading-relaxed">
+                {decoded.symbolicSummary}
+              </blockquote>
+            </div>
+          )}
+
+          {/* Theme Labels */}
+          {themes.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-violet-400/70 mb-2">
+                Cultural Themes
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {themes.map((t, i) => (
+                  <span key={i} className="px-2.5 py-1 rounded-full text-xs font-medium border border-violet-400/30 bg-violet-400/10 text-violet-300">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Symbolic Vocabulary */}
+          {vocab.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-violet-400/70 mb-2">
+                Symbolic Vocabulary
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {vocab.map((w, i) => (
+                  <span key={i} className="px-2 py-0.5 rounded-md text-xs border border-border/50 bg-secondary text-foreground/70 font-mono">
+                    {w}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Raw Keywords */}
+          {keywords.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-2">
+                Raw Keywords
+                <span className="ml-2 text-muted-foreground/50 normal-case font-normal tracking-normal">— stored for trend analysis</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {keywords.map((k, i) => (
+                  <span key={i} className="px-1.5 py-0.5 rounded text-[10px] border border-border/30 bg-background/50 text-muted-foreground/60">
+                    {k}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Signal Groups */}
+          {decoded && (
+            <div className="space-y-4">
+              <SignalGroup signals={decoded.identityClaims} label="Identity Claims → Archetype, Brand Type" color="text-violet-400/80" />
+              <SignalGroup signals={decoded.statusSignals} label="Status Signals → Cultural Capital, Symbolic Position" color="text-blue-400/80" />
+              <SignalGroup signals={decoded.communityReferences} label="Community References → Audience Tribe, Emotional Promise" color="text-emerald-400/80" />
+              <SignalGroup signals={decoded.aspirationDrivers} label="Aspiration Drivers → Barthès Myth, Cultural Tension" color="text-orange-400/80" />
+              <SignalGroup signals={decoded.audienceLanguage} label="Audience Language → Stuart Hall Decoding, Goffman Gap" color="text-amber-400/80" />
+            </div>
+          )}
+
+          {/* Methodology note */}
+          <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/15">
+            <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-violet-400/70 mb-1">
+              Trend Analysis Note
+            </div>
+            <p className="text-xs text-muted-foreground/70 leading-relaxed">
+              Keywords, themes, and decoded signals are stored as semantic artifacts at the time of analysis.
+              Over time, comparing these artifacts across brands and creators reveals which shared symbols,
+              values, and vocabulary patterns are driving the most successful partnerships.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BrandProfileCard({ profile, compact = false }: BrandProfileCardProps) {
   return (
     <div className="space-y-6">
@@ -302,6 +490,9 @@ export default function BrandProfileCard({ profile, compact = false }: BrandProf
 
           {/* Audience Perception Panel */}
           <AudiencePerceptionPanel profile={profile} />
+
+          {/* Brand Symbol Decoder Panel */}
+          <BrandSymbolDecoderPanel profile={profile} />
 
           {/* Weight Configuration */}
           <div>

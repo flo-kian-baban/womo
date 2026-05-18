@@ -30,6 +30,7 @@ import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
 import { fetchBrandReviews } from "./reviewResearch";
+import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,11 @@ export interface BrandResearchResult {
   combinedReviewText: string;
   overallRating: number | null;
   totalReviews: number;
+  // Brand Symbol Decoder output
+  brandDecodedSymbols: BrandDecodedSymbols | null;
+  brandRawKeywords: string[];
+  brandThemeLabels: string[];
+  brandSymbolicVocabulary: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1505,12 +1511,35 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     "actually decode the brand, which may differ from the brand's self-presentation.",
   ].filter(Boolean).join("\n").trim();
 
+  // Run Brand Symbol Decoder on website text + review text (non-fatal)
+  let brandDecodedSymbols: BrandDecodedSymbols | null = null;
+  const websiteText = [description, ...snippets].filter(Boolean).join("\n");
+  const reviewText = reviewResult.combinedReviewText;
+  try {
+    if (websiteText || reviewText) {
+      brandDecodedSymbols = await decodeBrandSymbols({
+        brandName,
+        websiteText,
+        reviewText,
+      });
+    }
+  } catch (err) {
+    console.warn("[webResearch] Brand Symbol Decoder failed (non-fatal):", err);
+  }
+
+  // Inject decoded symbols block into evidence summary for AI extraction
+  const decodedSymbolsBlock = brandDecodedSymbols
+    ? `\n\n${formatBrandDecodedSymbolsBlock(brandDecodedSymbols)}`
+    : "";
+
+  const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock;
+
   return {
     brandName,
     websiteUrl: isUrl ? brandNameOrUrl : "",
     description,
     searchSnippets: snippets,
-    evidenceSummary,
+    evidenceSummary: evidenceSummaryWithSymbols,
     yelpRating,
     yelpReviewCount,
     yelpReviewExcerpts,
@@ -1520,6 +1549,10 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     combinedReviewText: reviewResult.combinedReviewText,
     overallRating: reviewResult.overallRating,
     totalReviews: reviewResult.totalReviews,
+    brandDecodedSymbols,
+    brandRawKeywords: brandDecodedSymbols?.rawKeywords ?? [],
+    brandThemeLabels: brandDecodedSymbols?.themeLabels ?? [],
+    brandSymbolicVocabulary: brandDecodedSymbols?.symbolicVocabulary ?? [],
   };
 }
 

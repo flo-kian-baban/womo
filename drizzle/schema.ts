@@ -156,6 +156,16 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   overallRating: float("overallRating"),
   totalReviews: int("totalReviews").default(0),
 
+  // Brand Symbol Decoder — semantic artifacts (mirrors creator-side decodedSymbols)
+  // rawKeywords: flat list of culturally significant words for trend tracking over time
+  brandRawKeywords: json("brandRawKeywords"),       // string[] — 10-30 keywords from website + reviews
+  // themeLabels: 3-5 named cultural themes (LLM-translated from keywords)
+  brandThemeLabels: json("brandThemeLabels"),       // string[] — e.g. ["Local Pride", "Accessible Luxury"]
+  // symbolicVocabulary: the brand's own identity-signalling words
+  brandSymbolicVocabulary: json("brandSymbolicVocabulary"), // string[] — 5-15 items
+  // Full decoded symbols object — mirrors creator decodedSymbols for direct field comparison
+  brandDecodedSymbols: json("brandDecodedSymbols"),  // BrandDecodedSymbols | null
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),

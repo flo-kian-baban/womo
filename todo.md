@@ -275,3 +275,14 @@
 - [x] Update BrandProfileCard UI: show Brand Archetype badge (Trust/Community/Momentum) with archetype description and weight signature
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## Brand Symbol Decoder — Mirrored Semantic Artifact Pipeline
+- [x] Audit creator-side decodedSymbols schema and Symbol Decoder prompt to establish exact field spec
+- [x] Write brandSymbolDecoder.ts: LLM prompt converts website + review text into structured JSON with identityClaims, statusSignals, communityReferences, aspirationDrivers, audienceLanguage, rawKeywords, themeLabels, symbolicVocabulary, symbolicSummary — all mirroring creator schema
+- [x] Update drizzle/schema.ts: add brandRawKeywords, brandThemeLabels, brandSymbolicVocabulary, brandDecodedSymbols (json) columns to brand_profiles
+- [x] Generate Drizzle migration (0007_tan_ronan.sql) and apply via webdev_execute_sql
+- [x] Wire decodeBrandSymbols() into webResearch.ts researchBrand() — runs on website text + review text; injects formatBrandDecodedSymbolsBlock into evidenceSummary
+- [x] Update routers.ts brand.analyze route to save brandRawKeywords, brandThemeLabels, brandSymbolicVocabulary, brandDecodedSymbols
+- [x] Update BrandProfileCard UI: add Brand Symbol Decoder collapsible panel with symbolic summary, cultural themes, symbolic vocabulary, raw keywords, and all 5 signal groups (identity, status, community, aspiration, audience)
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint

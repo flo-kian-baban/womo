@@ -157,6 +157,12 @@ export const appRouter = router({
           overallRating?: number | null;
           totalReviews?: number;
         } = {};
+        let symbolFields: {
+          brandRawKeywords?: string[];
+          brandThemeLabels?: string[];
+          brandSymbolicVocabulary?: string[];
+          brandDecodedSymbols?: Record<string, unknown>;
+        } = {};
         try {
           const brandResearch = await researchBrand(input.brandNameOrUrl);
           brandEvidenceSummary = brandResearch.evidenceSummary;
@@ -171,6 +177,15 @@ export const appRouter = router({
             overallRating: brandResearch.overallRating,
             totalReviews: brandResearch.totalReviews,
           };
+          // Brand Symbol Decoder fields
+          if (brandResearch.brandDecodedSymbols) {
+            symbolFields = {
+              brandRawKeywords: brandResearch.brandRawKeywords,
+              brandThemeLabels: brandResearch.brandThemeLabels,
+              brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
+              brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
+            };
+          }
         } catch (err) {
           console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
         }
@@ -197,6 +212,7 @@ export const appRouter = router({
           weightGamma: weights.gamma,
           weightPriority: weights.priority,
           ...reviewFields,
+          ...symbolFields,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
         });
