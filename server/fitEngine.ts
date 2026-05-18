@@ -106,81 +106,249 @@ export function archetypeClashes(brandArchetype: string, creatorArchetype: strin
   return ARCHETYPE_COMPATIBILITY[brand].clashesWith.includes(creator);
 }
 
+// ─── Brand Archetype Classification ─────────────────────────────────────────
+// Source: Chapter 3 — Brand Archetypes, Category Logic & Weight Selection
+
+export type BrandArchetype = "Trust" | "Community" | "Momentum";
+
+export const BRAND_ARCHETYPE_DESCRIPTIONS: Record<BrandArchetype, string> = {
+  Trust: "Built on credibility, safety, and reliability. The consumer must believe in the brand before they will act. Alignment is dominant (α=0.5), Stability is elevated (γ=0.3–0.4), Pulse is suppressed (β=0.1–0.2).",
+  Community: "Built on belonging, identity, and shared values. The consumer identifies with the brand. Alignment is primary (α=0.4–0.5), Stability is secondary (γ=0.3), Pulse is moderate (β=0.2–0.3).",
+  Momentum: "Built on energy, relevance, and cultural presence. The consumer wants what is exciting right now. Pulse is dominant (β=0.4–0.6), Alignment is secondary (α=0.2–0.4), Stability is suppressed (γ=0.2).",
+};
+
+// Category → Brand Archetype mapping (from Chapter 3 Category Logic table)
+export const CATEGORY_ARCHETYPE_MAP: Record<string, BrandArchetype> = {
+  // Trust brands
+  "Medical / Health": "Trust",
+  "Legal Services": "Trust",
+  "Financial Services": "Trust",
+  "Insurance": "Trust",
+  "Mental Health": "Trust",
+  "Children's Products": "Trust",
+  "Home Renovation": "Trust",
+  // Community brands
+  "Local Gym / Studio": "Community",
+  "Local Boutique Retail": "Community",
+  "Specialty Café": "Community",
+  "Wellness / Coaching": "Community",
+  "Pet Services": "Community",
+  "Youth Sports": "Community",
+  "Hair Care": "Community",
+  "Home Décor": "Community",
+  // Momentum brands
+  "Makeup / Color": "Momentum",
+  "QSR / Fast Food": "Momentum",
+  "Seasonal Campaign": "Momentum",
+  "Streetwear / Fashion": "Momentum",
+  "Packaged Food / CPG": "Momentum",
+  // Hybrid (primary archetype listed)
+  "Skincare": "Community",   // Community → Trust
+  "Craft Beverage": "Momentum", // Momentum → Community
+  "DTC / E-Commerce": "Momentum", // Momentum → Community
+  "Fine Dining": "Trust",    // Trust → Community
+  "Boutique Hotel": "Community", // Community → Trust
+  "Fitness Equipment": "Community", // Community → Momentum
+};
+
 // ─── Brand Weight Table ───────────────────────────────────────────────────────
-// Source: Brand Weighting sheet, rows 18–86
+// Source: Chapter 3 — Category Logic + Weight Selection Rules
+// Weights follow archetype signature patterns:
+//   Trust:     α=0.5, β=0.1–0.2, γ=0.3–0.4
+//   Community: α=0.4–0.5, β=0.2–0.3, γ=0.3
+//   Momentum:  α=0.2–0.4, β=0.4–0.6, γ=0.2
+// All weights sum to 1.0. No weight below 0.1 (Rule 3).
 
 export interface BrandWeights {
   alpha: number;
   beta: number;
   gamma: number;
   priority: string;
+  brandArchetype: BrandArchetype;
 }
 
 export const BRAND_WEIGHT_TABLE: Record<string, BrandWeights> = {
-  // Retail & E-Commerce
-  "Retail — Local Boutique": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community identity" },
-  "Retail — E-Commerce / DTC Product": { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Conversion + reach" },
-  "Retail — Seasonal / Holiday Campaign": { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse" },
-  // Beauty & Personal Care
-  "Beauty — Skincare": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + value alignment" },
-  "Beauty — Makeup / Color": { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Trend currency" },
-  "Beauty — Hair Care": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community authority" },
-  "Beauty — Salon / Local Service": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Local trust" },
-  // Home & Lifestyle
-  "Home — Interior Design / Décor": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Aesthetic alignment" },
-  "Home — Cleaning / Household Products": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Relatability + trust" },
-  "Home — Renovation / Contracting": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Credibility + safety" },
-  // Health & Medical Services
-  "Medical — General Practice / Clinic": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety" },
-  "Medical — Aesthetics / MedSpa": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Aspiration + trust" },
-  "Medical — Chiropractic / PT / Allied Health": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Authority + lifestyle fit" },
-  "Mental Health — Private Practice / App": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + consistency" },
-  // Professional Services
-  "Legal — Personal Injury / Consumer Law": { alpha: 0.4, beta: 0.2, gamma: 0.4, priority: "Authority + trust" },
-  "Financial — Personal Finance / Budgeting": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value alignment" },
-  "Financial — Local Accounting / Tax": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability" },
-  "Real Estate — Residential Agent": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community trust" },
-  "Real Estate — Property Developer": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Aspiration + authority" },
-  "Insurance — Local Broker": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety" },
+  // ── TRUST BRANDS ─────────────────────────────────────────────────────────
+  // Medical / Health
+  "Medical — General Practice / Clinic":        { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Medical — Aesthetics / MedSpa":              { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Aspiration + trust",           brandArchetype: "Trust" },
+  "Medical — Chiropractic / PT / Allied Health":{ alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Authority + lifestyle fit",    brandArchetype: "Trust" },
+  "Medical — Dental / Orthodontics":            { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Medical — Optometry / Vision Care":          { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Medical — Pharmacy / Health Retail":         { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + accessibility",       brandArchetype: "Trust" },
+  "Mental Health — Private Practice / App":     { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + consistency",         brandArchetype: "Trust" },
+  "Mental Health — Wellness Platform":          { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + community",           brandArchetype: "Trust" },
+  // Legal Services
+  "Legal — Personal Injury / Consumer Law":     { alpha: 0.4, beta: 0.2, gamma: 0.4, priority: "Authority + trust",           brandArchetype: "Trust" },
+  "Legal — Corporate / Commercial Law":         { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability",           brandArchetype: "Trust" },
+  "Legal — Family Law":                         { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Legal — Immigration Law":                    { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + community",           brandArchetype: "Trust" },
+  "Legal — Criminal Defence":                   { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Authority + trust",           brandArchetype: "Trust" },
+  // Financial Services
+  "Financial — Personal Finance / Budgeting":   { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value alignment",             brandArchetype: "Trust" },
+  "Financial — Local Accounting / Tax":         { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability",           brandArchetype: "Trust" },
+  "Financial — Wealth Management / Investment": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Financial — Mortgage / Lending":             { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + aspiration",          brandArchetype: "Trust" },
+  "Financial — Fintech / Banking App":          { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Trust + innovation",          brandArchetype: "Trust" },
+  // Insurance
+  "Insurance — Local Broker":                   { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Insurance — Life / Health Insurance":        { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Insurance — Auto / Home Insurance":          { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + reliability",         brandArchetype: "Trust" },
+  // Home Renovation / Construction
+  "Home — Renovation / Contracting":            { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Credibility + safety",        brandArchetype: "Trust" },
+  "Home — Architecture / Interior Design Firm": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Aesthetic authority",         brandArchetype: "Trust" },
+  // Children's & Family
+  "Family — Children's Products":               { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Safety + value alignment",    brandArchetype: "Trust" },
+  "Family — Baby / Infant Care":                { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Family — Parenting / Education Platform":    { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + community",           brandArchetype: "Trust" },
+  // Education (Trust-leaning)
+  "Education — Local Tutoring / School":        { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability",           brandArchetype: "Trust" },
+  "Education — University / College":           { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Authority + trust",           brandArchetype: "Trust" },
+  "Education — Professional Certification":     { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Authority + credibility",     brandArchetype: "Trust" },
+  // Real Estate
+  "Real Estate — Residential Agent":            { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community trust",             brandArchetype: "Trust" },
+  "Real Estate — Property Developer":           { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Aspiration + authority",      brandArchetype: "Trust" },
+  "Real Estate — Commercial / Investment":      { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability",           brandArchetype: "Trust" },
+  "Real Estate — Property Management":          { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + reliability",         brandArchetype: "Trust" },
+  // Automotive (Trust-leaning)
+  "Automotive — Dealership / Sales":            { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Trust + aspiration",          brandArchetype: "Trust" },
+  "Automotive — Repair / Service":              { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + reliability",         brandArchetype: "Trust" },
+
+  // ── COMMUNITY BRANDS ─────────────────────────────────────────────────────
   // Fitness & Sports
-  "Fitness — Local Gym / Studio": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community identity" },
-  "Fitness — Equipment / Apparel": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Authority + momentum" },
-  "Sports — Youth / Amateur Club": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community values" },
-  // Food & Beverage
-  "F&B — Specialty Coffee / Café": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Lifestyle alignment" },
-  "F&B — Craft Beverage / Alcohol": { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Culture + momentum" },
-  "F&B — Packaged Food / CPG": { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + relevance" },
-  "F&B — Health Food / Organic": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value alignment" },
-  // Education & Coaching
-  "Education — Online Course / Creator": { alpha: 0.5, beta: 0.3, gamma: 0.2, priority: "Authority alignment" },
-  "Education — Local Tutoring / School": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + stability" },
-  "Coaching — Business / Life Coach": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value + authority" },
-  // Pet & Family
-  "Pet — Products / Accessories": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community fit" },
-  "Pet — Veterinary / Local Service": { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety" },
-  "Family — Children's Products": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Safety + value alignment" },
-  // Travel & Hospitality
-  "Travel — Local Tourism / Experience": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Lifestyle fit" },
-  "Travel — Boutique Hotel / B&B": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Aesthetic alignment" },
-  "Travel — Tour Operator / Activity": { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + excitement" },
-  // Fashion
-  "Fashion — Heritage / Luxury": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Semantic purity" },
-  "Fashion — Trend-First / Streetwear": { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Cultural momentum" },
-  "Fashion — Accessible / Mid-Market": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Balanced reach" },
-  // Campaign Types
-  "Long-Term Ambassador": { alpha: 0.4, beta: 0.2, gamma: 0.4, priority: "Identity stability" },
-  "Product Launch": { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + relevance" },
-  // Restaurant
-  "Restaurant — Casual Dining": { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community trust" },
-  "Restaurant — Fine Dining / Experiential": { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Semantic purity" },
-  "Restaurant — QSR / Fast Food": { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Viral momentum" },
-  "Restaurant — QSR / Limited-Time Activation": { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse" },
+  "Fitness — Local Gym / Studio":               { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community identity",          brandArchetype: "Community" },
+  "Fitness — Equipment / Apparel":              { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Authority + momentum",         brandArchetype: "Community" },
+  "Fitness — Online Training / App":            { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community + authority",        brandArchetype: "Community" },
+  "Sports — Youth / Amateur Club":              { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community values",             brandArchetype: "Community" },
+  "Sports — Professional Team / League":        { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community identity",          brandArchetype: "Community" },
+  "Sports — Outdoor / Adventure":               { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Lifestyle alignment",          brandArchetype: "Community" },
+  // Retail (Community-leaning)
+  "Retail — Local Boutique":                    { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community identity",          brandArchetype: "Community" },
+  "Retail — Specialty / Niche Retail":          { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community fit",               brandArchetype: "Community" },
+  "Retail — Thrift / Vintage":                  { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Cultural identity",           brandArchetype: "Community" },
+  // Beauty (Community-leaning)
+  "Beauty — Skincare":                          { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + value alignment",      brandArchetype: "Community" },
+  "Beauty — Hair Care":                         { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community authority",          brandArchetype: "Community" },
+  "Beauty — Salon / Local Service":             { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Local trust",                 brandArchetype: "Community" },
+  "Beauty — Natural / Clean Beauty":            { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Values alignment",            brandArchetype: "Community" },
+  "Beauty — Men's Grooming":                    { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community identity",          brandArchetype: "Community" },
+  // Food & Beverage (Community-leaning)
+  "F&B — Specialty Coffee / Café":              { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Lifestyle alignment",          brandArchetype: "Community" },
+  "F&B — Health Food / Organic":                { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value alignment",             brandArchetype: "Community" },
+  "F&B — Farmers Market / Local Produce":       { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community + values",          brandArchetype: "Community" },
+  "F&B — Specialty / Ethnic Grocery":           { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Cultural identity",           brandArchetype: "Community" },
+  // Home & Lifestyle (Community-leaning)
+  "Home — Interior Design / Décor":             { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Aesthetic alignment",          brandArchetype: "Community" },
+  "Home — Cleaning / Household Products":       { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Relatability + trust",         brandArchetype: "Community" },
+  "Home — Smart Home / Technology":             { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Innovation + trust",           brandArchetype: "Community" },
+  // Pet
+  "Pet — Products / Accessories":               { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community fit",               brandArchetype: "Community" },
+  "Pet — Veterinary / Local Service":           { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + safety",              brandArchetype: "Trust" },
+  "Pet — Food / Nutrition":                     { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + community",           brandArchetype: "Community" },
+  // Coaching & Wellness
+  "Coaching — Business / Life Coach":           { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Value + authority",           brandArchetype: "Community" },
+  "Coaching — Nutrition / Dietitian":           { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Authority + community",        brandArchetype: "Community" },
+  "Coaching — Relationship / Dating":           { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Trust + identity",            brandArchetype: "Community" },
+  // Travel & Hospitality (Community-leaning)
+  "Travel — Boutique Hotel / B&B":              { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Aesthetic alignment",          brandArchetype: "Community" },
+  "Travel — Local Tourism / Experience":        { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Lifestyle fit",               brandArchetype: "Community" },
+  "Travel — Eco / Sustainable Tourism":         { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Values alignment",            brandArchetype: "Community" },
+  // Fashion (Community-leaning)
+  "Fashion — Heritage / Luxury":                { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Semantic purity",             brandArchetype: "Community" },
+  "Fashion — Accessible / Mid-Market":          { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Balanced reach",              brandArchetype: "Community" },
+  "Fashion — Sustainable / Ethical":            { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Values alignment",            brandArchetype: "Community" },
+  // Education (Community-leaning)
+  "Education — Online Course / Creator":        { alpha: 0.5, beta: 0.3, gamma: 0.2, priority: "Authority alignment",          brandArchetype: "Community" },
+  // Nonprofit & Cause
+  "Nonprofit — Cause Marketing":                { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Values alignment",            brandArchetype: "Community" },
+  "Nonprofit — Community Organisation":         { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Community identity",          brandArchetype: "Community" },
+  "Government / Public Sector":                 { alpha: 0.5, beta: 0.1, gamma: 0.4, priority: "Trust + authority",           brandArchetype: "Trust" },
+  // Restaurant (Community-leaning)
+  "Restaurant — Casual Dining":                 { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community trust",             brandArchetype: "Community" },
+  "Restaurant — Fine Dining / Experiential":    { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Semantic purity",             brandArchetype: "Community" },
+  "Restaurant — Ethnic / Cultural":             { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Cultural identity",           brandArchetype: "Community" },
+  "Restaurant — Brunch / Café Culture":         { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Lifestyle alignment",          brandArchetype: "Community" },
+  "Restaurant — Food Truck / Pop-Up":           { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Culture + momentum",           brandArchetype: "Momentum" },
+
+  // ── MOMENTUM BRANDS ──────────────────────────────────────────────────────
+  // Beauty (Momentum-leaning)
+  "Beauty — Makeup / Color":                    { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Trend currency",              brandArchetype: "Momentum" },
+  "Beauty — Fragrance / Luxury Beauty":         { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Aspiration + momentum",        brandArchetype: "Momentum" },
+  "Beauty — Nail / Body Art":                   { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Trend currency",              brandArchetype: "Momentum" },
+  // Retail (Momentum-leaning)
+  "Retail — E-Commerce / DTC Product":          { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Conversion + reach",          brandArchetype: "Momentum" },
+  "Retail — Seasonal / Holiday Campaign":       { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse",               brandArchetype: "Momentum" },
+  "Retail — Flash Sale / Discount":             { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse",               brandArchetype: "Momentum" },
+  // Food & Beverage (Momentum-leaning)
+  "F&B — Craft Beverage / Alcohol":             { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Culture + momentum",           brandArchetype: "Momentum" },
+  "F&B — Packaged Food / CPG":                  { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + relevance",           brandArchetype: "Momentum" },
+  "F&B — Energy Drink / Supplement":            { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Viral momentum",              brandArchetype: "Momentum" },
+  "F&B — Food Delivery / Ghost Kitchen":        { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Reach + relevance",           brandArchetype: "Momentum" },
+  "F&B — Snack / Confectionery":                { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Trend currency",              brandArchetype: "Momentum" },
+  // Restaurant (Momentum-leaning)
+  "Restaurant — QSR / Fast Food":               { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Viral momentum",              brandArchetype: "Momentum" },
+  "Restaurant — QSR / Limited-Time Activation": { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse",               brandArchetype: "Momentum" },
+  // Fashion (Momentum-leaning)
+  "Fashion — Trend-First / Streetwear":         { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Cultural momentum",           brandArchetype: "Momentum" },
+  "Fashion — Fast Fashion":                     { alpha: 0.2, beta: 0.6, gamma: 0.2, priority: "Maximum pulse",               brandArchetype: "Momentum" },
+  "Fashion — Activewear / Athleisure":          { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Culture + momentum",           brandArchetype: "Momentum" },
+  // Tech & Gaming
+  "Tech — SaaS / App":                          { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Innovation + reach",           brandArchetype: "Momentum" },
+  "Tech — Consumer Electronics":                { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Trend currency",              brandArchetype: "Momentum" },
+  "Tech — Gaming / Esports":                    { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Cultural momentum",           brandArchetype: "Momentum" },
+  "Tech — Creator Tools / Platform":            { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Community + innovation",       brandArchetype: "Momentum" },
+  // Entertainment & Media
+  "Entertainment — Streaming / OTT":            { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Reach + relevance",           brandArchetype: "Momentum" },
+  "Entertainment — Music / Artist":             { alpha: 0.4, beta: 0.4, gamma: 0.2, priority: "Cultural momentum",           brandArchetype: "Momentum" },
+  "Entertainment — Event / Festival":           { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Viral momentum",              brandArchetype: "Momentum" },
+  "Entertainment — Podcast / Media Brand":      { alpha: 0.4, beta: 0.3, gamma: 0.3, priority: "Community + reach",           brandArchetype: "Momentum" },
+  // Travel (Momentum-leaning)
+  "Travel — Tour Operator / Activity":          { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + excitement",          brandArchetype: "Momentum" },
+  "Travel — Airline / Transport":               { alpha: 0.3, beta: 0.5, gamma: 0.2, priority: "Reach + relevance",           brandArchetype: "Momentum" },
+  // Campaign Types (modifiers applied on top of brand type weights)
+  "Long-Term Ambassador":                       { alpha: 0.4, beta: 0.2, gamma: 0.4, priority: "Identity stability",          brandArchetype: "Community" },
+  "Product Launch":                             { alpha: 0.3, beta: 0.4, gamma: 0.3, priority: "Reach + relevance",           brandArchetype: "Momentum" },
 };
 
-export const DEFAULT_WEIGHTS: BrandWeights = { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Cultural alignment" };
+export const DEFAULT_WEIGHTS: BrandWeights = { alpha: 0.5, beta: 0.2, gamma: 0.3, priority: "Cultural alignment", brandArchetype: "Community" };
 
-export function getBrandWeights(brandType: string): BrandWeights {
-  return BRAND_WEIGHT_TABLE[brandType] ?? DEFAULT_WEIGHTS;
+/**
+ * Campaign type modifiers (Chapter 3, Rule 5).
+ * Long-Term Ambassador: γ +0.1, β -0.1 (stability more critical over 12+ months)
+ * Product Launch: β +0.1, γ -0.1 (cultural amplification needed now)
+ * Weights are clamped to minimum 0.1 and re-normalised to sum to 1.0.
+ */
+export function applyBrandCampaignModifier(
+  weights: BrandWeights,
+  campaignType: string
+): BrandWeights {
+  let { alpha, beta, gamma } = weights;
+
+  if (campaignType === "Long-Term Ambassador") {
+    beta = Math.max(0.1, beta - 0.1);
+    gamma = Math.min(0.8, gamma + 0.1);
+  } else if (campaignType === "Product Launch") {
+    beta = Math.min(0.8, beta + 0.1);
+    gamma = Math.max(0.1, gamma - 0.1);
+  }
+
+  // Re-normalise to ensure sum = 1.0
+  const total = alpha + beta + gamma;
+  if (Math.abs(total - 1.0) > 0.001) {
+    alpha = Math.round((alpha / total) * 10) / 10;
+    beta = Math.round((beta / total) * 10) / 10;
+    gamma = Math.round((1.0 - alpha - beta) * 10) / 10;
+  }
+
+  return { ...weights, alpha, beta, gamma };
+}
+
+export function getBrandWeights(brandType: string, campaignType?: string): BrandWeights {
+  const base = BRAND_WEIGHT_TABLE[brandType] ?? DEFAULT_WEIGHTS;
+  if (!campaignType || campaignType === "Heritage/Luxury" || campaignType === "Trend-First") {
+    return base;
+  }
+  return applyBrandCampaignModifier(base, campaignType);
 }
 
 // ─── Rogers Adoption Curve → Base Score ──────────────────────────────────────

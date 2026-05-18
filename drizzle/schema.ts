@@ -127,6 +127,9 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   culturalTension: text("culturalTension"), // "This brand exists in the tension between _ and _."
   barthesMyth: text("barthesMyth"), // "This brand normalizes the belief that _."
 
+  // Brand Archetype Classification (Trust / Community / Momentum) — Chapter 3 logic
+  brandArchetypeClassification: mysqlEnum("brandArchetypeClassification", ["Trust", "Community", "Momentum"]),
+
   // Brand type drives α/β/γ weight selection
   brandType: varchar("brandType", { length: 128 }),
   campaignType: mysqlEnum("campaignType", [

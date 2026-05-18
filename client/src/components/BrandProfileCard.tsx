@@ -24,6 +24,27 @@ const WEIGHT_FIELDS = [
   { key: "weightPriority", label: "Weight Priority", type: "text" },
 ];
 
+const BRAND_ARCHETYPE_META: Record<string, { color: string; icon: string; description: string; signature: string }> = {
+  Trust: {
+    color: "text-blue-400 border-blue-400/30 bg-blue-400/10",
+    icon: "⚔️",
+    description: "Built on credibility, safety, and reliability. The consumer must believe before they act.",
+    signature: "α=0.5 dominant · γ elevated · β suppressed",
+  },
+  Community: {
+    color: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10",
+    icon: "🤝",
+    description: "Built on belonging, identity, and shared values. The consumer identifies with the brand.",
+    signature: "α=0.4–0.5 dominant · γ=0.3 · β moderate",
+  },
+  Momentum: {
+    color: "text-orange-400 border-orange-400/30 bg-orange-400/10",
+    icon: "⚡",
+    description: "Built on energy, relevance, and cultural presence. The consumer wants what is exciting right now.",
+    signature: "β=0.4–0.6 dominant · α secondary · γ suppressed",
+  },
+};
+
 function FieldValue({ value, type }: { value: unknown; type: string }) {
   if (value === null || value === undefined) {
     return <span className="text-muted-foreground/40 text-sm italic">—</span>;
@@ -288,8 +309,25 @@ export default function BrandProfileCard({ profile, compact = false }: BrandProf
               <h4 className="text-xs font-semibold tracking-[0.1em] uppercase text-muted-foreground">
                 Weight Configuration
               </h4>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">α/β/γ Weights from Brand Type Table</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">α/β/γ Weights from Brand Type Table — Chapter 3 Logic</p>
             </div>
+            {/* Brand Archetype Classification */}
+            {profile.brandArchetypeClassification && (() => {
+              const meta = BRAND_ARCHETYPE_META[profile.brandArchetypeClassification];
+              if (!meta) return null;
+              return (
+                <div className={`mb-4 p-3 rounded-xl border ${meta.color}`}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-base">{meta.icon}</span>
+                    <span className={`text-xs font-bold tracking-[0.08em] uppercase ${meta.color.split(" ")[0]}`}>
+                      {profile.brandArchetypeClassification} Brand
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground/80 leading-relaxed mb-1">{meta.description}</p>
+                  <p className={`text-[10px] font-mono ${meta.color.split(" ")[0]} opacity-70`}>{meta.signature}</p>
+                </div>
+              );
+            })()}
             <div className="space-y-3">
               {WEIGHT_FIELDS.map((field) => {
                 const value = profile[field.key as keyof BrandProfile];

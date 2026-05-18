@@ -177,12 +177,14 @@ export const appRouter = router({
 
         // Step 2: AI extraction grounded in real evidence
         const extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
-        const weights = getBrandWeights(extracted.brandType);
+        // Apply campaign modifier (Rule 5) when campaignType is Long-Term Ambassador or Product Launch
+        const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
         await createBrandProfile({
           brandName: extracted.brandName,
           brandUrl: input.brandNameOrUrl.startsWith("http") ? input.brandNameOrUrl : undefined,
           category: extracted.category,
           archetype: extracted.archetype,
+          brandArchetypeClassification: extracted.brandArchetypeClassification,
           emotionalPromise: extracted.emotionalPromise,
           visualLanguage: extracted.visualLanguage,
           audienceTribe: extracted.audienceTribe,

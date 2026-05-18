@@ -1,0 +1,1 @@
+ALTER TABLE `brand_profiles` ADD `brandArchetypeClassification` enum('Trust','Community','Momentum');

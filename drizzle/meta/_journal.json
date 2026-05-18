@@ -43,6 +43,13 @@
       "when": 1779128712940,
       "tag": "0005_furry_rocket_raccoon",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1779129743226,
+      "tag": "0006_flat_blindfold",
+      "breakpoints": true
     }
   ]
 }

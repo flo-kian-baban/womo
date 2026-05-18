@@ -228,6 +228,7 @@ export interface BrandExtractionResult {
   brandName: string;
   category: string;
   archetype: string;
+  brandArchetypeClassification: "Trust" | "Community" | "Momentum";
   emotionalPromise: string;
   visualLanguage: string[];
   audienceTribe: string;
@@ -242,23 +243,85 @@ export async function extractBrandProfile(
   brandNameOrUrl: string,
   evidenceSummary?: string
 ): Promise<BrandExtractionResult> {
+  // Full brand type list — mirrors BRAND_WEIGHT_TABLE in fitEngine.ts
   const brandTypeOptions = [
-    "Retail — Local Boutique", "Retail — E-Commerce / DTC Product", "Retail — Seasonal / Holiday Campaign",
-    "Beauty — Skincare", "Beauty — Makeup / Color", "Beauty — Hair Care", "Beauty — Salon / Local Service",
-    "Home — Interior Design / Décor", "Home — Cleaning / Household Products", "Home — Renovation / Contracting",
-    "Medical — General Practice / Clinic", "Medical — Aesthetics / MedSpa", "Medical — Chiropractic / PT / Allied Health",
-    "Mental Health — Private Practice / App", "Legal — Personal Injury / Consumer Law",
+    // Trust brands — Medical
+    "Medical — General Practice / Clinic", "Medical — Aesthetics / MedSpa",
+    "Medical — Chiropractic / PT / Allied Health", "Medical — Dental / Orthodontics",
+    "Medical — Optometry / Vision Care", "Medical — Pharmacy / Health Retail",
+    "Mental Health — Private Practice / App", "Mental Health — Wellness Platform",
+    // Trust brands — Legal
+    "Legal — Personal Injury / Consumer Law", "Legal — Corporate / Commercial Law",
+    "Legal — Family Law", "Legal — Immigration Law", "Legal — Criminal Defence",
+    // Trust brands — Financial
     "Financial — Personal Finance / Budgeting", "Financial — Local Accounting / Tax",
-    "Real Estate — Residential Agent", "Real Estate — Property Developer", "Insurance — Local Broker",
-    "Fitness — Local Gym / Studio", "Fitness — Equipment / Apparel", "Sports — Youth / Amateur Club",
-    "F&B — Specialty Coffee / Café", "F&B — Craft Beverage / Alcohol", "F&B — Packaged Food / CPG", "F&B — Health Food / Organic",
-    "Education — Online Course / Creator", "Education — Local Tutoring / School", "Coaching — Business / Life Coach",
-    "Pet — Products / Accessories", "Pet — Veterinary / Local Service", "Family — Children's Products",
-    "Travel — Local Tourism / Experience", "Travel — Boutique Hotel / B&B", "Travel — Tour Operator / Activity",
-    "Fashion — Heritage / Luxury", "Fashion — Trend-First / Streetwear", "Fashion — Accessible / Mid-Market",
+    "Financial — Wealth Management / Investment", "Financial — Mortgage / Lending",
+    "Financial — Fintech / Banking App",
+    // Trust brands — Insurance
+    "Insurance — Local Broker", "Insurance — Life / Health Insurance", "Insurance — Auto / Home Insurance",
+    // Trust brands — Home / Construction
+    "Home — Renovation / Contracting", "Home — Architecture / Interior Design Firm",
+    // Trust brands — Family / Children
+    "Family — Children's Products", "Family — Baby / Infant Care", "Family — Parenting / Education Platform",
+    // Trust brands — Education
+    "Education — Local Tutoring / School", "Education — University / College",
+    "Education — Professional Certification",
+    // Trust brands — Real Estate
+    "Real Estate — Residential Agent", "Real Estate — Property Developer",
+    "Real Estate — Commercial / Investment", "Real Estate — Property Management",
+    // Trust brands — Automotive
+    "Automotive — Dealership / Sales", "Automotive — Repair / Service",
+    // Trust brands — Government
+    "Government / Public Sector",
+    // Community brands — Fitness & Sports
+    "Fitness — Local Gym / Studio", "Fitness — Equipment / Apparel", "Fitness — Online Training / App",
+    "Sports — Youth / Amateur Club", "Sports — Professional Team / League", "Sports — Outdoor / Adventure",
+    // Community brands — Retail
+    "Retail — Local Boutique", "Retail — Specialty / Niche Retail", "Retail — Thrift / Vintage",
+    // Community brands — Beauty
+    "Beauty — Skincare", "Beauty — Hair Care", "Beauty — Salon / Local Service",
+    "Beauty — Natural / Clean Beauty", "Beauty — Men's Grooming",
+    // Community brands — Food & Beverage
+    "F&B — Specialty Coffee / Café", "F&B — Health Food / Organic",
+    "F&B — Farmers Market / Local Produce", "F&B — Specialty / Ethnic Grocery",
+    // Community brands — Home & Lifestyle
+    "Home — Interior Design / Décor", "Home — Cleaning / Household Products", "Home — Smart Home / Technology",
+    // Community brands — Pet
+    "Pet — Products / Accessories", "Pet — Veterinary / Local Service", "Pet — Food / Nutrition",
+    // Community brands — Coaching & Wellness
+    "Coaching — Business / Life Coach", "Coaching — Nutrition / Dietitian", "Coaching — Relationship / Dating",
+    // Community brands — Travel & Hospitality
+    "Travel — Boutique Hotel / B&B", "Travel — Local Tourism / Experience", "Travel — Eco / Sustainable Tourism",
+    // Community brands — Fashion
+    "Fashion — Heritage / Luxury", "Fashion — Accessible / Mid-Market", "Fashion — Sustainable / Ethical",
+    // Community brands — Education
+    "Education — Online Course / Creator",
+    // Community brands — Nonprofit
+    "Nonprofit — Cause Marketing", "Nonprofit — Community Organisation",
+    // Community brands — Restaurant
+    "Restaurant — Casual Dining", "Restaurant — Fine Dining / Experiential",
+    "Restaurant — Ethnic / Cultural", "Restaurant — Brunch / Café Culture",
+    // Momentum brands — Beauty
+    "Beauty — Makeup / Color", "Beauty — Fragrance / Luxury Beauty", "Beauty — Nail / Body Art",
+    // Momentum brands — Retail
+    "Retail — E-Commerce / DTC Product", "Retail — Seasonal / Holiday Campaign", "Retail — Flash Sale / Discount",
+    // Momentum brands — Food & Beverage
+    "F&B — Craft Beverage / Alcohol", "F&B — Packaged Food / CPG", "F&B — Energy Drink / Supplement",
+    "F&B — Food Delivery / Ghost Kitchen", "F&B — Snack / Confectionery",
+    // Momentum brands — Restaurant
+    "Restaurant — QSR / Fast Food", "Restaurant — QSR / Limited-Time Activation",
+    "Restaurant — Food Truck / Pop-Up",
+    // Momentum brands — Fashion
+    "Fashion — Trend-First / Streetwear", "Fashion — Fast Fashion", "Fashion — Activewear / Athleisure",
+    // Momentum brands — Tech & Gaming
+    "Tech — SaaS / App", "Tech — Consumer Electronics", "Tech — Gaming / Esports", "Tech — Creator Tools / Platform",
+    // Momentum brands — Entertainment
+    "Entertainment — Streaming / OTT", "Entertainment — Music / Artist",
+    "Entertainment — Event / Festival", "Entertainment — Podcast / Media Brand",
+    // Momentum brands — Travel
+    "Travel — Tour Operator / Activity", "Travel — Airline / Transport",
+    // Campaign Types
     "Long-Term Ambassador", "Product Launch",
-    "Restaurant — Casual Dining", "Restaurant — Fine Dining / Experiential", "Restaurant — QSR / Fast Food",
-    "Restaurant — QSR / Limited-Time Activation",
   ];
 
   const systemPrompt = `You are a brand strategist and cultural analyst specializing in influencer marketing.
@@ -268,6 +331,13 @@ You MUST base your analysis on this evidence. Do NOT contradict the evidence.
 If the evidence shows a local restaurant, analyze it as a local restaurant. If the evidence shows a luxury brand, analyze it as luxury.
 Be rigorous, specific, and grounded in the provided evidence. Use the exact terminology specified.
 
+BRAND ARCHETYPE CLASSIFICATION (Chapter 3 — F.I.T. Framework):
+Before selecting a brandType, you MUST first classify the brand into one of three Brand Archetypes:
+- TRUST: Built on credibility, safety, and reliability. Consumer must believe before they act. Examples: medical clinics, legal firms, financial advisors, insurance, children's products. Weight signature: α=0.5, β=0.1–0.2, γ=0.3–0.4.
+- COMMUNITY: Built on belonging, identity, and shared values. Consumer identifies with the brand. Examples: local gyms, boutique retail, specialty cafés, wellness coaches, pet care. Weight signature: α=0.4–0.5, β=0.2–0.3, γ=0.3.
+- MOMENTUM: Built on energy, relevance, and cultural presence. Consumer wants what is exciting right now. Examples: QSR chains, streetwear, makeup/color, craft beverages, seasonal campaigns. Weight signature: α=0.2–0.4, β=0.4–0.6, γ=0.2.
+The brandArchetypeClassification field MUST be consistent with the brandType you select.
+
 When the evidence includes an AUDIENCE PERCEPTION section with Yelp and/or Google Maps reviews:
 - Treat review language as the most authentic signal of how the brand is DECODED by its audience (Stuart Hall)
 - Look for the symbolic meaning customers assign to the brand (e.g. 'cultural anchor', 'status symbol', 'comfort food')
@@ -275,7 +345,8 @@ When the evidence includes an AUDIENCE PERCEPTION section with Yelp and/or Googl
 - Note emotional drivers that bring customers to this brand (belonging, nostalgia, discovery, status)
 - Detect any in-group vs. out-group decoding split in the reviews
 - Flag cultural risks visible in negative reviews (inconsistency, unmet expectations, service gaps)
-- Let review evidence directly inform: audienceTribe, barthesMyth, emotionalPromise, culturalTension, and aiSummary`;
+- Let review evidence directly inform: audienceTribe, barthesMyth, emotionalPromise, culturalTension, and aiSummary
+- Use the Brand Archetype classification to validate your brandType selection: if reviews show high trust-dependency, lean Trust; if reviews show community belonging, lean Community; if reviews show trend-chasing, lean Momentum.`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
@@ -296,10 +367,13 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "audienceTribe": "Psychographic description of target audience — what they believe, aspire to, and reject",
   "culturalTension": "This brand exists in the tension between [X] and [Y].",
   "barthesMyth": "This brand normalizes the belief that [complete this sentence].",
+  "brandArchetypeClassification": ONE OF EXACTLY: "Trust" | "Community" | "Momentum" — the governing structural archetype for this brand based on Chapter 3 logic,
   "brandType": ONE OF EXACTLY: ${JSON.stringify(brandTypeOptions)},
   "campaignType": "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch",
-  "aiSummary": "A 2-3 sentence cultural analyst summary of this brand's symbolic position, target audience, and creator partnership strategy."
+  "aiSummary": "A 2-3 sentence cultural analyst summary of this brand's symbolic position, target audience, and creator partnership strategy. Include which Brand Archetype this is (Trust/Community/Momentum) and why."
 }
+
+IMPORTANT: brandArchetypeClassification and brandType must be consistent. Trust brands → Medical, Legal, Financial, Insurance, Children's, Home Renovation. Community brands → Fitness, Boutique Retail, Specialty Café, Wellness, Pet, Hair Care, Home Décor. Momentum brands → Makeup/Color, QSR, Streetwear, CPG, Craft Beverage, Seasonal Campaigns, Tech.
 
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
 
@@ -324,12 +398,14 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             audienceTribe: { type: "string" },
             culturalTension: { type: "string" },
             barthesMyth: { type: "string" },
+            brandArchetypeClassification: { type: "string", enum: ["Trust", "Community", "Momentum"] },
             brandType: { type: "string" },
             campaignType: { type: "string", enum: ["Heritage/Luxury", "Trend-First", "Long-Term Ambassador", "Product Launch"] },
             aiSummary: { type: "string" },
           },
           required: [
-            "brandName", "category", "archetype", "emotionalPromise", "visualLanguage",
+            "brandName", "category", "archetype", "brandArchetypeClassification",
+            "emotionalPromise", "visualLanguage",
             "audienceTribe", "culturalTension", "barthesMyth", "brandType", "campaignType", "aiSummary",
           ],
           additionalProperties: false,

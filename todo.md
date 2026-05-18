@@ -261,3 +261,17 @@
 - [x] Update BrandProfileCard UI to show Audience Perception panel with review excerpts and decoded signals
 - [x] Run TypeScript check and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## Brand Type Expansion + AI-Driven Classification (Chapter 3 Logic)
+- [x] Expand BRAND_WEIGHT_TABLE in fitEngine.ts with all missing brand types from Chapter 3 category logic (80+ brand types across Trust/Community/Momentum)
+- [x] Add Brand Archetype classification layer to fitEngine.ts: Trust / Community / Momentum enum with category-to-archetype mapping
+- [x] Implement campaign modifier logic in getBrandWeights(): Long-Term Ambassador (+0.1 γ, -0.1 β) and Product Launch (+0.1 β, -0.1 γ)
+- [x] Add brandArchetypeClassification field (Trust | Community | Momentum) to brand_profiles DB schema
+- [x] Apply DB migration for brandArchetypeClassification column
+- [x] Update aiExtraction.ts: add brandArchetypeClassification to BrandExtractionResult interface and JSON schema
+- [x] Update aiExtraction.ts: add Brand Archetype classification instruction to system prompt — AI must classify as Trust/Community/Momentum based on evidence, then select brand type
+- [x] Update aiExtraction.ts: expand brandTypeOptions list with all new types from Chapter 3 (80+ types)
+- [x] Update routers.ts brand.analyze route to save brandArchetypeClassification field and apply campaign modifier
+- [x] Update BrandProfileCard UI: show Brand Archetype badge (Trust/Community/Momentum) with archetype description and weight signature
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint
