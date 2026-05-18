@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import BrandProfileCard from "@/components/BrandProfileCard";
+import { ApiStatusPanel } from "@/components/ApiStatusPanel";
 import { Link } from "wouter";
 import type { BrandProfile } from "../../../drizzle/schema";
 
@@ -85,6 +86,7 @@ export default function AnalyzeBrand() {
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-8">
         {/* ─── Input Form ──────────────────────────────────────────────────── */}
         <div>
+          <ApiStatusPanel />
           <form onSubmit={handleSubmit(onSubmit)} className="fit-card rounded-xl p-6 space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">

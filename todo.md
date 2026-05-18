@@ -309,3 +309,10 @@
 - [x] Update FITScore.tsx: show Verified F.I.T. Impressions Score in the live calculation result card with shared themes and content directions
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## API Quota Status Indicator
+- [x] Add tRPC route: system.apiStatus — lightweight probe of Google Maps, YouTube Data API, and Yelp; returns ok/limited/down per source with message and timestamp
+- [x] Build ApiStatusPanel component: compact panel with color-coded dots, source names, status messages, refresh button, and degraded notice
+- [x] Add ApiStatusPanel to the Analyze Brand page above the input form
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint
