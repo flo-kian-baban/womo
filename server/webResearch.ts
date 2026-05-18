@@ -28,6 +28,7 @@
 import { callDataApi } from "./_core/dataApi";
 import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
+import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ export interface CreatorResearchResult {
   transcripts: TranscriptEntry[];  // NEW: actual spoken transcripts
   transcriptCount: number;         // NEW: number of transcripts successfully fetched
   transcriptExcerpts: string;      // NEW: combined excerpt text for DB storage
+  decodedSymbols?: Record<string, unknown> | null; // Symbol Decoder output for DB storage
   evidenceSummary: string;         // Plain-text evidence block passed to LLM
 }
 
@@ -892,12 +894,13 @@ function buildCreatorEvidenceSummary(data: {
   musicSignals?: string[];
   transcripts?: TranscriptEntry[];
   engagementSignals?: EngagementSignals;
+  decodedSymbolsBlock?: string;
 }): string {
   const {
     handle, platform, displayName, bio, followerCount, videoCount, totalLikes,
     totalViews, avgViews, engagementRate, location, videoTitles, topHashtags,
     rawKeywords, contentThemeLabels, contentThemes, musicSignals = [],
-    transcripts = [], engagementSignals,
+    transcripts = [], engagementSignals, decodedSymbolsBlock = "",
   } = data;
 
   // Build combined transcript text for creator type detection
@@ -1038,7 +1041,7 @@ STATS:
   Avg Views per Video: ${formatNum(avgViews)}
   Engagement Rate: ${engagementRate}%
 
-DETECTED CREATOR TYPE: ${creatorType}${personalityNote}${engagementBlock}${temporalBlock}
+DETECTED CREATOR TYPE: ${creatorType}${personalityNote}${engagementBlock}${temporalBlock}${decodedSymbolsBlock ? "\n\n" + decodedSymbolsBlock : ""}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PRIMARY EVIDENCE — SPOKEN TRANSCRIPTS (${transcripts.length} videos)
@@ -1230,11 +1233,22 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     .map(t => `[${t.caption.slice(0, 40) || "video"}]: ${t.transcript.slice(0, 200)}`)
     .join("\n\n");
 
+  // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
+  const tikTokDecodedSymbols = await decodeCreatorSymbols({
+    handle,
+    bio,
+    videoTitles: allTitles,
+    hashtags: topHashtags,
+    transcriptExcerpts: transcripts.map(t => t.transcript),
+  });
+  const tikTokDecodedSymbolsBlock = tikTokDecodedSymbols ? formatDecodedSymbolsBlock(tikTokDecodedSymbols) : "";
+
   const evidenceSummary = buildCreatorEvidenceSummary({
     handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
     totalLikes, totalViews, avgViews, engagementRate, location,
     videoTitles: allTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
     musicSignals: musicTitles, transcripts, engagementSignals,
+    decodedSymbolsBlock: tikTokDecodedSymbolsBlock,
   });
 
   return {
@@ -1244,6 +1258,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     recentVideoTitles: allTitles, topHashtags, rawKeywords,
     contentThemeLabels, contentThemes,
     transcripts, transcriptCount: transcripts.length, transcriptExcerpts,
+    decodedSymbols: tikTokDecodedSymbols as Record<string, unknown> | null,
     evidenceSummary,
   };
 }
@@ -1283,11 +1298,21 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     .map(t => `[${t.caption.slice(0, 40) || "video"}]: ${t.transcript.slice(0, 200)}`)
     .join("\n\n");
 
+  // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
+  const ytDecodedSymbols = await decodeCreatorSymbols({
+    handle,
+    bio,
+    videoTitles: uniqueVideoTitles,
+    hashtags: topHashtags,
+    transcriptExcerpts: transcripts.map(t => t.transcript),
+  });
+  const ytDecodedSymbolsBlock = ytDecodedSymbols ? formatDecodedSymbolsBlock(ytDecodedSymbols) : "";
+
   const evidenceSummary = buildCreatorEvidenceSummary({
     handle, platform: "YouTube", displayName, bio, followerCount, videoCount,
     totalLikes: 0, totalViews, avgViews, engagementRate, location,
     videoTitles: uniqueVideoTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
-    transcripts,
+    transcripts, decodedSymbolsBlock: ytDecodedSymbolsBlock,
   });
 
   return {
@@ -1296,6 +1321,7 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     profileUrl, recentVideoTitles: uniqueVideoTitles, topHashtags, rawKeywords,
     contentThemeLabels, contentThemes,
     transcripts, transcriptCount: transcripts.length, transcriptExcerpts,
+    decodedSymbols: ytDecodedSymbols as Record<string, unknown> | null,
     evidenceSummary,
   };
 }

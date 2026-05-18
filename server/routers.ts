@@ -41,6 +41,7 @@ export const appRouter = router({
           location?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
           topHashtags?: string[]; recentVideoTitles?: string[];
           transcriptCount?: number; transcriptExcerpts?: string;
+          decodedSymbols?: Record<string, unknown>;
         } | undefined;
         // Research layer throws TRPCError for insufficient data — let it propagate to the client
         const research = await researchCreator(input.handleOrUrl, input.platform);
@@ -60,6 +61,7 @@ export const appRouter = router({
           recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
           transcriptCount: research.transcriptCount ?? 0,
           transcriptExcerpts: research.transcriptExcerpts || undefined,
+          decodedSymbols: research.decodedSymbols ?? undefined,
         };
 
         // Step 2: AI extraction grounded in real evidence
@@ -106,6 +108,7 @@ export const appRouter = router({
           recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
           transcriptCount: researchData?.transcriptCount ?? 0,
           transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
+          decodedSymbols: researchData?.decodedSymbols ?? undefined,
         });
         // Get the inserted ID
         const profiles = await listCreatorProfiles(undefined, extracted.handle);

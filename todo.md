@@ -199,3 +199,11 @@
 - [ ] Pass computed signals block to AI evidence summary
 - [ ] Update AI extraction prompt: explicit rubrics for Parasocial Bond, Audience Relationship, Cultural Capital, Drift Signal, Brand Saturation, Remix Rate
 - [ ] Run all tests and TypeScript check after changes
+
+## Symbol Decoder Pipeline
+- [ ] Write server/symbolDecoder.ts: LLM pass over all creator-authored text (titles, transcripts, bio, hashtags) extracting IdentityClaims, StatusSignals, CommunityReferences, AspirationDrivers
+- [ ] Inject DECODED CULTURAL SIGNALS block into buildCreatorEvidenceSummary in webResearch.ts
+- [ ] Update AI extraction system prompt to reference decoded signals for Archetype, BarthesMyth, AudienceRelationshipType, ParasocialBondStrength, NicheTopicNode, StuartHallDecoding, GoffmanStageConsistency
+- [ ] Update TranscriptPanel UI to show decoded signal chips alongside transcript excerpts
+- [ ] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
+- [ ] Save checkpoint

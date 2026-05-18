@@ -91,6 +91,9 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   transcriptCount: int("transcriptCount").default(0),
   transcriptExcerpts: text("transcriptExcerpts"), // Combined excerpt text from top 3 transcripts
 
+  // Symbol Decoder output (pre-processed cultural signals from all creator-authored text)
+  decodedSymbols: json("decodedSymbols"), // DecodedSymbols | null — identityClaims, statusSignals, communityReferences, aspirationDrivers, symbolicSummary
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),
