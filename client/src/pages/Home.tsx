@@ -6,7 +6,7 @@ const FEATURE_CARDS = [
   {
     href: "/analyze/influencer",
     icon: Users,
-    label: "Analyze Influencer",
+    label: "Analyze Creator",
     description: "Extract a complete cultural profile from any TikTok or YouTube handle using AI and the F.I.T. framework.",
     color: "oklch(0.65 0.15 240)",
     delay: "animate-stagger-1",
@@ -31,7 +31,7 @@ const FEATURE_CARDS = [
     href: "/library",
     icon: BookOpen,
     label: "Profile Library",
-    description: "Browse, search, and manage all saved influencer profiles, brand profiles, and match records.",
+    description: "Browse, search, and manage all saved creator profiles, brand profiles, and match records.",
     color: "oklch(0.65 0.15 300)",
     delay: "animate-stagger-4",
   },
@@ -69,7 +69,7 @@ export default function Home() {
       {/* ─── Stats ─────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-4 mb-10 animate-fade-in-up animate-stagger-1">
         {[
-          { label: "Influencers", value: creators?.length ?? 0, href: "/library" },
+          { label: "Creators", value: creators?.length ?? 0, href: "/library" },
           { label: "Brands", value: brands?.length ?? 0, href: "/library" },
           { label: "F.I.T. Reports", value: matches?.length ?? 0, href: "/library" },
         ].map((stat) => (

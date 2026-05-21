@@ -32,7 +32,7 @@ function RadarWarningBadge({ warning }: { warning: string }) {
   );
 }
 
-function VerifiedFITScoreMeter({ score, label }: { score: number; label: string }) {
+function PARRMeter({ score, label }: { score: number; label: string }) {
   const color =
     score >= 80 ? "oklch(0.65 0.15 145)" :
     score >= 60 ? "oklch(0.78 0.12 75)" :
@@ -111,8 +111,8 @@ export default function MatchReport() {
       match: {
         fitScore: data.match.fitScore,
         fitStatus: data.match.fitStatus,
-        verifiedFITScore: data.match.verifiedFITScore,
-        verifiedFITLabel: data.match.verifiedFITLabel,
+        parrScore: data.match.parrScore,
+        parrLabel: data.match.parrLabel,
         symbolicOverlapScore: data.match.symbolicOverlapScore,
         sharedKeywords: data.match.sharedKeywords,
         sharedThemes: data.match.sharedThemes,
@@ -171,7 +171,7 @@ export default function MatchReport() {
   const contentDirections = (match.contentDirections as Array<{ title: string; rationale: string; exampleAngle: string }>) ?? [];
   const sharedKeywords = (match.sharedKeywords as string[]) ?? [];
   const sharedThemes = (match.sharedThemes as string[]) ?? [];
-  const verifiedFITSignalBreakdown = (match.verifiedFITSignalBreakdown as Record<string, number>) ?? {};
+  const parrSignalBreakdown = (match.parrSignalBreakdown as Record<string, number>) ?? {};
   const comparablePartnerships = comparableQuery.data ?? [];
 
   const fitStatusColor = match.fitStatus === "Green Light"
@@ -261,19 +261,19 @@ export default function MatchReport() {
         </div>
 
         {/* Verified F.I.T. Impressions Score */}
-        {match.verifiedFITScore != null ? (
+        {match.parrScore != null ? (
           <div className="flex flex-col gap-4">
-            <VerifiedFITScoreMeter
-              score={Number(match.verifiedFITScore)}
-              label={match.verifiedFITLabel ?? ""}
+            <PARRMeter
+              score={Number(match.parrScore)}
+              label={match.parrLabel ?? ""}
             />
-            {Object.keys(verifiedFITSignalBreakdown).length > 0 && (
+            {Object.keys(parrSignalBreakdown).length > 0 && (
               <div className="fit-card rounded-xl p-5">
                 <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-3">
                   Signal Breakdown
                 </div>
                 <div className="space-y-2.5">
-                  {Object.entries(verifiedFITSignalBreakdown).map(([key, val]) => (
+                  {Object.entries(parrSignalBreakdown).map(([key, val]) => (
                     <SignalBreakdownBar key={key} label={signalLabels[key] ?? key} value={val} />
                   ))}
                 </div>
@@ -453,9 +453,9 @@ export default function MatchReport() {
                         <div className="text-lg font-serif gold-text">{Number(cm.fitScore).toFixed(1)}</div>
                         <div className={`text-[10px] font-semibold ${cmStatus}`}>{cm.fitStatus}</div>
                       </div>
-                      {cm.verifiedFITScore != null && (
+                      {cm.parrScore != null && (
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-primary">{cm.verifiedFITScore}</div>
+                          <div className="text-sm font-semibold text-primary">{cm.parrScore}</div>
                           <div className="text-[10px] text-muted-foreground">V.F.I.T.</div>
                         </div>
                       )}

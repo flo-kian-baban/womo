@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
-import { BarChart3, Loader2, Sparkles, AlertTriangle, CheckCircle2, AlertCircle, XCircle, ChevronDown, Lightbulb } from "lucide-react";
+import { BarChart3, Loader2, Sparkles, AlertTriangle, CheckCircle2, AlertCircle, XCircle, ChevronDown, Lightbulb, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import type { CreatorProfile, BrandProfile, MatchRecord } from "../../../drizzle/schema";
@@ -160,12 +161,13 @@ type MatchResult = {
     fitStatus: string;
     radarWarnings: string[];
     // Verified F.I.T. Impressions Score
-    verifiedFITScore?: number;
-    verifiedFITLabel?: string;
-    verifiedFITSignalBreakdown?: Record<string, number>;
+    parrScore?: number;
+    parrLabel?: string;
+    parrSignalBreakdown?: Record<string, number>;
     symbolicOverlapScore?: number;
     sharedKeywords?: string[];
     sharedThemes?: string[];
+    qovScore?: number;
   };
   narrative: {
     narrativeSummary: string;
@@ -233,7 +235,7 @@ export default function FITScore() {
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-4 items-end">
           <div className="space-y-2">
             <label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
-              Influencer Profile
+              Creator Profile
             </label>
             <Select value={creatorId} onValueChange={setCreatorId}>
               <SelectTrigger className="bg-secondary border-border">
@@ -336,7 +338,17 @@ export default function FITScore() {
               </div>
               <div className="flex flex-col items-center gap-3">
                 <div className="text-5xl font-serif gold-text">{matchResult.result.fitScore.toFixed(1)}</div>
-                <div className="text-xs text-muted-foreground">F.I.T. Score / 10</div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">F.I.T. Score / 10</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                      The F.I.T. Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <FITStatusBadge status={matchResult.result.fitStatus} />
               </div>
             </div>
@@ -380,44 +392,54 @@ export default function FITScore() {
               </span>
             </div>
 
-            {/* Verified F.I.T. Impressions Score */}
-            {matchResult.result.verifiedFITScore != null && (
+            {/* PARR — Predicted Audience Receptivity Rate */}
+            {matchResult.result.parrScore != null && (
               <div className="p-5 rounded-xl border mb-6" style={{
-                borderColor: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145 / 0.3)' :
-                  matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75 / 0.3)' :
-                  matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50 / 0.3)' : 'oklch(0.60 0.18 25 / 0.3)',
-                background: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145 / 0.05)' :
-                  matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75 / 0.05)' :
-                  matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50 / 0.05)' : 'oklch(0.60 0.18 25 / 0.05)',
+                borderColor: matchResult.result.parrScore >= 80 ? 'oklch(0.65 0.15 145 / 0.3)' :
+                  matchResult.result.parrScore >= 60 ? 'oklch(0.78 0.12 75 / 0.3)' :
+                  matchResult.result.parrScore >= 40 ? 'oklch(0.72 0.15 50 / 0.3)' : 'oklch(0.60 0.18 25 / 0.3)',
+                background: matchResult.result.parrScore >= 80 ? 'oklch(0.65 0.15 145 / 0.05)' :
+                  matchResult.result.parrScore >= 60 ? 'oklch(0.78 0.12 75 / 0.05)' :
+                  matchResult.result.parrScore >= 40 ? 'oklch(0.72 0.15 50 / 0.05)' : 'oklch(0.60 0.18 25 / 0.05)',
               }}>
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-                    Verified F.I.T. Impressions Score
+                  <div className="flex items-center gap-1.5">
+                    <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                      PARR
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                        <p className="font-semibold mb-1">Predicted Audience Receptivity Rate</p>
+                        PARR predicts the probability of audience acceptance. It calculates what percentage of the Creator's audience is structurally guaranteed to receive your brand message as authentic and culturally legitimate, rather than forced or inauthentic.
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <span className="text-2xl font-serif" style={{
-                      color: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
-                        matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
-                        matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
-                    }}>{matchResult.result.verifiedFITScore}</span>
-                    <span className="text-xs text-muted-foreground">/ 100</span>
+                      color: matchResult.result.parrScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                        matchResult.result.parrScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                        matchResult.result.parrScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                    }}>{matchResult.result.parrScore}%</span>
                   </div>
                 </div>
                 <div className="text-xs font-semibold mb-2" style={{
-                  color: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
-                    matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
-                    matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
-                }}>{matchResult.result.verifiedFITLabel}</div>
+                  color: matchResult.result.parrScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                    matchResult.result.parrScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                    matchResult.result.parrScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                }}>{matchResult.result.parrLabel}</div>
                 <div className="h-1.5 rounded-full bg-border overflow-hidden mb-3">
                   <div className="h-full rounded-full transition-all duration-1000" style={{
-                    width: `${matchResult.result.verifiedFITScore}%`,
-                    background: matchResult.result.verifiedFITScore >= 80 ? 'oklch(0.65 0.15 145)' :
-                      matchResult.result.verifiedFITScore >= 60 ? 'oklch(0.78 0.12 75)' :
-                      matchResult.result.verifiedFITScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
+                    width: `${matchResult.result.parrScore}%`,
+                    background: matchResult.result.parrScore >= 80 ? 'oklch(0.65 0.15 145)' :
+                      matchResult.result.parrScore >= 60 ? 'oklch(0.78 0.12 75)' :
+                      matchResult.result.parrScore >= 40 ? 'oklch(0.72 0.15 50)' : 'oklch(0.60 0.18 25)',
                   }} />
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Probability that this creator's audience will accept this partnership as culturally legitimate.
+                  Predicted Audience Receptivity Rate — the percentage of this creator's audience structurally guaranteed to receive the brand message as authentic.
                 </p>
                 {/* Shared symbolic evidence */}
                 {(matchResult.result.sharedThemes?.length ?? 0) > 0 && (
@@ -430,6 +452,33 @@ export default function FITScore() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* QoV — Quality of View */}
+            {matchResult.result.qovScore != null && (
+              <div className="p-5 rounded-xl border border-border/60 bg-muted/10 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                      QoV
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                        <p className="font-semibold mb-1">Quality of View</p>
+                        Quality of View quantifies the cultural resonance of each impression. A higher QoV means the view is more likely to convert into brand equity because both the entity-level fit and the audience-level receptivity are optimized.
+                        <p className="mt-1 text-muted-foreground">Formula: (F.I.T. Score ÷ 10) × PARR</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <span className="text-2xl font-serif text-foreground/90">{matchResult.result.qovScore}%</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Quality of View — the cultural resonance multiplier for each impression this partnership generates.
+                </p>
               </div>
             )}
 

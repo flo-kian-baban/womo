@@ -1,7 +1,7 @@
 /**
  * Connex F.I.T. — AI Extraction Layer
  * Uses the built-in LLM to extract structured cultural profiles
- * from influencer handles and brand names/URLs.
+ * from creator handles and brand names/URLs.
  */
 
 import { invokeLLM } from "./_core/llm";
@@ -41,7 +41,7 @@ export async function extractCreatorProfile(
   platform: string,
   evidenceSummary?: string  // Real scraped evidence from webResearch.ts
 ): Promise<CreatorExtractionResult> {
-  const systemPrompt = `You are a cultural anthropologist and media analyst specializing in influencer marketing.
+  const systemPrompt = `You are a cultural anthropologist and media analyst specializing in creator marketing.
 Your task is to analyze a social media creator and produce a structured cultural profile using the Connex F.I.T. framework.
 
 CRITICAL INSTRUCTION — TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL:
@@ -338,7 +338,7 @@ export async function extractBrandProfile(
     "Long-Term Ambassador", "Product Launch",
   ];
 
-  const systemPrompt = `You are a brand strategist and cultural analyst specializing in influencer marketing.
+  const systemPrompt = `You are a brand strategist and cultural analyst specializing in creator marketing.
 Your task is to analyze a brand or business and produce a structured cultural profile using the Connex F.I.T. framework.
 You will be provided with REAL, SCRAPED evidence from the brand's public website and web presence.
 You MUST base your analysis on this evidence. Do NOT contradict the evidence.
@@ -468,7 +468,7 @@ export interface NarrativeResult {
 }
 
 export async function generateFITNarrative(input: NarrativeInput): Promise<NarrativeResult> {
-  const systemPrompt = `You are a plain-talking influencer marketing strategist writing a match report for a business owner or junior marketer.
+  const systemPrompt = `You are a plain-talking creator marketing strategist writing a match report for a business owner or junior marketer.
 Your job is to explain whether this creator and brand are a good match in clear, simple language that anyone can understand.
 
 IMPORTANT WRITING RULES:

@@ -77,7 +77,7 @@ export default function Library() {
         <TabsList className="bg-secondary border border-border mb-6">
           <TabsTrigger value="creators" className="gap-2">
             <Users className="w-3.5 h-3.5" />
-            Influencers
+            Creators
             {creators && <span className="ml-1 text-xs text-muted-foreground">({creators.length})</span>}
           </TabsTrigger>
           <TabsTrigger value="brands" className="gap-2">
@@ -104,7 +104,7 @@ export default function Library() {
                 className="pl-9 bg-secondary border-border text-sm"
               />
             </div>
-            <Link href="/analyze/influencer">
+            <Link href="/analyze/creator">
               <Button size="sm" className="gold-gradient text-background font-semibold">
                 + Analyze New
               </Button>
@@ -116,10 +116,10 @@ export default function Library() {
           ) : !creators?.length ? (
             <div className="fit-card rounded-xl p-12 flex flex-col items-center justify-center text-center">
               <Users className="w-10 h-10 text-muted-foreground/20 mb-4" />
-              <p className="text-muted-foreground">No influencer profiles yet</p>
-              <Link href="/analyze/influencer">
+              <p className="text-muted-foreground">No creator profiles yet</p>
+              <Link href="/analyze/creator">
                 <Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">
-                  Analyze your first influencer
+                  Analyze your first creator
                 </Button>
               </Link>
             </div>
@@ -189,8 +189,12 @@ export default function Library() {
                     </p>
                   )}
 
-                  <div className="mt-3 pt-3 border-t border-border/30 text-[10px] text-muted-foreground/40">
-                    {new Date(creator.createdAt).toLocaleDateString()}
+                  <div className="mt-3 pt-3 border-t border-border/30 flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground/40">{new Date(creator.createdAt).toLocaleDateString()}</span>
+                    <Link href={`/creator/${creator.id}`} className="text-[10px] text-primary/60 hover:text-primary flex items-center gap-1 transition-colors">
+                      <ExternalLink className="w-2.5 h-2.5" />
+                      View Full Profile
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -292,8 +296,12 @@ export default function Library() {
                     </p>
                   )}
 
-                  <div className="mt-3 pt-3 border-t border-border/30 text-[10px] text-muted-foreground/40">
-                    {new Date(brand.createdAt).toLocaleDateString()}
+                  <div className="mt-3 pt-3 border-t border-border/30 flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground/40">{new Date(brand.createdAt).toLocaleDateString()}</span>
+                    <Link href={`/brand/${brand.id}`} className="text-[10px] text-primary/60 hover:text-primary flex items-center gap-1 transition-colors">
+                      <ExternalLink className="w-2.5 h-2.5" />
+                      View Full Profile
+                    </Link>
                   </div>
                 </div>
               ))}

@@ -583,7 +583,7 @@ export function calculateSymbolicVocabularyOverlap(input: {
  *   4. Symbolic Vocabulary Overlap (0.15) — shared language between creator and brand decoded symbols
  *   5. Goffman Stage Consistency (0.10)   — is the creator's persona consistent enough to trust?
  */
-export interface VerifiedFITScoreInputs {
+export interface PARRInputs {
   tribMatchScore: number;           // 0–10 from alignment calculation
   stuartHallDecoding: string;       // Dominant / Negotiated / Oppositional
   archetypeMatchScore: number;      // 0–10 from archetype matrix
@@ -591,15 +591,15 @@ export interface VerifiedFITScoreInputs {
   goffmanStageConsistency: string;  // Consistent / Minor Gap / Significant Gap
 }
 
-export type VerifiedFITLabel =
+export type PARRLabel =
   | "High Cultural Legitimacy"
   | "Moderate Legitimacy"
   | "Mixed Signal"
   | "Low Legitimacy";
 
-export function calculateVerifiedFITScore(inputs: VerifiedFITScoreInputs): {
-  verifiedFITScore: number;
-  verifiedFITLabel: VerifiedFITLabel;
+export function calculatePARR(inputs: PARRInputs): {
+  parrScore: number;
+  parrLabel: PARRLabel;
   signalBreakdown: Record<string, number>;
 } {
   // Stuart Hall → numeric signal (0–10)
@@ -630,15 +630,15 @@ export function calculateVerifiedFITScore(inputs: VerifiedFITScoreInputs): {
     signalBreakdown.personaConsistency * 0.10;
 
   // Scale 0–10 → 0–100
-  const verifiedFITScore = Math.round(rawScore * 10);
+  const parrScore = Math.round(rawScore * 10);
 
-  let verifiedFITLabel: VerifiedFITLabel;
-  if (verifiedFITScore >= 80) verifiedFITLabel = "High Cultural Legitimacy";
-  else if (verifiedFITScore >= 60) verifiedFITLabel = "Moderate Legitimacy";
-  else if (verifiedFITScore >= 40) verifiedFITLabel = "Mixed Signal";
-  else verifiedFITLabel = "Low Legitimacy";
+  let parrLabel: PARRLabel;
+  if (parrScore >= 80) parrLabel = "High Cultural Legitimacy";
+  else if (parrScore >= 60) parrLabel = "Moderate Legitimacy";
+  else if (parrScore >= 40) parrLabel = "Mixed Signal";
+  else parrLabel = "Low Legitimacy";
 
-  return { verifiedFITScore, verifiedFITLabel, signalBreakdown };
+  return { parrScore, parrLabel, signalBreakdown };
 }
 
 // ─── Full Engine Entry Point ──────────────────────────────────────────────────
@@ -687,13 +687,15 @@ export interface FullFITResult {
   fitScore: number;
   fitStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
   radarWarnings: RadarWarning[];
-  // Verified F.I.T. Impressions Score
-  verifiedFITScore: number;
-  verifiedFITLabel: VerifiedFITLabel;
-  verifiedFITSignalBreakdown: Record<string, number>;
+  // PARR — Predicted Audience Receptivity Rate
+  parrScore: number;
+  parrLabel: PARRLabel;
+  parrSignalBreakdown: Record<string, number>;
   sharedKeywords: string[];
   sharedThemes: string[];
   symbolicOverlapScore: number;
+  // QoV — Quality of View (percentage, 0–100)
+  qovScore: number;
 }
 
 export function runFullFITCalculation(input: FullFITCalculationInput): FullFITResult {
@@ -746,14 +748,17 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     });
 
   // Verified F.I.T. Impressions Score
-  const { verifiedFITScore, verifiedFITLabel, signalBreakdown: verifiedFITSignalBreakdown } =
-    calculateVerifiedFITScore({
+  const { parrScore, parrLabel, signalBreakdown: parrSignalBreakdown } =
+    calculatePARR({
       tribMatchScore: input.tribMatchScore,
       stuartHallDecoding: input.stuartHallDecoding,
       archetypeMatchScore,
       symbolicOverlapScore,
       goffmanStageConsistency: input.goffmanStageConsistency,
     });
+
+  // QoV = (fitScore / 10) × (parrScore / 100) — expressed as a percentage (0–100)
+  const qovScore = Math.round((fitScore / 10) * (parrScore / 100) * 100 * 10) / 10;
 
   return {
     archetypeMatchScore,
@@ -774,11 +779,12 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     fitScore,
     fitStatus,
     radarWarnings,
-    verifiedFITScore,
-    verifiedFITLabel,
-    verifiedFITSignalBreakdown,
+    parrScore,
+    parrLabel,
+    parrSignalBreakdown,
     sharedKeywords,
     sharedThemes,
     symbolicOverlapScore,
+    qovScore,
   };
 }

@@ -365,7 +365,7 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
             messages: [
               {
                 role: "system",
-                content: `You are a plain-talking influencer marketing strategist writing a partnership brief for a business owner or junior marketer.
+                content: `You are a plain-talking creator marketing strategist writing a partnership brief for a business owner or junior marketer.
 Your job is to explain — in simple, direct language — whether this creator and brand are a good match, and why.
 
 IMPORTANT WRITING RULES:
@@ -405,7 +405,7 @@ SHARED SIGNALS:
 
 SCORES:
 - F.I.T. Score: ${result.fitScore}/10 (${result.fitStatus})
-- Audience Acceptance Score: ${result.verifiedFITScore}/100 (${result.verifiedFITLabel})
+- Audience Acceptance Score: ${result.parrScore}/100 (${result.parrLabel})
 - Alignment: ${result.alignmentScoreRaw.toFixed(1)}/10 | Momentum: ${result.pulseScoreRaw.toFixed(1)}/10 | Consistency: ${result.stabilityScoreRaw.toFixed(1)}/10
 
 Write the following in JSON format:
@@ -494,12 +494,14 @@ Write the following in JSON format:
           narrativeSummary: narrative.narrativeSummary,
           alignmentNotes: narrative.alignmentNotes as unknown as Record<string, unknown>,
           // Verified F.I.T. Impressions Score
-          verifiedFITScore: result.verifiedFITScore,
-          verifiedFITLabel: result.verifiedFITLabel,
-          verifiedFITSignalBreakdown: result.verifiedFITSignalBreakdown as unknown as Record<string, unknown>,
+          parrScore: result.parrScore,
+          parrLabel: result.parrLabel,
+          parrSignalBreakdown: result.parrSignalBreakdown as unknown as Record<string, unknown>,
           symbolicOverlapScore: result.symbolicOverlapScore,
           sharedKeywords: result.sharedKeywords as unknown as string[],
           sharedThemes: result.sharedThemes as unknown as string[],
+          // QoV — Quality of View
+          qovScore: result.qovScore,
           // Synergy Narrative + Content Directions
           synergyNarrative: synergyNarrative || null,
           contentDirections: contentDirections.length > 0 ? contentDirections as unknown as Record<string, unknown>[] : null,

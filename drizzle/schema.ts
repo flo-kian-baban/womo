@@ -217,13 +217,14 @@ export const matchRecords = mysqlTable("match_records", {
   narrativeSummary: text("narrativeSummary"),
   alignmentNotes: json("alignmentNotes"), // field-by-field notes object
 
-  // Verified F.I.T. Impressions Score (0–100)
-  verifiedFITScore: int("verifiedFITScore"),
-  verifiedFITLabel: varchar("verifiedFITLabel", { length: 64 }),
-  verifiedFITSignalBreakdown: json("verifiedFITSignalBreakdown"), // Record<string, number>
+  // PARR — Predicted Audience Receptivity Rate (0–100, displayed as %)
+  parrScore: int("parrScore"),
+  parrLabel: varchar("parrLabel", { length: 64 }),
+  parrSignalBreakdown: json("parrSignalBreakdown"), // Record<string, number>
   symbolicOverlapScore: float("symbolicOverlapScore"),
   sharedKeywords: json("sharedKeywords"),   // string[]
   sharedThemes: json("sharedThemes"),       // string[]
+  qovScore: float("qovScore"),               // Quality of View — (fitScore/10) × (parrScore/100) as %
 
   // Synergy Narrative + Content Directions
   synergyNarrative: text("synergyNarrative"),

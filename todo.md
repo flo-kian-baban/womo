@@ -320,3 +320,21 @@
 ## UI Fixes — Profile Library Labels + FIT Score Circle Overlap
 - [x] Profile Library: show creator handle and brand name in F.I.T. Report cards instead of just ID numbers — listMatchRecords() now JOINs creator and brand profiles to return handle and name
 - [x] FIT Score page: fix text overlap in Alignment/Pulse/Stability score circles — score number now absolutely positioned in centre of ring, label moved below ring outside SVG boundary
+
+## Phase 1 Commercial Strategy Updates
+- [x] Global terminology refactor: replaced all "Influencer" → "Creator" across all UI labels, page titles, nav items, button text, route paths (/analyze/influencer → /analyze/creator), and code comments
+- [x] Add F.I.T. Score tooltip/info block with exact copy: "The F.I.T. Score measures the structural alignment between a Brand and a Creator..."
+- [x] Rename "Verified FIT Score" → "Predicted Audience Receptivity Rate (PARR)" everywhere in UI and code (DB column rename via SQL, all TypeScript references updated)
+- [x] Convert PARR display from 0–100 number to percentage format (e.g. 82%)
+- [x] Add PARR layman's explanation tooltip with exact copy
+- [x] Implement QoV (Quality of View) metric: formula = (F.I.T. Score / 10) × (PARR / 100), display as percentage
+- [x] Add qovScore column to match_records DB schema via webdev_execute_sql
+- [x] Add QoV calculation to fitEngine.ts runFullFITCalculation() return and save in routers.ts
+- [x] Add QoV display to FITScore.tsx with plain-English explanation tooltip
+- [x] Profile Library: Creator profile cards now show "View Full Profile" deep-link to /creator/:id
+- [x] Profile Library: Brand profile cards now show "View Full Profile" deep-link to /brand/:id
+- [x] Build CreatorDetail page (/creator/:id) showing complete cultural breakdown via CreatorProfileCard
+- [x] Build BrandDetail page (/brand/:id) showing complete cultural breakdown via BrandProfileCard
+- [x] Append PARR/QoV validation strategy note to developer documentation (connex-fit-developer-overview.md)
+- [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
+- [x] Save checkpoint

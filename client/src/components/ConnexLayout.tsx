@@ -13,8 +13,8 @@ const NAV_ITEMS = [
     icon: Sparkles,
   },
   {
-    label: "Analyze Influencer",
-    href: "/analyze/influencer",
+    label: "Analyze Creator",
+    href: "/analyze/creator",
     icon: Users,
   },
   {

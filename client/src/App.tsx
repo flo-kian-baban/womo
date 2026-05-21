@@ -6,10 +6,12 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ConnexLayout from "./components/ConnexLayout";
 import Home from "./pages/Home";
-import AnalyzeInfluencer from "./pages/AnalyzeInfluencer";
+import AnalyzeCreator from "./pages/AnalyzeCreator";
 import AnalyzeBrand from "./pages/AnalyzeBrand";
 import FITScore from "./pages/FITScore";
 import Library from "./pages/Library";
+import CreatorDetail from "./pages/CreatorDetail";
+import BrandDetail from "./pages/BrandDetail";
 import MatchReport from "./pages/MatchReport";
 
 function Router() {
@@ -17,11 +19,13 @@ function Router() {
     <ConnexLayout>
       <Switch>
         <Route path="/" component={Home} />
-        <Route path="/analyze/influencer" component={AnalyzeInfluencer} />
+        <Route path="/analyze/creator" component={AnalyzeCreator} />
         <Route path="/analyze/brand" component={AnalyzeBrand} />
         <Route path="/fit-score" component={FITScore} />
         <Route path="/report/:id" component={MatchReport} />
         <Route path="/library" component={Library} />
+          <Route path="/creator/:id" component={CreatorDetail} />
+          <Route path="/brand/:id" component={BrandDetail} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
