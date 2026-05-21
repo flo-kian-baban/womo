@@ -1,8 +1,9 @@
 import { useParams, Link } from "wouter";
 import {
   ArrowLeft, FileJson, AlertTriangle, CheckCircle2, XCircle, AlertCircle,
-  Sparkles, TrendingUp, Users, Lightbulb, Hash, BarChart3, ExternalLink
+  Sparkles, TrendingUp, Users, Lightbulb, Hash, BarChart3, ExternalLink, Info
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -39,20 +40,36 @@ function PARRMeter({ score, label }: { score: number; label: string }) {
     score >= 40 ? "oklch(0.72 0.15 50)" :
     "oklch(0.60 0.18 25)";
 
-  const bgColor =
-    score >= 80 ? "border-green-400/30 bg-green-400/5" :
-    score >= 60 ? "border-yellow-400/30 bg-yellow-400/5" :
-    score >= 40 ? "border-orange-400/30 bg-orange-400/5" :
-    "border-red-400/30 bg-red-400/5";
+  const borderColor =
+    score >= 80 ? "oklch(0.65 0.15 145 / 0.3)" :
+    score >= 60 ? "oklch(0.78 0.12 75 / 0.3)" :
+    score >= 40 ? "oklch(0.72 0.15 50 / 0.3)" :
+    "oklch(0.60 0.18 25 / 0.3)";
+
+  const bgColorStyle =
+    score >= 80 ? "oklch(0.65 0.15 145 / 0.05)" :
+    score >= 60 ? "oklch(0.78 0.12 75 / 0.05)" :
+    score >= 40 ? "oklch(0.72 0.15 50 / 0.05)" :
+    "oklch(0.60 0.18 25 / 0.05)";
 
   return (
-    <div className={`rounded-xl border p-6 ${bgColor}`}>
-      <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground mb-3">
-        Verified F.I.T. Impressions Score
-      </div>
-      <div className="flex items-end gap-3 mb-3">
-        <div className="text-5xl font-serif" style={{ color }}>{score}</div>
-        <div className="text-muted-foreground text-sm mb-1.5">/ 100</div>
+    <div className="rounded-xl border p-6" style={{ borderColor, background: bgColorStyle }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-1.5">
+          <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground">
+            PARR
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-xs leading-relaxed">
+              <p className="font-semibold mb-1">Predicted Audience Receptivity Rate</p>
+              PARR predicts the probability of audience acceptance. It calculates what percentage of the Creator's audience is structurally guaranteed to receive your brand message as authentic and culturally legitimate, rather than forced or inauthentic.
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="text-4xl font-serif" style={{ color }}>{score}%</div>
       </div>
       <div className="text-sm font-semibold mb-3" style={{ color }}>{label}</div>
       <div className="h-2 rounded-full bg-border overflow-hidden">
@@ -62,7 +79,7 @@ function PARRMeter({ score, label }: { score: number; label: string }) {
         />
       </div>
       <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-        Probability that this creator's audience will accept this partnership as culturally legitimate — not forced or inauthentic.
+        The predicted percentage of a creator's audience that is culturally receptive to the brand message.
       </p>
     </div>
   );
@@ -260,13 +277,59 @@ export default function MatchReport() {
           </div>
         </div>
 
-        {/* Verified F.I.T. Impressions Score */}
+        {/* PARR + QoV */}
         {match.parrScore != null ? (
           <div className="flex flex-col gap-4">
             <PARRMeter
               score={Number(match.parrScore)}
               label={match.parrLabel ?? ""}
             />
+
+            {/* QoV — Quality of View */}
+            {match.qovScore != null && (() => {
+              const qov = Number(match.qovScore);
+              const qovColor =
+                qov >= 60 ? "oklch(0.65 0.15 145)" :
+                qov >= 40 ? "oklch(0.78 0.12 75)" :
+                qov >= 20 ? "oklch(0.72 0.15 50)" :
+                "oklch(0.60 0.18 25)";
+              const qovBorder =
+                qov >= 60 ? "oklch(0.65 0.15 145 / 0.3)" :
+                qov >= 40 ? "oklch(0.78 0.12 75 / 0.3)" :
+                qov >= 20 ? "oklch(0.72 0.15 50 / 0.3)" :
+                "oklch(0.60 0.18 25 / 0.3)";
+              const qovBg =
+                qov >= 60 ? "oklch(0.65 0.15 145 / 0.05)" :
+                qov >= 40 ? "oklch(0.78 0.12 75 / 0.05)" :
+                qov >= 20 ? "oklch(0.72 0.15 50 / 0.05)" :
+                "oklch(0.60 0.18 25 / 0.05)";
+              return (
+                <div className="rounded-xl border p-5" style={{ borderColor: qovBorder, background: qovBg }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                        QoV
+                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                          <p className="font-semibold mb-1">Quality of View</p>
+                          QoV predicts how good a view is likely to be, based on creator-brand fit and audience receptivity.
+                          <p className="mt-1 text-muted-foreground">Formula: (F.I.T. Score ÷ 10) × PARR</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <span className="text-3xl font-serif" style={{ color: qovColor }}>{qov}%</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Quality of View — the cultural resonance multiplier for each impression this partnership generates.
+                  </p>
+                </div>
+              );
+            })()}
+
             {Object.keys(parrSignalBreakdown).length > 0 && (
               <div className="fit-card rounded-xl p-5">
                 <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-3">
@@ -282,7 +345,7 @@ export default function MatchReport() {
           </div>
         ) : (
           <div className="fit-card rounded-xl p-8 flex items-center justify-center text-muted-foreground text-sm">
-            Verified F.I.T. Impressions Score not available for this report.<br />
+            PARR not available for this report.<br />
             Re-run the calculation to generate it.
           </div>
         )}
@@ -455,8 +518,8 @@ export default function MatchReport() {
                       </div>
                       {cm.parrScore != null && (
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-primary">{cm.parrScore}</div>
-                          <div className="text-[10px] text-muted-foreground">V.F.I.T.</div>
+                          <div className="text-sm font-semibold text-primary">{cm.parrScore}%</div>
+                          <div className="text-[10px] text-muted-foreground">PARR</div>
                         </div>
                       )}
                       <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
