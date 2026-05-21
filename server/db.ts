@@ -138,7 +138,21 @@ export async function getMatchRecordById(id: number) {
 export async function listMatchRecords(userId?: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return db.select().from(matchRecords).orderBy(desc(matchRecords.createdAt)).limit(50);
+  const rows = await db.select().from(matchRecords).orderBy(desc(matchRecords.createdAt)).limit(50);
+  // Enrich each match with creator handle and brand name via individual lookups
+  const enriched = await Promise.all(rows.map(async (match) => {
+    const [creator] = await db.select({ handle: creatorProfiles.handle, displayName: creatorProfiles.displayName })
+      .from(creatorProfiles).where(eq(creatorProfiles.id, match.creatorProfileId)).limit(1);
+    const [brand] = await db.select({ brandName: brandProfiles.brandName })
+      .from(brandProfiles).where(eq(brandProfiles.id, match.brandProfileId)).limit(1);
+    return {
+      ...match,
+      creatorHandle: creator?.handle ?? null,
+      creatorDisplayName: creator?.displayName ?? null,
+      brandName: brand?.brandName ?? null,
+    };
+  }));
+  return enriched;
 }
 
 export async function deleteMatchRecord(id: number) {

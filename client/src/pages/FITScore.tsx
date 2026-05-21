@@ -27,33 +27,39 @@ function ScoreRing({
   const cx = size / 2;
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <svg width={size} height={size} className="rotate-[-90deg]">
-        <circle
-          cx={cx}
-          cy={cx}
-          r={radius}
-          fill="none"
-          stroke="oklch(0.22 0.010 260)"
-          strokeWidth={6}
-        />
-        <circle
-          cx={cx}
-          cy={cx}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={6}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="score-ring transition-all duration-1000"
-          style={{ filter: `drop-shadow(0 0 6px ${color}60)` }}
-        />
-      </svg>
-      <div className="text-center -mt-1" style={{ marginTop: `-${size / 2 + 8}px`, position: "relative", zIndex: 1 }}>
-        <div className="text-2xl font-serif" style={{ color }}>{score.toFixed(1)}</div>
-        <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="rotate-[-90deg]">
+          <circle
+            cx={cx}
+            cy={cx}
+            r={radius}
+            fill="none"
+            stroke="oklch(0.22 0.010 260)"
+            strokeWidth={6}
+          />
+          <circle
+            cx={cx}
+            cy={cx}
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth={6}
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            className="score-ring transition-all duration-1000"
+            style={{ filter: `drop-shadow(0 0 6px ${color}60)` }}
+          />
+        </svg>
+        {/* Text overlaid in the centre of the ring */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-xl font-serif leading-none" style={{ color }}>{score.toFixed(1)}</div>
+        </div>
+      </div>
+      {/* Label sits below the ring, never overlapping */}
+      <div className="text-center">
+        <div className="text-xs text-muted-foreground">{label}</div>
         {sublabel && <div className="text-[10px] text-muted-foreground/50">{sublabel}</div>}
       </div>
     </div>

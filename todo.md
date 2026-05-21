@@ -316,3 +316,7 @@
 - [x] Add ApiStatusPanel to the Analyze Brand page above the input form
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## UI Fixes — Profile Library Labels + FIT Score Circle Overlap
+- [x] Profile Library: show creator handle and brand name in F.I.T. Report cards instead of just ID numbers — listMatchRecords() now JOINs creator and brand profiles to return handle and name
+- [x] FIT Score page: fix text overlap in Alignment/Pulse/Stability score circles — score number now absolutely positioned in centre of ring, label moved below ring outside SVG boundary

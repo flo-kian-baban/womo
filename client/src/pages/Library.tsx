@@ -333,7 +333,9 @@ export default function Library() {
                       <FITStatusDot status={match.fitStatus} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium">
-                          Creator #{match.creatorProfileId} × Brand #{match.brandProfileId}
+                          {match.creatorHandle ? `@${match.creatorHandle}` : `Creator #${match.creatorProfileId}`}
+                          {" × "}
+                          {(match as any).brandName ?? `Brand #${match.brandProfileId}`}
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
                           {new Date(match.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
