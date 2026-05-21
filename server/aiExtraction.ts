@@ -103,7 +103,20 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "handle": "their @handle (without @)",
   "platform": "TikTok" | "YouTube" | "Multi",
   "displayName": "their display name",
-  "archetype": ONE OF EXACTLY: "The Sage" | "The Hero" | "The Outlaw" | "The Explorer" | "The Magician" | "The Ruler" | "The Caregiver" | "The Lover" | "The Jester" | "The Innocent" | "The Everyman" | "The Creator",
+  "archetype": ONE OF EXACTLY: "The Sage" | "The Hero" | "The Outlaw" | "The Explorer" | "The Magician" | "The Ruler" | "The Caregiver" | "The Lover" | "The Jester" | "The Innocent" | "The Everyman" | "The Creator".
+    ARCHETYPE DECISION RULES - apply in strict priority order, pick the FIRST match:
+    1. The Outlaw: creator challenges norms, confronts authority, speaks bluntly or controversially, rates or judges people/food directly in front of them, or positions as anti-establishment. CRITICAL: If transcripts show confrontational or provocative behavior - even if they also explore food or culture - classify as The Outlaw, NOT The Explorer.
+    2. The Hero: overcomes adversity, documents achievement journey, motivates others through difficulty.
+    3. The Explorer: discovers new places/cultures with curiosity and openness. Neutral/curious tone. Do NOT use if primary mode is confrontation or judgment.
+    4. The Everyman: relatable, ordinary, seeks belonging. Self-deprecating humor, everyday life.
+    5. The Jester: entertains through humor, comedy skits, pranks.
+    6. The Sage: educates, explains, shares expertise. Tutorial or analysis content.
+    7. The Lover: beauty, relationships, sensory experience, passion with emotional depth.
+    8. The Caregiver: nurtures, supports, advocates for others.
+    9. The Magician: transforms situations, reveals hidden truths, before/after content.
+    10. The Ruler: commands authority, leads, demonstrates mastery.
+    11. The Creator: builds, makes, crafts original work. DIY, art, design.
+    12. The Innocent: projects optimism, purity, nostalgia. Wholesome content.,
   "recurringThemes": ["theme1", "theme2", "theme3"] (3-4 specific recurring content topics/formats — be anthropologically specific, e.g. "Halal Street Food Reviews" not "Food", "Diaspora Identity Storytelling" not "Culture"),
   "toneRegister": "2-3 words describing their emotional register and communication style",
   "parasocialBondStrength": number between 1.0 and 5.0.
@@ -163,6 +176,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
+    temperature: 0,
     response_format: {
       type: "json_schema",
       json_schema: {
