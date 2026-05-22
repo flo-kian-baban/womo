@@ -440,3 +440,11 @@
 - [x] Add tone mismatch penalty to Alignment (α) calculation (via enriched myth alignment prompt)
 - [x] Add brandTone field to brand_profiles schema
 - [x] Update tests — 27/27 pass, TypeScript clean
+
+## Bug Fix: Creator Profile Insert Error (2026-05-22)
+- [x] Root cause: JSON schema missing enum constraints for all enum fields
+- [x] LLM was returning "Authority / Expert" instead of just "Authority"
+- [x] Fix: Added enum constraints to JSON schema for all enum fields in creator extraction
+- [x] Fields fixed: archetype, platform, audienceRelationshipType, culturalCapital, goffmanStageConsistency, driftSignal, stuartHallDecoding, rogersAdopterStage, creatorNichePosition, lifecyclePhase, turnerLiminalPhase
+- [x] Tests pass, TypeScript clean
+- [x] Ready for re-testing with @joyeeyang0 and other creators
