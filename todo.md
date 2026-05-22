@@ -364,3 +364,11 @@
 - [x] Log clearly when a bucket was filled via fallback (e.g., "anchor: 2 oldest-available videos added")
 - [x] Deduplication: fill-forward never reuses a video already assigned to another bucket
 - [x] TypeScript check (0 errors) and all tests (27/27 pass)
+
+## HTML-First TikTok Video Collection (Author Contamination Fix)
+- [x] Build fetchTikTokVideosFromProfileHTML() helper to extract videos directly from creator profile HTML
+- [x] Refactor fetchTikTokTranscripts() to use HTML scrape as PRIMARY source (bypasses search API author-contamination)
+- [x] Implement fallback to TikTok search API only if HTML scrape yields < 6 videos
+- [x] Fallback search API still uses strict author-filter to prevent contamination
+- [x] Updated logging: "HTML scrape yielded X videos" + fallback status
+- [x] TypeScript check (0 errors) and all tests (27/27 pass)

@@ -490,6 +490,105 @@ export interface TemporalVideoEntry {
   saves: number;
 }
 
+/**
+ * Fetch videos from the creator's profile page HTML (PRIMARY SOURCE).
+ * Parses __UNIVERSAL_DATA_FOR_REHYDRATION__ to extract itemList with video metadata.
+ * Returns array of VideoItem objects extracted directly from the profile.
+ */
+async function fetchTikTokVideosFromProfileHTML(
+  handle: string,
+  normalizedHandle: string
+): Promise<Array<{
+  id: string;
+  caption: string;
+  views: number;
+  likes: number;
+  comments: number;
+  saves: number;
+  shares: number;
+  createTime: number;
+  musicOriginal: boolean;
+  duetEnabled: boolean;
+  stitchEnabled: boolean;
+  isAd: boolean;
+  durationMs: number;
+}>> {
+  const items: Array<{
+    id: string;
+    caption: string;
+    views: number;
+    likes: number;
+    comments: number;
+    saves: number;
+    shares: number;
+    createTime: number;
+    musicOriginal: boolean;
+    duetEnabled: boolean;
+    stitchEnabled: boolean;
+    isAd: boolean;
+    durationMs: number;
+  }> = [];
+
+  try {
+    const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
+    const jsonMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!jsonMatch) {
+      console.log(`[webResearch] @${handle}: no profile HTML rehydration data`);
+      return items;
+    }
+
+    const pageData = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
+    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+    const userDetail = (defaultScope?.["webapp.user-detail"] as Record<string, unknown>) ?? {};
+    const itemList = (userDetail?.itemList as unknown[]) ?? [];
+
+    console.log(`[webResearch] @${handle}: HTML scrape found ${itemList.length} videos in profile`);
+
+    for (const item of itemList) {
+      const v = item as Record<string, unknown>;
+      const videoId = (v?.id as string) ?? "";
+      if (!videoId) continue;
+
+      const desc = (v?.desc as string) ?? "";
+      const statsObj = (v?.stats as Record<string, unknown>) ?? {};
+      const views = Number(statsObj?.playCount ?? 0);
+      const likes = Number(statsObj?.diggCount ?? 0);
+      const comments = Number(statsObj?.commentCount ?? 0);
+      const saves = Number(statsObj?.collectCount ?? 0);
+      const shares = Number(statsObj?.shareCount ?? 0);
+      const createTime = Number(v?.createTime ?? 0);
+
+      const music = (v?.music as Record<string, unknown>) ?? {};
+      const musicOriginal = Boolean(music?.original ?? false);
+      const duetEnabled = Boolean(v?.duetEnabled ?? false);
+      const stitchEnabled = Boolean(v?.stitchEnabled ?? false);
+      const isAd = Boolean(v?.isAd ?? false);
+      const videoObj = (v?.video as Record<string, unknown>) ?? {};
+      const durationMs = Number(videoObj?.duration ?? 0);
+
+      items.push({
+        id: videoId,
+        caption: desc,
+        views,
+        likes,
+        comments,
+        saves,
+        shares,
+        createTime,
+        musicOriginal,
+        duetEnabled,
+        stitchEnabled,
+        isAd,
+        durationMs,
+      });
+    }
+  } catch (err) {
+    console.warn(`[webResearch] @${handle}: HTML scrape failed:`, (err as Error).message);
+  }
+
+  return items;
+}
+
 async function fetchTikTokTranscripts(handle: string): Promise<{
   transcripts: TranscriptEntry[];
   videoTitles: string[];
@@ -514,7 +613,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
   };
 
-  // Collect video IDs from TikTok search — author-filtered
+  // Collect video IDs: PRIMARY SOURCE is HTML scrape, FALLBACK is search API
   // Each item carries the full engagement snapshot needed for temporal analysis
   interface VideoItem {
     id: string;
@@ -533,100 +632,117 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   }
   const videoItems: VideoItem[] = [];
 
-  // Run two targeted searches: handle alone + handle with a broad keyword
-  const queries = [handle, `@${handle}`];
-
-  for (const q of queries) {
-    try {
-      const result = await callDataApi("TikTok/search_tiktok_video_general", {
-        query: { keyword: q, count: "20" },  // count MUST be a STRING
-      }) as Record<string, unknown>;
-
-      const items = (result?.item_list as unknown[]) ?? [];
-      console.log(`[webResearch] TikTok search "${q}": ${items.length} results`);
-
-      for (const item of items) {
-        const v = item as Record<string, unknown>;
-
-        // AUTHOR GUARD: only keep videos from the target creator
-        const author = (v?.author as Record<string, unknown>) ?? {};
-        const authorId = ((author?.uniqueId as string) ?? (author?.unique_id as string) ?? "").toLowerCase();
-        const authorNorm = normalizeHandle(authorId);
-
-        const isMatch =
-          authorNorm === normalizedHandle ||
-          authorNorm.includes(normalizedHandle) ||
-          normalizedHandle.includes(authorNorm);
-
-        if (!isMatch && authorId !== "") {
-          continue; // Different creator — skip
-        }
-
-        const videoId = (v?.id as string) ?? ((v?.video as Record<string, unknown>)?.id as string) ?? "";
-        if (!videoId || seen.has(videoId)) continue;
-        seen.add(videoId);
-
-        const desc = (v?.desc as string) ?? "";
-        const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
-        const views    = Number(statsObj?.playCount   ?? statsObj?.play_count    ?? 0);
-        const likes    = Number(statsObj?.diggCount   ?? statsObj?.digg_count    ?? 0);
-        const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
-        const saves    = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
-        const shares   = Number(statsObj?.shareCount  ?? statsObj?.share_count   ?? 0);
-        const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
-
-        // Music signals
-        const music = (v?.music as Record<string, unknown>) ?? {};
-        const musicTitle  = (music?.title      as string) ?? "";
-        const musicAuthor = (music?.authorName as string) ?? "";
-        const musicOriginal = Boolean(music?.original ?? false);
-        if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
-          if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
-        }
-        if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
-          if (!musicTitles.includes(`[original audio by @${handle}]`)) {
-            musicTitles.push(`[original audio by @${handle}]`);
-          }
-        }
-
-        // Interaction flags
-        const duetEnabled   = Boolean(v?.duetEnabled   ?? v?.duet_enabled   ?? false);
-        const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
-        const isAd          = Boolean(v?.isAd          ?? v?.is_ad          ?? false);
-        const videoObj      = (v?.video as Record<string, unknown>) ?? {};
-        const durationMs    = Number(videoObj?.duration ?? 0);
-
-        // Collect hashtags from challenges and textExtra
-        const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
-        for (const c of challenges) {
-          const tagName = (c?.title as string) ?? (c?.name as string) ?? "";
-          if (tagName) hashtags.push(`#${tagName}`);
-        }
-        const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? (v?.text_extra as Array<Record<string, unknown>>) ?? [];
-        for (const tag of textExtra) {
-          const tagName = (tag?.hashtagName as string) ?? (tag?.hashtag_name as string) ?? "";
-          if (tagName) hashtags.push(`#${tagName}`);
-        }
-        if (desc) {
-          const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
-          hashtags.push(...inlineTags);
-        }
-
-        if (views > 0) viewCounts.push(views);
-        if (desc) videoTitles.push(desc);
-
-        videoItems.push({
-          id: videoId, caption: desc, views, likes, comments, saves, shares,
-          createTime, musicOriginal, duetEnabled, stitchEnabled, isAd, durationMs,
-        });
-      }
-    } catch (err) {
-      if (isQuotaErr(err)) searchQuotaExhausted = true;
-      console.warn(`[webResearch] TikTok search "${q}" failed:`, err);
+  // ─── PRIMARY SOURCE: HTML scrape of creator profile page ────────────────────
+  const htmlVideos = await fetchTikTokVideosFromProfileHTML(handle, normalizedHandle);
+  for (const v of htmlVideos) {
+    if (!seen.has(v.id)) {
+      seen.add(v.id);
+      videoItems.push(v);
+      if (v.views > 0) viewCounts.push(v.views);
+      if (v.caption) videoTitles.push(v.caption);
     }
   }
 
-  console.log(`[webResearch] @${handle}: ${videoItems.length} confirmed videos — applying 6-3-3 stratified sampling`);
+  console.log(`[webResearch] @${handle}: HTML scrape yielded ${htmlVideos.length} videos`);
+
+  // ─── FALLBACK SOURCE: TikTok search API (only if HTML scrape insufficient) ──
+  if (videoItems.length < 6) {
+    console.log(`[webResearch] @${handle}: HTML scrape found only ${videoItems.length} videos, falling back to search API`);
+    const queries = [handle, `@${handle}`];
+
+    for (const q of queries) {
+      if (videoItems.length >= 12) break; // Stop if we have enough
+      try {
+        const result = await callDataApi("TikTok/search_tiktok_video_general", {
+          query: { keyword: q, count: "20" },  // count MUST be a STRING
+        }) as Record<string, unknown>;
+
+        const items = (result?.item_list as unknown[]) ?? [];
+        console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
+
+        for (const item of items) {
+          const v = item as Record<string, unknown>;
+
+          // AUTHOR GUARD: only keep videos from the target creator
+          const author = (v?.author as Record<string, unknown>) ?? {};
+          const authorId = ((author?.uniqueId as string) ?? (author?.unique_id as string) ?? "").toLowerCase();
+          const authorNorm = normalizeHandle(authorId);
+
+          const isMatch =
+            authorNorm === normalizedHandle ||
+            authorNorm.includes(normalizedHandle) ||
+            normalizedHandle.includes(authorNorm);
+
+          if (!isMatch && authorId !== "") {
+            continue; // Different creator — skip
+          }
+
+          const videoId = (v?.id as string) ?? ((v?.video as Record<string, unknown>)?.id as string) ?? "";
+          if (!videoId || seen.has(videoId)) continue;
+          seen.add(videoId);
+
+          const desc = (v?.desc as string) ?? "";
+          const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
+          const views    = Number(statsObj?.playCount   ?? statsObj?.play_count    ?? 0);
+          const likes    = Number(statsObj?.diggCount   ?? statsObj?.digg_count    ?? 0);
+          const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
+          const saves    = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
+          const shares   = Number(statsObj?.shareCount  ?? statsObj?.share_count   ?? 0);
+          const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
+
+          // Music signals
+          const music = (v?.music as Record<string, unknown>) ?? {};
+          const musicTitle  = (music?.title      as string) ?? "";
+          const musicAuthor = (music?.authorName as string) ?? "";
+          const musicOriginal = Boolean(music?.original ?? false);
+          if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
+            if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
+          }
+          if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
+            if (!musicTitles.includes(`[original audio by @${handle}]`)) {
+              musicTitles.push(`[original audio by @${handle}]`);
+            }
+          }
+
+          // Interaction flags
+          const duetEnabled   = Boolean(v?.duetEnabled   ?? v?.duet_enabled   ?? false);
+          const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
+          const isAd          = Boolean(v?.isAd          ?? v?.is_ad          ?? false);
+          const videoObj      = (v?.video as Record<string, unknown>) ?? {};
+          const durationMs    = Number(videoObj?.duration ?? 0);
+
+          // Collect hashtags from challenges and textExtra
+          const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
+          for (const c of challenges) {
+            const tagName = (c?.title as string) ?? (c?.name as string) ?? "";
+            if (tagName) hashtags.push(`#${tagName}`);
+          }
+          const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? (v?.text_extra as Array<Record<string, unknown>>) ?? [];
+          for (const tag of textExtra) {
+            const tagName = (tag?.hashtagName as string) ?? (tag?.hashtag_name as string) ?? "";
+            if (tagName) hashtags.push(`#${tagName}`);
+          }
+          if (desc) {
+            const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
+            hashtags.push(...inlineTags);
+          }
+
+          if (views > 0) viewCounts.push(views);
+          if (desc) videoTitles.push(desc);
+
+          videoItems.push({
+            id: videoId, caption: desc, views, likes, comments, saves, shares,
+            createTime, musicOriginal, duetEnabled, stitchEnabled, isAd, durationMs,
+          });
+        }
+      } catch (err) {
+        if (isQuotaErr(err)) searchQuotaExhausted = true;
+        console.warn(`[webResearch] TikTok search "${q}" (fallback) failed:`, err);
+      }
+    }
+  }
+
+  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected (HTML + fallback search) — applying 6-3-3 stratified sampling`);
 
   // ─── 6-3-3 Stratified Sampling ─────────────────────────────────────────────
   // Sort all collected videos by createTime descending (newest first)
