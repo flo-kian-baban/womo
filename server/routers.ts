@@ -4,7 +4,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import {
-  createCreatorProfile, getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
+  createCreatorProfile, getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, updateCreatorProfile,
   createBrandProfile, getBrandProfileById, listBrandProfiles, deleteBrandProfile,
   createMatchRecord, getMatchRecordById, listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
@@ -46,6 +46,7 @@ export const appRouter = router({
           culturalVelocity?: string;
           dataConfidenceLevel?: string;
           longitudinalSampleJson?: Record<string, unknown>;
+          discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number }>;
         } | undefined;
         // Research layer throws TRPCError for insufficient data — let it propagate to the client
         const research = await researchCreator(input.handleOrUrl, input.platform);
@@ -69,6 +70,7 @@ export const appRouter = router({
           culturalVelocity: research.culturalVelocity ?? undefined,
           dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
           longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+          discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
         };
 
         // Step 2: AI extraction grounded in real evidence
@@ -120,6 +122,7 @@ export const appRouter = router({
           culturalVelocity: researchData?.culturalVelocity ?? undefined,
           dataConfidenceLevel: researchData?.dataConfidenceLevel ?? undefined,
           longitudinalSampleJson: researchData?.longitudinalSampleJson ?? undefined,
+          discoveredVideoPoolJson: researchData?.discoveredVideoPoolJson as unknown as Record<string, unknown> ?? undefined,
         });
         // Get the inserted ID
         const profiles = await listCreatorProfiles(undefined, extracted.handle);
@@ -146,6 +149,58 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         await deleteCreatorProfile(input.id);
         return { success: true };
+      }),
+
+    // ─── Supplemental Video Ingestion ─────────────────────────────────────────
+    // Fetches transcript for a single TikTok video URL and appends it to the
+    // creator profile's transcript pool, then updates the profile's data.
+    ingestSupplementalVideo: publicProcedure
+      .input(z.object({
+        creatorProfileId: z.number(),
+        videoUrl: z.string().url(),
+        videoId: z.string(),
+        caption: z.string().default(""),
+      }))
+      .mutation(async ({ input }) => {
+        const { fetchSingleTikTokTranscript } = await import("./webResearch");
+        const profile = await getCreatorProfileById(input.creatorProfileId);
+        if (!profile) throw new Error("Creator profile not found");
+
+        // Fetch transcript for this specific video
+        const transcript = await fetchSingleTikTokTranscript(input.videoUrl, input.videoId, input.caption);
+        if (!transcript) throw new Error("Could not fetch transcript for this video. The video may not have captions.");
+
+        // Append to existing transcript excerpts
+        const existingExcerpts = profile.transcriptExcerpts ?? "";
+        const newExcerpt = `[${input.caption.slice(0, 40) || "video"}]: ${transcript.transcript.slice(0, 200)}`;
+        const updatedExcerpts = existingExcerpts
+          ? `${existingExcerpts}\n\n${newExcerpt}`
+          : newExcerpt;
+
+        // Remove this video from the discovered pool
+        const currentPool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number }> | null) ?? [];
+        const updatedPool = currentPool.filter(v => v.id !== input.videoId);
+
+        // Update transcript count and excerpts
+        const newCount = (profile.transcriptCount ?? 0) + 1;
+        const newConfidence: "high" | "medium" | "low" =
+          newCount >= 6 ? "high" : newCount >= 3 ? "medium" : "low";
+
+        await updateCreatorProfile(input.creatorProfileId, {
+          transcriptCount: newCount,
+          transcriptExcerpts: updatedExcerpts,
+          dataConfidenceLevel: newConfidence,
+          discoveredVideoPoolJson: updatedPool as unknown as Record<string, unknown>,
+        });
+
+        return {
+          success: true,
+          videoId: input.videoId,
+          transcriptWordCount: transcript.wordCount,
+          newTranscriptCount: newCount,
+          newDataConfidence: newConfidence,
+          transcriptExcerpt: transcript.transcript.slice(0, 300),
+        };
       }),
   }),
 

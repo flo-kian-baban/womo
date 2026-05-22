@@ -1,8 +1,11 @@
 import { Separator } from "@/components/ui/separator";
-import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic } from "lucide-react";
+import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic, Plus, ExternalLink, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import type { CreatorProfile } from "../../../drizzle/schema";
 import TranscriptPanel from "./TranscriptPanel";
 import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
+import { trpc } from "../lib/trpc";
+import { toast } from "sonner";
+import { useState } from "react";
 
 interface CreatorProfileCardProps {
   profile: CreatorProfile;
@@ -142,6 +145,96 @@ function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknow
   }
 
   return <span className="text-sm text-foreground">{String(value)}</span>;
+}
+
+// ─── Supplemental Video Panel ────────────────────────────────────────────────
+function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
+  const utils = trpc.useUtils();
+  const [ingestingId, setIngestingId] = useState<string | null>(null);
+  const [ingestedIds, setIngestedIds] = useState<Set<string>>(new Set());
+
+  const pool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number }> | null) ?? [];
+  const availablePool = pool.filter(v => !ingestedIds.has(v.id));
+
+  const ingestMutation = trpc.creator.ingestSupplementalVideo.useMutation({
+    onSuccess: (data) => {
+      setIngestedIds(prev => new Set(Array.from(prev).concat(data.videoId)));
+      setIngestingId(null);
+      toast.success(`Transcript added — ${data.transcriptWordCount} words ingested. Data confidence: ${data.newDataConfidence}.`);
+      utils.creator.get.invalidate({ id: profile.id });
+      utils.creator.list.invalidate();
+    },
+    onError: (err) => {
+      setIngestingId(null);
+      toast.error(`Could not fetch transcript: ${err.message}`);
+    },
+  });
+
+  if (availablePool.length === 0) return null;
+
+  const transcriptCount = profile.transcriptCount ?? 0;
+  const isBelowTarget = transcriptCount < 12;
+
+  return (
+    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-xs font-semibold text-amber-400">
+            {isBelowTarget ? `Sample Shortfall — ${transcriptCount}/12 transcripts ingested` : "Additional Videos Available"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {availablePool.length} additional confirmed video{availablePool.length !== 1 ? "s" : ""} found. Click to pull transcript data into this profile.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+        {availablePool.map((video) => {
+          const isLoading = ingestingId === video.id;
+          const date = video.createTime ? new Date(video.createTime * 1000).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "";
+          return (
+            <div key={video.id} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/50 border border-border/50 group">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground/80 truncate leading-snug">
+                  {video.caption || "(no caption)"}
+                </p>
+                {date && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{date}</p>}
+              </div>
+              <a
+                href={video.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 rounded text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0"
+                title="Open on TikTok"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                onClick={() => {
+                  setIngestingId(video.id);
+                  ingestMutation.mutate({
+                    creatorProfileId: profile.id,
+                    videoUrl: video.url,
+                    videoId: video.id,
+                    caption: video.caption,
+                  });
+                }}
+                disabled={isLoading || ingestingId !== null}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+              >
+                {isLoading ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Fetching...</>
+                ) : (
+                  <><Plus className="w-3 h-3" /> Add</>  
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function CreatorProfileCard({ profile, compact = false }: CreatorProfileCardProps) {
@@ -352,6 +445,9 @@ export default function CreatorProfileCard({ profile, compact = false }: Creator
           </div>
         </div>
       )}
+
+      {/* ── Supplemental Video Pool ─────────────────────────────────────────── */}
+      {!compact && <SupplementalVideoPanel profile={profile} />}
 
       {/* ── AI Summary ──────────────────────────────────────────────────────── */}
       {profile.aiSummary && (

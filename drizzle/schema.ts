@@ -101,6 +101,7 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   culturalVelocity: varchar("culturalVelocity", { length: 32 }),  // Focusing | Drifting | Insufficient Data
   dataConfidenceLevel: varchar("dataConfidenceLevel", { length: 16 }), // high | medium | low
   longitudinalSampleJson: json("longitudinalSampleJson"), // LongitudinalSample serialized
+  discoveredVideoPoolJson: json("discoveredVideoPoolJson"), // Array<{id,url,caption,createTime}> — unsampled confirmed videos
 
   // Raw AI summary
   aiSummary: text("aiSummary"),

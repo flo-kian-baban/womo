@@ -85,6 +85,12 @@ export async function deleteCreatorProfile(id: number) {
   await db.delete(creatorProfiles).where(eq(creatorProfiles.id, id));
 }
 
+export async function updateCreatorProfile(id: number, data: Partial<InsertCreatorProfile>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(creatorProfiles).set(data).where(eq(creatorProfiles.id, id));
+}
+
 // ─── Brand Profiles ───────────────────────────────────────────────────────────
 
 export async function createBrandProfile(data: InsertBrandProfile) {

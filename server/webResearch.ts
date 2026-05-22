@@ -82,6 +82,8 @@ export interface CreatorResearchResult {
   longitudinalSample?: LongitudinalSample; // 6-3-3 stratified sample
   culturalVelocity?: "Focusing" | "Drifting" | "Insufficient Data";
   dataConfidenceLevel?: "high" | "medium" | "low";
+  // Supplemental video pool — all discovered-but-unsampled video URLs
+  discoveredVideoPool?: Array<{ id: string; url: string; caption: string; createTime: number }>;
 }
 
 export interface BrandResearchResult {
@@ -607,6 +609,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   engagementSignals: EngagementSignals;
   quotaExhausted: boolean;
   longitudinalSample: LongitudinalSample;
+  discoveredVideoPool: Array<{ id: string; url: string; caption: string; createTime: number }>;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -654,13 +657,18 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
   console.log(`[webResearch] @${handle}: API fetch yielded ${apiVideos.length} videos`);
 
-  // ─── FALLBACK SOURCE: TikTok search API (only if API fetch insufficient) ──
-  if (videoItems.length < 6) {
-    console.log(`[webResearch] @${handle}: API fetch found only ${videoItems.length} videos, falling back to search API`);
-    const queries = [handle, `@${handle}`];
+  // ─── SUPPLEMENTAL SOURCE: Multi-query TikTok search (always runs to maximise pool) ──
+  // Uses dot-stripped handle variant to work around TikTok search tokenisation
+  {
+    const noDot = handle.replace(/\./g, "");
+    const queries = [
+      handle,          // kaylee.nhi
+      `@${handle}`,    // @kaylee.nhi
+      noDot,           // kayleenhi
+      `@${noDot}`,     // @kayleenhi
+    ];
 
     for (const q of queries) {
-      if (videoItems.length >= 12) break; // Stop if we have enough
       try {
         const result = await callDataApi("TikTok/search_tiktok_video_general", {
           query: { keyword: q, count: "20" },  // count MUST be a STRING
@@ -746,12 +754,12 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
         }
       } catch (err) {
         if (isQuotaErr(err)) searchQuotaExhausted = true;
-        console.warn(`[webResearch] TikTok search "${q}" (fallback) failed:`, err);
+        console.warn(`[webResearch] TikTok search "${q}" (supplemental) failed:`, err);
       }
     }
   }
 
-  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected (HTML + fallback search) — applying 6-3-3 stratified sampling`);
+  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
 
   // ─── 6-3-3 Stratified Sampling ─────────────────────────────────────────────
   // Sort all collected videos by createTime descending (newest first)
@@ -841,16 +849,16 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   }
 
   // Combine the 12 sampled videos (deduplicated)
-  const sampledIds = new Set<string>();
+  const bucketedIds = new Set<string>();
   const sampledVideos: Array<{ item: typeof videoItems[0]; bucket: "recent" | "mid" | "anchor" }> = [];
   for (const v of recentBucket) {
-    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "recent" }); }
+    if (!bucketedIds.has(v.id)) { bucketedIds.add(v.id); sampledVideos.push({ item: v, bucket: "recent" }); }
   }
   for (const v of midBucket) {
-    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "mid" }); }
+    if (!bucketedIds.has(v.id)) { bucketedIds.add(v.id); sampledVideos.push({ item: v, bucket: "mid" }); }
   }
   for (const v of anchorBucket) {
-    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "anchor" }); }
+    if (!bucketedIds.has(v.id)) { bucketedIds.add(v.id); sampledVideos.push({ item: v, bucket: "anchor" }); }
   }
 
   const midUsedFallback = midFallback && midBucket.length > midCandidates.length;
@@ -973,7 +981,23 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     culturalVelocity,
   };
 
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample };
+  // Build the supplemental video pool: all confirmed videos NOT already sampled
+  const sampledIds = new Set([
+    ...longitudinalRecent.map(t => t.videoId),
+    ...longitudinalMid.map(t => t.videoId),
+    ...longitudinalAnchor.map(t => t.videoId),
+  ]);
+  const discoveredVideoPool = videoItems
+    .filter(v => !sampledIds.has(v.id))
+    .sort((a, b) => b.createTime - a.createTime)
+    .map(v => ({
+      id: v.id,
+      url: `https://www.tiktok.com/@${handle}/video/${v.id}`,
+      caption: v.caption,
+      createTime: v.createTime,
+    }));
+
+  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -1524,7 +1548,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool } = transcriptData;
   if (searchQuotaExhausted) quotaExhausted = true;
 
   // Step 3: HTML scrape for additional video titles (profile page)
@@ -1679,6 +1703,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     longitudinalSample,
     culturalVelocity: longitudinalSample?.culturalVelocity,
     dataConfidenceLevel,
+    discoveredVideoPool,
   };
 }
 
@@ -2135,4 +2160,76 @@ export async function researchCreator(
 
   // Default: TikTok
   return researchTikTokCreator(handle);
+}
+
+/**
+ * Exported helper: fetch transcript for a single TikTok video by URL.
+ * Used by the supplemental video ingestion feature.
+ * Tries captions first, then falls back to Whisper transcription.
+ */
+export async function fetchSingleTikTokTranscript(
+  videoUrl: string,
+  videoId: string,
+  caption: string
+): Promise<TranscriptEntry | null> {
+  // Extract handle from URL (e.g. https://www.tiktok.com/@kaylee.nhi/video/123)
+  const handleMatch = videoUrl.match(/tiktok\.com\/@([^/]+)/);
+  const handle = handleMatch ? handleMatch[1] : "unknown";
+
+  // Try captions first
+  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
+  if (captionResult) return captionResult;
+
+  // Whisper fallback
+  console.log(`[webResearch] Supplemental video ${videoId}: no captions, trying Whisper...`);
+  try {
+    const { default: axios } = await import("axios");
+    // Fetch the video page to get the download URL
+    const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
+    const rehydrationMatch = html.match(
+      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
+    );
+    if (!rehydrationMatch) return null;
+
+    const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
+    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+    const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
+    const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
+    const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
+    const playAddr = (videoObj?.playAddr as string) ?? (videoObj?.downloadAddr as string) ?? "";
+
+    if (!playAddr) return null;
+
+    // Download video to temp file for Whisper
+    const os = await import("os");
+    const path = await import("path");
+    const fs = await import("fs");
+    const tmpFile = path.join(os.tmpdir(), `tiktok_${videoId}.mp4`);
+
+    const videoResp = await axios.get(playAddr, {
+      headers: { "Referer": "https://www.tiktok.com/", "User-Agent": "Mozilla/5.0" },
+      responseType: "arraybuffer",
+      timeout: 30000,
+    });
+    fs.writeFileSync(tmpFile, Buffer.from(videoResp.data as ArrayBuffer));
+
+    // Upload to storage and transcribe
+    const { storagePut } = await import("./storage");
+    const { key, url } = await storagePut(`whisper/supplemental_${videoId}.mp4`, fs.readFileSync(tmpFile), "video/mp4");
+    const absoluteUrl = url.startsWith("/") ? `${process.env.BUILT_IN_FORGE_API_URL ?? ""}${url}` : url;
+
+    const { transcribeAudio } = await import("./_core/voiceTranscription");
+    const result = await transcribeAudio({ audioUrl: absoluteUrl });
+    fs.unlinkSync(tmpFile);
+
+    if (!result || !('text' in result) || !result.text || result.text.length < 10) return null;
+
+    const transcript = result.text;
+    const wordCount = transcript.split(/\s+/).length;
+    console.log(`[webResearch] ✅ Whisper transcript for supplemental video ${videoId}: ${wordCount} words`);
+    return { videoId, videoUrl, caption, transcript, wordCount, transcriptSource: "whisper" };
+  } catch (err) {
+    console.warn(`[webResearch] Whisper fallback failed for supplemental video ${videoId}:`, (err as Error).message);
+    return null;
+  }
 }
