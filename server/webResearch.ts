@@ -2165,7 +2165,9 @@ export async function researchCreator(
 /**
  * Exported helper: fetch transcript for a single TikTok video by URL.
  * Used by the supplemental video ingestion feature.
- * Tries captions first, then falls back to Whisper transcription.
+ * Tries captions first (re-fetching fresh page HTML to get current subtitle URLs).
+ * Returns null if no captions are available — Whisper is not used here because
+ * TikTok playAddr URLs require authentication and expire quickly.
  */
 export async function fetchSingleTikTokTranscript(
   videoUrl: string,
@@ -2176,60 +2178,56 @@ export async function fetchSingleTikTokTranscript(
   const handleMatch = videoUrl.match(/tiktok\.com\/@([^/]+)/);
   const handle = handleMatch ? handleMatch[1] : "unknown";
 
-  // Try captions first
-  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
-  if (captionResult) return captionResult;
-
-  // Whisper fallback
-  console.log(`[webResearch] Supplemental video ${videoId}: no captions, trying Whisper...`);
+  // Re-fetch the video page to get fresh subtitle URLs (playAddr/subtitleInfos expire)
+  // This is more reliable than using cached URLs from the initial analysis
   try {
-    const { default: axios } = await import("axios");
-    // Fetch the video page to get the download URL
     const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
     const rehydrationMatch = html.match(
       /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
     );
-    if (!rehydrationMatch) return null;
+    if (rehydrationMatch) {
+      const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
+      const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+      const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
+      const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
+      const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
+      const subtitleInfos = (videoObj?.subtitleInfos as Array<Record<string, unknown>>) ?? [];
 
-    const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
-    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-    const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
-    const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
-    const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
-    const playAddr = (videoObj?.playAddr as string) ?? (videoObj?.downloadAddr as string) ?? "";
+      if (subtitleInfos.length > 0) {
+        // Fresh subtitles found — fetch them
+        const engSub = subtitleInfos.find(
+          (s) => (s?.LanguageCodeName as string)?.startsWith("eng")
+        ) ?? subtitleInfos[0];
+        const subtitleUrl = engSub?.Url as string;
 
-    if (!playAddr) return null;
-
-    // Download video to temp file for Whisper
-    const os = await import("os");
-    const path = await import("path");
-    const fs = await import("fs");
-    const tmpFile = path.join(os.tmpdir(), `tiktok_${videoId}.mp4`);
-
-    const videoResp = await axios.get(playAddr, {
-      headers: { "Referer": "https://www.tiktok.com/", "User-Agent": "Mozilla/5.0" },
-      responseType: "arraybuffer",
-      timeout: 30000,
-    });
-    fs.writeFileSync(tmpFile, Buffer.from(videoResp.data as ArrayBuffer));
-
-    // Upload to storage and transcribe
-    const { storagePut } = await import("./storage");
-    const { key, url } = await storagePut(`whisper/supplemental_${videoId}.mp4`, fs.readFileSync(tmpFile), "video/mp4");
-    const absoluteUrl = url.startsWith("/") ? `${process.env.BUILT_IN_FORGE_API_URL ?? ""}${url}` : url;
-
-    const { transcribeAudio } = await import("./_core/voiceTranscription");
-    const result = await transcribeAudio({ audioUrl: absoluteUrl });
-    fs.unlinkSync(tmpFile);
-
-    if (!result || !('text' in result) || !result.text || result.text.length < 10) return null;
-
-    const transcript = result.text;
-    const wordCount = transcript.split(/\s+/).length;
-    console.log(`[webResearch] ✅ Whisper transcript for supplemental video ${videoId}: ${wordCount} words`);
-    return { videoId, videoUrl, caption, transcript, wordCount, transcriptSource: "whisper" };
+        if (subtitleUrl) {
+          const { default: axios } = await import("axios");
+          const subResponse = await axios.get(subtitleUrl, {
+            headers: {
+              "Referer": "https://www.tiktok.com/",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            timeout: 10000,
+            responseType: "text",
+          });
+          const vttText = subResponse.data as string;
+          const transcript = parseWebVTT(vttText);
+          if (transcript && transcript.length >= 10) {
+            const wordCount = transcript.split(/\s+/).length;
+            console.log(`[webResearch] ✅ Fresh subtitle transcript for supplemental video ${videoId}: ${wordCount} words`);
+            return { videoId, videoUrl, caption, transcript, wordCount };
+          }
+        }
+      }
+    }
   } catch (err) {
-    console.warn(`[webResearch] Whisper fallback failed for supplemental video ${videoId}:`, (err as Error).message);
-    return null;
+    console.warn(`[webResearch] Fresh page fetch failed for supplemental video ${videoId}:`, (err as Error).message);
   }
+
+  // Try the original caption fetch as a secondary attempt
+  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
+  if (captionResult) return captionResult;
+
+  console.log(`[webResearch] Supplemental video ${videoId}: no captions available (TikTok video download not supported server-side)`);
+  return null;
 }

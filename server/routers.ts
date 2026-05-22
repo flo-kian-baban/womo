@@ -168,7 +168,26 @@ export const appRouter = router({
 
         // Fetch transcript for this specific video
         const transcript = await fetchSingleTikTokTranscript(input.videoUrl, input.videoId, input.caption);
-        if (!transcript) throw new Error("Could not fetch transcript for this video. The video may not have captions.");
+
+        // Always remove this video from the pool (whether or not we got a transcript)
+        const currentPool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number }> | null) ?? [];
+        const updatedPool = currentPool.filter(v => v.id !== input.videoId);
+
+        if (!transcript) {
+          // No captions available — remove from pool so user doesn't retry indefinitely
+          await updateCreatorProfile(input.creatorProfileId, {
+            discoveredVideoPoolJson: updatedPool as unknown as Record<string, unknown>,
+          });
+          return {
+            success: false,
+            noCaptions: true,
+            videoId: input.videoId,
+            transcriptWordCount: 0,
+            newTranscriptCount: profile.transcriptCount ?? 0,
+            newDataConfidence: (profile.dataConfidenceLevel ?? "low") as "high" | "medium" | "low",
+            transcriptExcerpt: "",
+          };
+        }
 
         // Append to existing transcript excerpts
         const existingExcerpts = profile.transcriptExcerpts ?? "";
@@ -176,10 +195,6 @@ export const appRouter = router({
         const updatedExcerpts = existingExcerpts
           ? `${existingExcerpts}\n\n${newExcerpt}`
           : newExcerpt;
-
-        // Remove this video from the discovered pool
-        const currentPool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number }> | null) ?? [];
-        const updatedPool = currentPool.filter(v => v.id !== input.videoId);
 
         // Update transcript count and excerpts
         const newCount = (profile.transcriptCount ?? 0) + 1;
@@ -195,6 +210,7 @@ export const appRouter = router({
 
         return {
           success: true,
+          noCaptions: false,
           videoId: input.videoId,
           transcriptWordCount: transcript.wordCount,
           newTranscriptCount: newCount,

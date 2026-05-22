@@ -160,7 +160,11 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
     onSuccess: (data) => {
       setIngestedIds(prev => new Set(Array.from(prev).concat(data.videoId)));
       setIngestingId(null);
-      toast.success(`Transcript added — ${data.transcriptWordCount} words ingested. Data confidence: ${data.newDataConfidence}.`);
+      if (data.noCaptions) {
+        toast.warning(`No captions available for this video — it has been removed from the queue.`);
+      } else {
+        toast.success(`Transcript added — ${data.transcriptWordCount} words ingested. Data confidence: ${data.newDataConfidence}.`);
+      }
       utils.creator.get.invalidate({ id: profile.id });
       utils.creator.list.invalidate();
     },
