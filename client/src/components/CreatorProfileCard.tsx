@@ -153,8 +153,9 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestedIds, setIngestedIds] = useState<Set<string>>(new Set());
 
-  const pool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number }> | null) ?? [];
-  const availablePool = pool.filter(v => !ingestedIds.has(v.id));
+  const pool = (profile.discoveredVideoPoolJson as Array<{ id: string; url: string; caption: string; createTime: number; alreadySampled?: boolean }> | null) ?? [];
+  // Show all videos — both already-sampled and new ones
+  const displayPool = pool.filter(v => !ingestedIds.has(v.id));
 
   const ingestMutation = trpc.creator.ingestSupplementalVideo.useMutation({
     onSuccess: (data) => {
@@ -174,10 +175,12 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
     },
   });
 
-  if (availablePool.length === 0) return null;
+  if (displayPool.length === 0) return null;
 
   const transcriptCount = profile.transcriptCount ?? 0;
   const isBelowTarget = transcriptCount < 12;
+  const newVideos = displayPool.filter(v => !v.alreadySampled);
+  const sampledVideos = displayPool.filter(v => v.alreadySampled);
 
   return (
     <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
@@ -185,23 +188,37 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
         <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
         <div>
           <p className="text-xs font-semibold text-amber-400">
-            {isBelowTarget ? `Sample Shortfall — ${transcriptCount}/12 transcripts ingested` : "Additional Videos Available"}
+            {isBelowTarget ? `Sample Shortfall — ${transcriptCount}/12 transcripts ingested` : "Video Pool"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {availablePool.length} additional confirmed video{availablePool.length !== 1 ? "s" : ""} found. Click to pull transcript data into this profile.
+            {displayPool.length} confirmed video{displayPool.length !== 1 ? "s" : ""} found
+            {newVideos.length > 0 && ` · ${newVideos.length} new`}
+            {sampledVideos.length > 0 && ` · ${sampledVideos.length} already sampled`}.
+            Click <strong>Add</strong> to pull additional transcript language into this profile.
           </p>
         </div>
       </div>
-      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-        {availablePool.map((video) => {
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {displayPool.map((video) => {
           const isLoading = ingestingId === video.id;
           const date = video.createTime ? new Date(video.createTime * 1000).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "";
           return (
-            <div key={video.id} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/50 border border-border/50 group">
+            <div key={video.id} className={`flex items-center gap-2 p-2 rounded-lg border group ${
+              video.alreadySampled
+                ? "bg-secondary/30 border-border/30"
+                : "bg-secondary/50 border-border/50"
+            }`}>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground/80 truncate leading-snug">
-                  {video.caption || "(no caption)"}
-                </p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-xs text-foreground/80 truncate leading-snug flex-1 min-w-0">
+                    {video.caption || "(no caption)"}
+                  </p>
+                  {video.alreadySampled && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 flex-shrink-0">
+                      Sampled
+                    </span>
+                  )}
+                </div>
                 {date && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{date}</p>}
               </div>
               <a
@@ -230,7 +247,7 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
                 {isLoading ? (
                   <><Loader2 className="w-3 h-3 animate-spin" /> Fetching...</>
                 ) : (
-                  <><Plus className="w-3 h-3" /> Add</>  
+                  <><Plus className="w-3 h-3" /> Add</>
                 )}
               </button>
             </div>

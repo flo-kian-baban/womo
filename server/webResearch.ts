@@ -981,20 +981,22 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     culturalVelocity,
   };
 
-  // Build the supplemental video pool: all confirmed videos NOT already sampled
+  // Build the supplemental video pool: ALL confirmed videos (including sampled ones)
+  // This gives the user the full picture of what was found and allows adding more transcript
+  // data from any video — even ones already sampled (to get longer/richer transcripts)
   const sampledIds = new Set([
     ...longitudinalRecent.map(t => t.videoId),
     ...longitudinalMid.map(t => t.videoId),
     ...longitudinalAnchor.map(t => t.videoId),
   ]);
   const discoveredVideoPool = videoItems
-    .filter(v => !sampledIds.has(v.id))
     .sort((a, b) => b.createTime - a.createTime)
     .map(v => ({
       id: v.id,
       url: `https://www.tiktok.com/@${handle}/video/${v.id}`,
       caption: v.caption,
       createTime: v.createTime,
+      alreadySampled: sampledIds.has(v.id),
     }));
 
   return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool };
@@ -1651,7 +1653,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   const transcriptTexts = transcripts.map(t => t.transcript);
   const rawKeywords = extractKeywords([...allTitles, bio, ...transcriptTexts]);
 
-  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 1000);
+  // Use full transcript text for richer AI analysis (up to 6000 chars combined)
+  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
   const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, bio, combinedTranscriptText);
   const contentThemes = inferContentThemes(allTitles, topHashtags, bio);
 
@@ -1661,10 +1664,10 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     if (locationMatch) location = locationMatch[1];
   }
 
-  // Build transcript excerpts for DB storage
+  // Build transcript excerpts for DB storage — store ALL transcripts in full (no truncation)
+  // This maximises the language data available for scoring and cultural analysis
   const transcriptExcerpts = transcripts
-    .slice(0, 3)
-    .map(t => `[${t.caption.slice(0, 40) || "video"}]: ${t.transcript.slice(0, 200)}`)
+    .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
     .join("\n\n");
 
   // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
@@ -1748,7 +1751,8 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
   const topHashtags = extractHashtags([...uniqueVideoTitles, bio]);
   const transcriptTexts = transcripts.map(t => t.transcript);
   const rawKeywords = Array.from(new Set([...channelKeywords, ...extractKeywords([...uniqueVideoTitles, bio, ...transcriptTexts])])).slice(0, 40);
-  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 1000);
+  // Use full transcript text for richer AI analysis (up to 6000 chars combined)
+  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
   const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio, combinedTranscriptText);
   const contentThemes = inferContentThemes(uniqueVideoTitles, topHashtags, bio);
 
@@ -1756,9 +1760,9 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     ? `https://www.youtube.com/channel/${channelId}`
     : `https://www.youtube.com/@${handle}`;
 
+  // Store ALL transcripts in full (no truncation) for maximum language data
   const transcriptExcerpts = transcripts
-    .slice(0, 3)
-    .map(t => `[${t.caption.slice(0, 40) || "video"}]: ${t.transcript.slice(0, 200)}`)
+    .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
     .join("\n\n");
 
   // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
