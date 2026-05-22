@@ -30,7 +30,10 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const ANALYSIS_STEPS = [
-  "Researching brand's public presence and history...",
+  "Initiating recursive semantic crawl of brand website...",
+  "Following internal links: About, Story, Mission, Values pages...",
+  "Targeting 2,000+ words of semantic content...",
+  "Ingesting top 50 Google Maps reviews for perceived identity...",
   "Analyzing visual identity and tone...",
   "Identifying Jungian archetype...",
   "Extracting emotional promise and audience tribe...",
@@ -38,7 +41,7 @@ const ANALYSIS_STEPS = [
   "Generating Barthes myth sentence...",
   "Classifying brand type for weight selection...",
   "Loading α/β/γ weight configuration...",
-  "Assembling brand cultural profile...",
+  "Assembling brand semantic core...",
 ];
 
 export default function AnalyzeBrand() {
@@ -157,8 +160,13 @@ export default function AnalyzeBrand() {
           {/* Analysis progress */}
           {analyzeMutation.isPending && (
             <div className="mt-4 fit-card rounded-xl p-5 animate-fade-in-up">
-              <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-3">
-                AI Analysis in Progress
+              <div className="mb-3">
+                <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                  Deep Anthropological Analysis in Progress
+                </div>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  Analyzing brand semantic core across website and reviews. Processing time: ~45–60s.
+                </p>
               </div>
               <div className="space-y-2">
                 {ANALYSIS_STEPS.map((step, i) => (

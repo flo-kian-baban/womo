@@ -338,3 +338,22 @@
 - [x] Append PARR/QoV validation strategy note to developer documentation (connex-fit-developer-overview.md)
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
+
+## Phase 1.5 — Deep Data & Intelligence Layer
+
+- [x] 6-3-3 stratified TikTok sampling: fetch 6 recent + 3 from ~9mo + 3 "Anchor" from ~18mo (12 total)
+- [x] Metadata-first approach: fetch full video ID list first, then selectively fetch transcripts for sampled IDs
+- [x] Whisper AI transcription fallback for videos missing built-in captions
+- [x] Add longitudinalSample JSON column to creator_profiles schema (stores 6-3-3 bucket data)
+- [x] Add culturalVelocity + dataConfidenceLevel columns to creator_profiles schema
+- [x] Recursive semantic brand crawl: follow About/Story/Blog internal links to reach 2,000+ words
+- [x] Replace Yelp with Google Maps top-50 reviews (remove Yelp scraper)
+- [x] Add brandSemanticWordCount + brandCrawlPages columns to brand_profiles schema
+- [x] Shared keyword extraction engine: compute top-10 overlapping keywords between creator transcripts and brand content
+- [x] Add wordCloudData + alignmentNarrative + culturalVelocity columns to match_records schema
+- [x] Visual word cloud component on F.I.T. detail page (top 10 shared keywords)
+- [x] Alignment narrative: AI-generated 2-sentence match summary on F.I.T. detail page
+- [x] Cultural Velocity indicator: "Focusing" vs "Drifting" on F.I.T. detail page
+- [x] Data Confidence Warning: show "Low Data Confidence" banner when 6-3-3 incomplete or brand <2000 words
+- [x] Enhanced loading state copy: "Deep Anthropological Analysis in Progress..." (~45-60s message)
+- [x] Update internal dev docs with Phase 1.5 implementation note

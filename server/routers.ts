@@ -43,6 +43,9 @@ export const appRouter = router({
           topHashtags?: string[]; recentVideoTitles?: string[];
           transcriptCount?: number; transcriptExcerpts?: string;
           decodedSymbols?: Record<string, unknown>;
+          culturalVelocity?: string;
+          dataConfidenceLevel?: string;
+          longitudinalSampleJson?: Record<string, unknown>;
         } | undefined;
         // Research layer throws TRPCError for insufficient data — let it propagate to the client
         const research = await researchCreator(input.handleOrUrl, input.platform);
@@ -63,6 +66,9 @@ export const appRouter = router({
           transcriptCount: research.transcriptCount ?? 0,
           transcriptExcerpts: research.transcriptExcerpts || undefined,
           decodedSymbols: research.decodedSymbols ?? undefined,
+          culturalVelocity: research.culturalVelocity ?? undefined,
+          dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+          longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
         };
 
         // Step 2: AI extraction grounded in real evidence
@@ -111,6 +117,9 @@ export const appRouter = router({
           transcriptCount: researchData?.transcriptCount ?? 0,
           transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
           decodedSymbols: researchData?.decodedSymbols ?? undefined,
+          culturalVelocity: researchData?.culturalVelocity ?? undefined,
+          dataConfidenceLevel: researchData?.dataConfidenceLevel ?? undefined,
+          longitudinalSampleJson: researchData?.longitudinalSampleJson ?? undefined,
         });
         // Get the inserted ID
         const profiles = await listCreatorProfiles(undefined, extracted.handle);
@@ -355,6 +364,8 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorThemes,
           brandKeywords,
           brandThemes,
+          culturalVelocity: (creator.culturalVelocity as string | null) ?? "Insufficient Data",
+          dataConfidenceLevel: (creator.dataConfidenceLevel as string | null) ?? "low",
         });
 
         // Generate Synergy Narrative + Content Directions
@@ -502,6 +513,10 @@ Write the following in JSON format:
           sharedThemes: result.sharedThemes as unknown as string[],
           // QoV — Quality of View
           qovScore: result.qovScore,
+          // Phase 1.5 Visual Intelligence
+          alignmentNarrative: result.alignmentNarrative || null,
+          culturalVelocity: result.culturalVelocity || null,
+          dataConfidenceLevel: result.dataConfidenceLevel || null,
           // Synergy Narrative + Content Directions
           synergyNarrative: synergyNarrative || null,
           contentDirections: contentDirections.length > 0 ? contentDirections as unknown as Record<string, unknown>[] : null,

@@ -663,6 +663,9 @@ export interface FullFITCalculationInput {
   creatorThemes?: string[];
   brandKeywords?: string[];
   brandThemes?: string[];
+  // Phase 1.5 additions
+  culturalVelocity?: string;      // from longitudinal sample
+  dataConfidenceLevel?: string;   // overall data quality
 }
 
 export interface FullFITResult {
@@ -696,6 +699,10 @@ export interface FullFITResult {
   symbolicOverlapScore: number;
   // QoV — Quality of View (percentage, 0–100)
   qovScore: number;
+  // Phase 1.5 Visual Intelligence
+  alignmentNarrative: string;  // AI-generated 2-sentence match summary
+  culturalVelocity: "Focusing" | "Drifting" | "Insufficient Data"; // creator trajectory
+  dataConfidenceLevel: "high" | "medium" | "low"; // overall data quality
 }
 
 export function runFullFITCalculation(input: FullFITCalculationInput): FullFITResult {
@@ -760,6 +767,25 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
   // QoV = (fitScore / 10) × (parrScore / 100) — expressed as a percentage (0–100)
   const qovScore = Math.round((fitScore / 10) * (parrScore / 100) * 100 * 10) / 10;
 
+  // Phase 1.5: Alignment Narrative — AI-generated 2-sentence match summary
+  // This is a synchronous rule-based summary; LLM-generated version is computed in the router
+  const creatorArch = input.creatorArchetype ?? "Unknown";
+  const brandArch   = input.brandArchetype ?? "Unknown";
+  const archetypeMatch = archetypeMatchScore >= 80 ? "strong" : archetypeMatchScore >= 60 ? "moderate" : "weak";
+  const parrTier = parrScore >= 80 ? "high" : parrScore >= 60 ? "moderate" : "low";
+  const alignmentNarrative = [
+    `Both entities share a ${archetypeMatch} archetype alignment: the Creator operates as a "${creatorArch}" while the Brand projects a "${brandArch}" identity.`,
+    parrTier === "high"
+      ? `The creator's audience shows high cultural receptivity (PARR: ${parrScore}%), indicating strong structural compatibility for this partnership.`
+      : parrTier === "moderate"
+      ? `Audience receptivity is moderate (PARR: ${parrScore}%); recommend aligning content tone with the brand's symbolic vocabulary before activating.`
+      : `Audience receptivity is low (PARR: ${parrScore}%); significant archetype tension exists—proceed only with a carefully crafted cultural bridge strategy.`,
+  ].join(" ");
+
+  // Cultural velocity from longitudinal sample (passed in from creator research)
+  const culturalVelocity = (input.culturalVelocity as "Focusing" | "Drifting" | "Insufficient Data") ?? "Insufficient Data";
+  const dataConfidenceLevel = (input.dataConfidenceLevel as "high" | "medium" | "low") ?? "low";
+
   return {
     archetypeMatchScore,
     mythAlignmentScore: input.mythAlignmentScore,
@@ -786,5 +812,8 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     sharedThemes,
     symbolicOverlapScore,
     qovScore,
+    alignmentNarrative,
+    culturalVelocity,
+    dataConfidenceLevel,
   };
 }

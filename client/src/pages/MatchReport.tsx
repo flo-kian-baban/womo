@@ -1,7 +1,8 @@
 import { useParams, Link } from "wouter";
 import {
   ArrowLeft, FileJson, AlertTriangle, CheckCircle2, XCircle, AlertCircle,
-  Sparkles, TrendingUp, Users, Lightbulb, Hash, BarChart3, ExternalLink, Info
+  Sparkles, TrendingUp, Users, Lightbulb, Hash, BarChart3, ExternalLink, Info,
+  TrendingDown, Minus, ShieldAlert
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,84 @@ function PARRMeter({ score, label }: { score: number; label: string }) {
       <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
         The predicted percentage of a creator's audience that is culturally receptive to the brand message.
       </p>
+    </div>
+  );
+}
+
+// ─── Word Cloud ─────────────────────────────────────────────────────────────
+
+function SemanticWordCloud({ keywords, maxCount = 10 }: { keywords: string[]; maxCount?: number }) {
+  const words = keywords.slice(0, maxCount);
+  if (words.length === 0) return null;
+
+  // Assign visual weight based on position (first = largest)
+  const sizes = [
+    "text-2xl font-bold", "text-xl font-bold", "text-xl font-semibold",
+    "text-lg font-semibold", "text-lg font-medium", "text-base font-medium",
+    "text-base", "text-sm", "text-sm", "text-xs",
+  ];
+  const opacities = ["opacity-100", "opacity-90", "opacity-85", "opacity-80", "opacity-75",
+    "opacity-70", "opacity-65", "opacity-60", "opacity-55", "opacity-50"];
+
+  // Shuffle for visual variety while keeping weight
+  const shuffled = words.map((w, i) => ({ word: w, size: sizes[i] ?? "text-xs", opacity: opacities[i] ?? "opacity-50" }));
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
+  }
+
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-2 items-baseline justify-center py-2">
+      {shuffled.map(({ word, size, opacity }) => (
+        <span
+          key={word}
+          className={`${size} ${opacity} text-primary capitalize font-serif tracking-wide transition-all hover:opacity-100 cursor-default`}
+        >
+          {word}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── Cultural Velocity Indicator ─────────────────────────────────────────────
+
+function CulturalVelocityBadge({ velocity }: { velocity: string }) {
+  if (velocity === "Focusing") {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-400/30 bg-green-400/5">
+        <TrendingUp className="w-4 h-4 text-green-400 flex-shrink-0" />
+        <div>
+          <span className="text-xs font-semibold text-green-400">Focusing</span>
+          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+            Creator's identity is sharpening over time — consistent niche, growing authority.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (velocity === "Drifting") {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-400/30 bg-orange-400/5">
+        <TrendingDown className="w-4 h-4 text-orange-400 flex-shrink-0" />
+        <div>
+          <span className="text-xs font-semibold text-orange-400">Drifting</span>
+          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+            Creator's content themes are shifting — identity may be in transition.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-muted/10">
+      <Minus className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+      <div>
+        <span className="text-xs font-semibold text-muted-foreground">Insufficient Data</span>
+        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+          Not enough longitudinal data to determine trajectory.
+        </p>
+      </div>
     </div>
   );
 }
@@ -190,6 +269,9 @@ export default function MatchReport() {
   const sharedThemes = (match.sharedThemes as string[]) ?? [];
   const parrSignalBreakdown = (match.parrSignalBreakdown as Record<string, number>) ?? {};
   const comparablePartnerships = comparableQuery.data ?? [];
+  const alignmentNarrative = (match as Record<string, unknown>).alignmentNarrative as string | null;
+  const culturalVelocity = ((match as Record<string, unknown>).culturalVelocity as string | null) ?? "Insufficient Data";
+  const dataConfidenceLevel = ((match as Record<string, unknown>).dataConfidenceLevel as string | null) ?? "low";
 
   const fitStatusColor = match.fitStatus === "Green Light"
     ? "text-green-400"
@@ -351,6 +433,20 @@ export default function MatchReport() {
         )}
       </div>
 
+      {/* ─── Data Confidence Warning ──────────────────────────────────────── */}
+      {dataConfidenceLevel === "low" && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-yellow-400/30 bg-yellow-400/5 mb-6 animate-fade-in-up">
+          <ShieldAlert className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-yellow-400">Low Data Confidence</div>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              The 6-3-3 longitudinal sample or brand semantic crawl returned below-threshold data for this match.
+              Scores are directionally valid but may be refined with a re-analysis once more content is available.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ─── Synergy Brief ───────────────────────────────────────────────────── */}
       {match.synergyNarrative && (
         <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-2">
@@ -364,13 +460,13 @@ export default function MatchReport() {
         </div>
       )}
 
-      {/* ─── Symbolic Resonance Evidence ─────────────────────────────────────── */}
-      {(sharedKeywords.length > 0 || sharedThemes.length > 0) && (
+      {/* ─── Semantic Word Cloud (Phase 1.5) ─────────────────────────────────── */}
+      {sharedKeywords.length > 0 && (
         <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-2">
           <div className="flex items-center gap-2 mb-4">
             <Hash className="w-4 h-4 text-primary/70" />
             <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-              Symbolic Resonance Evidence
+              Shared Semantic Vocabulary
             </div>
             {match.symbolicOverlapScore != null && (
               <div className="ml-auto text-xs text-muted-foreground">
@@ -378,8 +474,12 @@ export default function MatchReport() {
               </div>
             )}
           </div>
+          <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+            The top keywords shared between the brand's site/reviews and the creator's transcripts — the cultural vocabulary they both speak.
+          </p>
+          <SemanticWordCloud keywords={sharedKeywords} maxCount={10} />
           {sharedThemes.length > 0 && (
-            <div className="mb-4">
+            <div className="mt-4 pt-4 border-t border-border/30">
               <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-2">Shared Cultural Themes</div>
               <div className="flex flex-wrap gap-2">
                 {sharedThemes.map((theme) => (
@@ -390,18 +490,28 @@ export default function MatchReport() {
               </div>
             </div>
           )}
-          {sharedKeywords.length > 0 && (
-            <div>
-              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-2">Shared Symbolic Vocabulary</div>
-              <div className="flex flex-wrap gap-1.5">
-                {sharedKeywords.map((kw) => (
-                  <span key={kw} className="px-2 py-0.5 rounded text-xs bg-muted/40 text-muted-foreground border border-border/50 capitalize">
-                    {kw}
-                  </span>
-                ))}
-              </div>
+        </div>
+      )}
+
+      {/* ─── Alignment Narrative + Cultural Velocity (Phase 1.5) ─────────────── */}
+      {(alignmentNarrative || culturalVelocity !== "Insufficient Data") && (
+        <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-2">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="w-4 h-4 text-primary/70" />
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+              Cultural Intelligence
+            </div>
+          </div>
+          {alignmentNarrative && (
+            <div className="mb-4 p-4 rounded-xl border border-border/40 bg-muted/10">
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-2">Alignment Narrative</div>
+              <p className="text-sm text-foreground/85 leading-relaxed">{alignmentNarrative}</p>
             </div>
           )}
+          <div>
+            <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-2">Cultural Velocity</div>
+            <CulturalVelocityBadge velocity={culturalVelocity} />
+          </div>
         </div>
       )}
 

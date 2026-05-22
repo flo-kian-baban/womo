@@ -1038,3 +1038,25 @@ await createInvite.mutateAsync({ eventId: "123", origin: window.location.origin 
 // Backend - use input.origin to build the URL
 const inviteUrl = `${input.origin}/events/${eventId}/join?token=${token}`;
 ```
+
+---
+
+## Phase 1.5 Data & Intelligence Layer
+
+**Implemented:** Creator 6-3-3 longitudinal sampling, recursive brand semantic crawl, Google Maps top-50 review ingestion, semantic word cloud, alignment narrative, cultural velocity indicator, and data confidence warnings.
+
+**PARR and QoV now leverage:**
+- Longitudinal transcripts from a stratified 12-video sample (6 recent / 3 mid / 3 anchor)
+- Multi-source brand semantics (recursive website crawl targeting 2,000+ words + top-50 Google Maps reviews)
+- Visual Proof features (Semantic Word Cloud / Alignment Narrative) added to the F.I.T. Report to justify scoring logic
+
+**Validation Strategy:**
+The PARR is a predictive metric for cultural receptivity. Future platform iterations must implement data hooks to track actual Attention (Watch Time) and Engagement (ER) metrics for active campaigns. This data will be used to empirically validate and "harden" the PARR and QoV formulas.
+
+**Cultural Velocity:**
+Derived from the 6-3-3 longitudinal sample. "Focusing" = consistent niche identity across all three time periods. "Drifting" = significant theme divergence between anchor and recent content. Stored in `creator_profiles.culturalVelocity` and surfaced in the F.I.T. Report.
+
+**Data Confidence Levels:**
+- `high`: Brand semantic crawl returned 2,000+ words AND creator 6-3-3 sample is complete (12 videos)
+- `medium`: Partial data (500–1,999 words brand / fewer than 12 creator videos)
+- `low`: Below threshold — scores are directionally valid but flagged with a "Low Data Confidence" warning in the report UI

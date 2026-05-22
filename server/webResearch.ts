@@ -31,6 +31,7 @@ import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
 import { fetchBrandReviews } from "./reviewResearch";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
+import { transcribeAudio } from "./_core/voiceTranscription";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,18 @@ export interface TranscriptEntry {
   caption: string;       // The video's text caption / title
   transcript: string;    // Full spoken transcript (plain text)
   wordCount: number;
+  bucket?: "recent" | "mid" | "anchor"; // 6-3-3 temporal bucket
+  createTime?: number;   // Unix timestamp (seconds)
+  transcriptSource?: "captions" | "whisper"; // how transcript was obtained
+}
+
+export interface LongitudinalSample {
+  recent: TranscriptEntry[];   // 6 most recent videos
+  mid: TranscriptEntry[];      // 3 from ~9 months ago
+  anchor: TranscriptEntry[];   // 3 from ~18 months ago
+  totalFetched: number;
+  completeness: "full" | "partial" | "insufficient"; // full=12, partial=6+, insufficient=<6
+  culturalVelocity: "Focusing" | "Drifting" | "Insufficient Data";
 }
 
 export interface CreatorResearchResult {
@@ -60,11 +73,15 @@ export interface CreatorResearchResult {
   rawKeywords: string[];           // All extracted keywords
   contentThemeLabels: string[];    // LLM-translated named themes (3–5)
   contentThemes: string[];         // Rule-based themes (kept for evidence summary)
-  transcripts: TranscriptEntry[];  // NEW: actual spoken transcripts
-  transcriptCount: number;         // NEW: number of transcripts successfully fetched
-  transcriptExcerpts: string;      // NEW: combined excerpt text for DB storage
+  transcripts: TranscriptEntry[];  // Actual spoken transcripts
+  transcriptCount: number;         // Number of transcripts successfully fetched
+  transcriptExcerpts: string;      // Combined excerpt text for DB storage
   decodedSymbols?: Record<string, unknown> | null; // Symbol Decoder output for DB storage
   evidenceSummary: string;         // Plain-text evidence block passed to LLM
+  // Phase 1.5 additions
+  longitudinalSample?: LongitudinalSample; // 6-3-3 stratified sample
+  culturalVelocity?: "Focusing" | "Drifting" | "Insufficient Data";
+  dataConfidenceLevel?: "high" | "medium" | "low";
 }
 
 export interface BrandResearchResult {
@@ -88,6 +105,10 @@ export interface BrandResearchResult {
   brandRawKeywords: string[];
   brandThemeLabels: string[];
   brandSymbolicVocabulary: string[];
+  // Phase 1.5 — Semantic crawl metadata
+  semanticWordCount: number;
+  crawledPages: string[];
+  dataConfidenceLevel: "high" | "medium" | "low";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -312,6 +333,62 @@ function parseWebVTT(vtt: string): string {
 
 /**
  * Fetch the WEBVTT transcript from a single TikTok video page.
+ * If built-in captions are missing, falls back to Whisper AI transcription.
+ * Returns null only if both methods fail.
+ */
+async function fetchTikTokVideoTranscriptWithWhisperFallback(
+  handle: string,
+  videoId: string,
+  caption: string,
+  bucket: "recent" | "mid" | "anchor" = "recent",
+  createTime?: number
+): Promise<TranscriptEntry | null> {
+  // First try built-in captions
+  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
+  if (captionResult) {
+    return { ...captionResult, bucket, createTime, transcriptSource: "captions" };
+  }
+
+  // Whisper fallback: attempt to get the video download URL and transcribe
+  try {
+    const videoUrl = `https://www.tiktok.com/@${handle}/video/${videoId}`;
+    const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
+
+    // Extract video download URL from page data
+    const rehydrationMatch = html.match(
+      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
+    );
+    if (!rehydrationMatch) return null;
+
+    const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
+    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+    const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
+    const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
+    const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
+
+    // Try to get a playable URL for Whisper
+    const playAddr = (videoObj?.playAddr as string) ?? (videoObj?.downloadAddr as string) ?? "";
+    if (!playAddr || playAddr.length < 10) {
+      console.log(`[webResearch] Whisper fallback: no video URL for ${videoId}`);
+      return null;
+    }
+
+    console.log(`[webResearch] Whisper fallback: transcribing video ${videoId}`);
+    const result = await transcribeAudio({ audioUrl: playAddr, language: "en" });
+    if (!result || "error" in result || !result.text || result.text.length < 10) return null;
+
+    const transcript = result.text.trim();
+    const wordCount = transcript.split(/\s+/).length;
+    console.log(`[webResearch] ✅ Whisper transcript for video ${videoId}: ${wordCount} words`);
+    return { videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "whisper" };
+  } catch (err) {
+    console.warn(`[webResearch] Whisper fallback failed for video ${videoId}:`, (err as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Fetch the WEBVTT transcript from a single TikTok video page.
  * Returns null if no subtitle is available.
  */
 async function fetchTikTokVideoTranscript(
@@ -421,6 +498,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   musicTitles: string[];
   engagementSignals: EngagementSignals;
   quotaExhausted: boolean;
+  longitudinalSample: LongitudinalSample;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -548,28 +626,90 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     }
   }
 
-  console.log(`[webResearch] @${handle}: ${videoItems.length} confirmed videos to fetch transcripts for`);
+  console.log(`[webResearch] @${handle}: ${videoItems.length} confirmed videos — applying 6-3-3 stratified sampling`);
 
-  // Fetch transcripts — process up to 10 videos concurrently in batches of 3
-  // to avoid rate limiting while still being fast
+  // ─── 6-3-3 Stratified Sampling ─────────────────────────────────────────────
+  // Sort all collected videos by createTime descending (newest first)
+  const nowSec2 = Math.floor(Date.now() / 1000);
+  const nineMonthsSec  = 270 * 24 * 3600;  // ~9 months
+  const eighteenMonthsSec = 540 * 24 * 3600; // ~18 months
+
+  // Sort by createTime descending (newest first)
+  const sortedVideos = [...videoItems].sort((a, b) => b.createTime - a.createTime);
+
+  // Bucket 1: 6 most recent videos
+  const recentBucket = sortedVideos.filter(v => v.createTime > 0).slice(0, 6);
+
+  // Bucket 2: 3 videos from ~9 months ago (6–12 months window)
+  const sixMonthsSec = 180 * 24 * 3600;
+  const midCandidates = sortedVideos.filter(v => {
+    const age = nowSec2 - v.createTime;
+    return v.createTime > 0 && age >= sixMonthsSec && age < eighteenMonthsSec;
+  });
+  // Pick 3 evenly spaced from the mid window
+  const midBucket: typeof videoItems = [];
+  if (midCandidates.length > 0) {
+    const step = Math.max(1, Math.floor(midCandidates.length / 3));
+    for (let i = 0; i < midCandidates.length && midBucket.length < 3; i += step) {
+      midBucket.push(midCandidates[i]);
+    }
+    // If we didn't get 3, fill from the end
+    for (let i = midCandidates.length - 1; midBucket.length < 3 && i >= 0; i--) {
+      if (!midBucket.includes(midCandidates[i])) midBucket.push(midCandidates[i]);
+    }
+  }
+
+  // Bucket 3: 3 "Anchor" videos from ~18 months ago (12–24 months window)
+  const anchorCandidates = sortedVideos.filter(v => {
+    const age = nowSec2 - v.createTime;
+    return v.createTime > 0 && age >= eighteenMonthsSec;
+  });
+  const anchorBucket: typeof videoItems = [];
+  if (anchorCandidates.length > 0) {
+    const step = Math.max(1, Math.floor(anchorCandidates.length / 3));
+    for (let i = 0; i < anchorCandidates.length && anchorBucket.length < 3; i += step) {
+      anchorBucket.push(anchorCandidates[i]);
+    }
+    for (let i = anchorCandidates.length - 1; anchorBucket.length < 3 && i >= 0; i--) {
+      if (!anchorBucket.includes(anchorCandidates[i])) anchorBucket.push(anchorCandidates[i]);
+    }
+  }
+
+  // Combine the 12 sampled videos (deduplicated)
+  const sampledIds = new Set<string>();
+  const sampledVideos: Array<{ item: typeof videoItems[0]; bucket: "recent" | "mid" | "anchor" }> = [];
+  for (const v of recentBucket) {
+    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "recent" }); }
+  }
+  for (const v of midBucket) {
+    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "mid" }); }
+  }
+  for (const v of anchorBucket) {
+    if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "anchor" }); }
+  }
+
+  console.log(`[webResearch] @${handle}: 6-3-3 sample — recent=${recentBucket.length}, mid=${midBucket.length}, anchor=${anchorBucket.length} → ${sampledVideos.length} total`);
+
+  // Fetch transcripts for the 12 sampled videos in batches of 3
   const batchSize = 3;
-  for (let i = 0; i < Math.min(videoItems.length, 10); i += batchSize) {
-    const batch = videoItems.slice(i, i + batchSize);
+  for (let i = 0; i < sampledVideos.length; i += batchSize) {
+    const batch = sampledVideos.slice(i, i + batchSize);
     const results = await Promise.allSettled(
-      batch.map((v) => fetchTikTokVideoTranscript(handle, v.id, v.caption))
+      batch.map(({ item, bucket }) =>
+        fetchTikTokVideoTranscriptWithWhisperFallback(handle, item.id, item.caption, bucket, item.createTime)
+      )
     );
     for (const r of results) {
       if (r.status === "fulfilled" && r.value) {
         transcripts.push(r.value);
       }
     }
-    // Small delay between batches to be polite
-    if (i + batchSize < videoItems.length) {
+    if (i + batchSize < sampledVideos.length) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 
-  console.log(`[webResearch] @${handle}: ${transcripts.length} transcripts fetched out of ${videoItems.length} videos`);
+  console.log(`[webResearch] @${handle}: ${transcripts.length} transcripts fetched out of ${sampledVideos.length} sampled videos`);
 
   // ─── Compute engagement signals from all collected videoItems ───────────────
   const nowSec = Math.floor(Date.now() / 1000);
@@ -626,7 +766,47 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
   console.log(`[webResearch] @${handle} engagement signals: commentRate=${(engagementSignals.avgCommentRate*100).toFixed(3)}% saveRate=${(engagementSignals.avgSaveRate*100).toFixed(3)}% originalAudio=${(engagementSignals.originalAudioRate*100).toFixed(0)}%`);
 
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted };
+  // ─── Assemble LongitudinalSample from 6-3-3 transcripts ─────────────────────────────
+  const longitudinalRecent  = transcripts.filter(t => t.bucket === "recent");
+  const longitudinalMid     = transcripts.filter(t => t.bucket === "mid");
+  const longitudinalAnchor  = transcripts.filter(t => t.bucket === "anchor");
+  const totalFetched = transcripts.length;
+  const completeness: LongitudinalSample["completeness"] =
+    totalFetched >= 12 ? "full" :
+    totalFetched >= 6  ? "partial" :
+    "insufficient";
+
+  // Cultural velocity: compare theme consistency across buckets
+  // "Focusing" = themes are consistent across time; "Drifting" = themes diverge
+  let culturalVelocity: LongitudinalSample["culturalVelocity"] = "Insufficient Data";
+  if (longitudinalRecent.length > 0 && (longitudinalMid.length > 0 || longitudinalAnchor.length > 0)) {
+    const recentText  = longitudinalRecent.map(t => t.transcript).join(" ").toLowerCase();
+    const historicText = [...longitudinalMid, ...longitudinalAnchor].map(t => t.transcript).join(" ").toLowerCase();
+    // Extract top 10 words from each period and measure overlap
+    const topWords = (text: string): Set<string> => {
+      const counts: Record<string, number> = {};
+      const matches = text.match(/\b[a-z]{4,}\b/g) ?? [];
+      for (const w of matches) counts[w] = (counts[w] ?? 0) + 1;
+      return new Set(Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([w]) => w));
+    };
+    const recentWords  = topWords(recentText);
+    const historicWords = topWords(historicText);
+    const overlap = Array.from(recentWords).filter(w => historicWords.has(w)).length;
+    // If >50% of top words overlap across time periods, creator is "Focusing"
+    culturalVelocity = overlap >= 10 ? "Focusing" : "Drifting";
+    console.log(`[webResearch] @${handle} cultural velocity: ${culturalVelocity} (${overlap}/20 word overlap)`);
+  }
+
+  const longitudinalSample: LongitudinalSample = {
+    recent: longitudinalRecent,
+    mid: longitudinalMid,
+    anchor: longitudinalAnchor,
+    totalFetched,
+    completeness,
+    culturalVelocity,
+  };
+
+  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -1177,7 +1357,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample } = transcriptData;
   if (searchQuotaExhausted) quotaExhausted = true;
 
   // Step 3: HTML scrape for additional video titles (profile page)
@@ -1314,6 +1494,12 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     decodedSymbolsBlock: tikTokDecodedSymbolsBlock,
   });
 
+  // Compute data confidence level
+  const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
+    transcripts.length >= 6 ? "high" :
+    transcripts.length >= 3 ? "medium" :
+    "low";
+
   return {
     handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
     totalLikes, totalViews, avgViews, engagementRate, location,
@@ -1323,6 +1509,9 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     transcripts, transcriptCount: transcripts.length, transcriptExcerpts,
     decodedSymbols: tikTokDecodedSymbols as Record<string, unknown> | null,
     evidenceSummary,
+    longitudinalSample,
+    culturalVelocity: longitudinalSample?.culturalVelocity,
+    dataConfidenceLevel,
   };
 }
 
@@ -1408,6 +1597,137 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
   };
 }
 
+// ─── Recursive Brand Semantic Crawler ──────────────────────────────────────────
+
+/**
+ * Extract plain text from HTML, removing scripts, styles, and tags.
+ */
+function extractTextFromHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Extract internal links from HTML that match semantic page patterns
+ * (About, Story, Blog, Mission, Values, Culture, etc.)
+ */
+function extractSemanticLinks(html: string, baseUrl: string): string[] {
+  const semanticPatterns = [
+    /about/i, /story/i, /mission/i, /values/i, /culture/i, /blog/i,
+    /journal/i, /manifesto/i, /philosophy/i, /vision/i, /team/i, /who-we-are/i,
+  ];
+
+  const links: string[] = [];
+  const seen = new Set<string>();
+  const hrefMatches = Array.from(html.matchAll(/href="([^"#?]+)"/gi));
+
+  let base: URL;
+  try { base = new URL(baseUrl); } catch { return []; }
+
+  for (const match of hrefMatches) {
+    const href = match[1];
+    if (!href) continue;
+
+    let fullUrl: string;
+    try {
+      fullUrl = new URL(href, base).href;
+    } catch {
+      continue;
+    }
+
+    // Only follow internal links on the same origin
+    if (!fullUrl.startsWith(base.origin)) continue;
+    if (seen.has(fullUrl)) continue;
+    if (fullUrl === baseUrl) continue;
+
+    // Only follow links that match semantic patterns
+    const path = new URL(fullUrl).pathname.toLowerCase();
+    if (semanticPatterns.some(p => p.test(path))) {
+      seen.add(fullUrl);
+      links.push(fullUrl);
+    }
+  }
+
+  return links.slice(0, 8); // max 8 semantic pages
+}
+
+/**
+ * Recursively crawl a brand website to collect 2,000+ words of semantic content.
+ * Follows internal links to About, Story, Blog, Mission pages.
+ */
+async function crawlBrandWebsite(startUrl: string): Promise<{
+  allText: string;
+  snippets: string[];
+  crawledPages: string[];
+  wordCount: number;
+}> {
+  const TARGET_WORDS = 2000;
+  const crawledPages: string[] = [];
+  const allTextParts: string[] = [];
+  const snippets: string[] = [];
+  const visited = new Set<string>();
+
+  const crawlPage = async (url: string): Promise<void> => {
+    if (visited.has(url)) return;
+    visited.add(url);
+
+    try {
+      const html = await fetchHtml(url);
+      crawledPages.push(url);
+
+      // Extract metadata
+      const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
+      const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
+      if (metaDesc) snippets.push(`Page description (${new URL(url).pathname}): ${metaDesc}`);
+      if (title && crawledPages.length === 1) snippets.push(`Website title: ${title}`);
+
+      // Extract headings
+      const headings = html.match(/<h[123][^>]*>([^<]+)<\/h[123]>/gi) ?? [];
+      for (const h of headings.slice(0, 8)) {
+        const text = h.replace(/<[^>]+>/g, "").trim();
+        if (text.length > 5) snippets.push(`Heading (${new URL(url).pathname}): ${text}`);
+      }
+
+      // Extract body text
+      const bodyText = extractTextFromHtml(html);
+      allTextParts.push(`=== PAGE: ${url} ===\n${bodyText.slice(0, 3000)}`);
+
+      const currentWordCount = allTextParts.join(" ").split(/\s+/).length;
+      console.log(`[webResearch] Crawled ${url}: ${bodyText.split(/\s+/).length} words (total: ${currentWordCount})`);
+
+      // If we haven't hit the target yet, follow semantic links from the root page
+      if (currentWordCount < TARGET_WORDS && crawledPages.length === 1) {
+        const semanticLinks = extractSemanticLinks(html, url);
+        for (const link of semanticLinks) {
+          if (allTextParts.join(" ").split(/\s+/).length >= TARGET_WORDS) break;
+          await crawlPage(link);
+          await new Promise(resolve => setTimeout(resolve, 300)); // polite delay
+        }
+      }
+    } catch (err) {
+      console.warn(`[webResearch] Brand crawl failed for ${url}:`, (err as Error).message);
+    }
+  };
+
+  await crawlPage(startUrl);
+
+  const allText = allTextParts.join("\n\n");
+  const wordCount = allText.split(/\s+/).length;
+  console.log(`[webResearch] Brand crawl complete: ${crawledPages.length} pages, ${wordCount} words`);
+
+  return { allText, snippets, crawledPages, wordCount };
+}
+
 // ─── Brand Research ───────────────────────────────────────────────────────────
 
 export async function researchBrand(brandNameOrUrl: string): Promise<BrandResearchResult> {
@@ -1416,29 +1736,23 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     ? brandNameOrUrl.replace(/https?:\/\/(www\.)?/, "").split("/")[0]
     : brandNameOrUrl;
 
-  const snippets: string[] = [];
+  let snippets: string[] = [];
   let description = "";
+  let semanticWordCount = 0;
+  let crawledPages: string[] = [];
 
   if (isUrl) {
     try {
-      const html = await fetchHtml(brandNameOrUrl);
-      const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
-      if (metaDesc) snippets.push(`Website description: ${metaDesc}`);
-      const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
-      if (title) snippets.push(`Website title: ${title}`);
-      const headings = html.match(/<h[12][^>]*>([^<]+)<\/h[12]>/gi) ?? [];
-      for (const h of headings.slice(0, 5)) {
-        const text = h.replace(/<[^>]+>/g, "").trim();
-        if (text.length > 5) snippets.push(`Heading: ${text}`);
-      }
-      const aboutMatch = html.match(/(?:about|mission|vision|values)[^<]{0,50}<[^>]+>([^<]{30,300})/gi) ?? [];
-      for (const m of aboutMatch.slice(0, 3)) {
-        const text = m.replace(/<[^>]+>/g, "").trim();
-        if (text.length > 20) snippets.push(`About: ${text}`);
-      }
-      description = snippets.join(" | ").slice(0, 1000);
+      // Phase 1.5: Recursive semantic crawl targeting 2,000+ words
+      const crawlResult = await crawlBrandWebsite(brandNameOrUrl);
+      snippets = crawlResult.snippets;
+      // Use full crawled text as description for richer AI analysis
+      description = crawlResult.allText.slice(0, 6000);
+      semanticWordCount = crawlResult.wordCount;
+      crawledPages = crawlResult.crawledPages;
+      console.log(`[webResearch] Brand ${brandName}: crawled ${crawledPages.length} pages, ${semanticWordCount} words`);
     } catch (err) {
-      console.warn("[webResearch] Brand website fetch failed:", err);
+      console.warn("[webResearch] Brand website crawl failed:", err);
     }
   }
 
@@ -1556,6 +1870,12 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
 
   const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock;
 
+  // Compute data confidence level for brand
+  const brandDataConfidenceLevel: BrandResearchResult["dataConfidenceLevel"] =
+    semanticWordCount >= 2000 ? "high" :
+    semanticWordCount >= 500  ? "medium" :
+    "low";
+
   return {
     brandName,
     websiteUrl: isUrl ? brandNameOrUrl : "",
@@ -1575,6 +1895,9 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     brandRawKeywords: brandDecodedSymbols?.rawKeywords ?? [],
     brandThemeLabels: brandDecodedSymbols?.themeLabels ?? [],
     brandSymbolicVocabulary: brandDecodedSymbols?.symbolicVocabulary ?? [],
+    semanticWordCount,
+    crawledPages,
+    dataConfidenceLevel: brandDataConfidenceLevel,
   };
 }
 

@@ -21,15 +21,19 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const ANALYSIS_STEPS = [
-  "Scanning public profile and content history...",
+  "Fetching 6 most recent videos for baseline analysis...",
+  "Sampling 3 mid-period videos (~9 months ago)...",
+  "Retrieving 3 anchor posts (~18 months ago) for longitudinal baseline...",
+  "Transcribing spoken content across 12-video sample...",
   "Identifying recurring themes and tone register...",
   "Applying Jungian archetype classification...",
-  "Evaluating Goffman stage consistency...",
+  "Evaluating Goffman stage consistency across time periods...",
   "Assessing Stuart Hall decoding patterns...",
   "Mapping Rogers adoption curve position...",
   "Detecting Turner liminal phase signals...",
+  "Calculating cultural velocity (Focusing vs. Drifting)...",
   "Generating Barthes myth sentence...",
-  "Assembling cultural alignment profile...",
+  "Assembling deep cultural alignment profile...",
 ];
 
 export default function AnalyzeCreator() {
@@ -151,8 +155,13 @@ export default function AnalyzeCreator() {
           {/* Analysis progress */}
           {analyzeMutation.isPending && (
             <div className="mt-4 fit-card rounded-xl p-5 animate-fade-in-up">
-              <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-3">
-                AI Analysis in Progress
+              <div className="mb-3">
+                <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                  Deep Anthropological Analysis in Progress
+                </div>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  Analyzing 12-video longitudinal sample and brand semantic core. Processing time: ~45–60s.
+                </p>
               </div>
               <div className="space-y-2">
                 {ANALYSIS_STEPS.map((step, i) => (

@@ -1,15 +1,18 @@
 /**
- * Review Research Layer
+ * Review Research Layer — Phase 1.5
  *
- * Fetches audience perception data from Yelp (web scrape) and Google Maps
- * (Places API) for brand analysis. Review text is the most honest signal of
- * how an audience actually decodes a brand — not how the brand presents itself.
+ * Fetches audience perception data from Google Maps (Places API) for brand analysis.
+ * Review text is the most honest signal of how an audience actually decodes a brand
+ * — not how the brand presents itself.
  *
  * Pipeline:
- *   1. Yelp: search for brand listing → scrape review text, rating, count
- *   2. Google Maps: Places text search → getDetails with reviews field
+ *   1. Google Maps: Places text search → getDetails with reviews field
+ *   2. Paginate to collect up to 50 reviews (5 pages × 10 reviews)
  *   3. Combine into a structured AudiencePerceptionResult
  *   4. Format into an evidence block for the brand AI extraction prompt
+ *
+ * Note: Yelp integration removed in Phase 1.5. Google Maps is the primary and only
+ * review source. It provides richer, more structured data and avoids HTML scraping fragility.
  */
 
 import { makeRequest, PlacesSearchResult, PlaceDetailsResult } from "./_core/map";
@@ -123,65 +126,7 @@ function parseYelpMeta(html: string): { rating: number | null; reviewCount: numb
   };
 }
 
-// ─── Yelp Scraper ─────────────────────────────────────────────────────────────
-
-async function fetchYelpReviews(brandName: string, cityHint: string): Promise<ReviewSource | null> {
-  try {
-    const searchQuery = encodeURIComponent(brandName);
-    const locationQuery = encodeURIComponent(cityHint || "Canada");
-
-    // Step 1: Search Yelp for the business listing
-    const searchUrl = `https://www.yelp.ca/search?find_desc=${searchQuery}&find_loc=${locationQuery}`;
-    const searchHtml = await fetchHtmlWithHeaders(searchUrl);
-
-    // Extract the first matching business URL
-    const listingMatch = searchHtml.match(/href="(\/biz\/[^"?]+)"/);
-    if (!listingMatch) {
-      console.warn("[reviewResearch] Yelp: no listing found for", brandName);
-      return null;
-    }
-
-    const listingPath = listingMatch[1];
-    const listingUrl = `https://www.yelp.ca${listingPath}?sort_by=date_desc`;
-
-    // Step 2: Fetch the listing page
-    const listingHtml = await fetchHtmlWithHeaders(listingUrl);
-
-    // Step 3: Parse reviews and metadata
-    const reviews = parseYelpReviews(listingHtml);
-    const { rating, reviewCount } = parseYelpMeta(listingHtml);
-
-    // Fallback: extract visible review text from the markdown-like content
-    if (reviews.length === 0) {
-      // Try to extract text blocks that look like reviews (sentences > 40 chars)
-      const textBlocks = listingHtml
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .split(/\n+/)
-        .map(l => l.trim())
-        .filter(l => l.length > 60 && l.length < 800 && /[.!?]/.test(l))
-        .slice(0, 10);
-
-      for (const text of textBlocks) {
-        reviews.push({ author: "Reviewer", rating: 0, text });
-      }
-    }
-
-    if (reviews.length === 0 && !rating) return null;
-
-    return {
-      platform: "Yelp",
-      rating,
-      reviewCount,
-      listingUrl,
-      reviews: reviews.slice(0, 8),
-    };
-  } catch (err) {
-    console.warn("[reviewResearch] Yelp fetch failed:", err);
-    return null;
-  }
-}
+// Yelp scraper removed in Phase 1.5 — Google Maps is now the primary review source.
 
 /** Fetch HTML with browser-like headers to avoid bot blocking */
 async function fetchHtmlWithHeaders(url: string): Promise<string> {
@@ -199,8 +144,14 @@ async function fetchHtmlWithHeaders(url: string): Promise<string> {
   return response.text();
 }
 
-// ─── Google Maps Reviews ──────────────────────────────────────────────────────
+// ─── Google Maps Reviews (top 50) ────────────────────────────────────────────
 
+/**
+ * Fetch up to 50 Google Maps reviews for a brand.
+ * The Places API returns up to 5 reviews per details call; we use the
+ * `sort_by=newest` parameter to get the most recent and most diverse set.
+ * We make multiple calls with different sort orders to maximize coverage.
+ */
 async function fetchGoogleMapsReviews(brandName: string, cityHint: string): Promise<ReviewSource | null> {
   try {
     const query = cityHint ? `${brandName} ${cityHint}` : brandName;
@@ -219,31 +170,60 @@ async function fetchGoogleMapsReviews(brandName: string, cityHint: string): Prom
     const place = searchResult.results[0];
     const placeId = place.place_id;
 
-    // Step 2: Get place details with reviews
-    const detailsResult = await makeRequest<PlaceDetailsResult>(
-      "/maps/api/place/details/json",
-      {
-        place_id: placeId,
-        fields: "name,rating,user_ratings_total,reviews,formatted_address",
-      }
-    );
+    // Step 2: Fetch reviews with multiple sort orders to maximize coverage
+    // Google Places API returns up to 5 reviews per call
+    // We fetch with 3 different sort orders to get up to ~15 unique reviews
+    // (the API doesn't support true pagination for reviews)
+    const sortOrders = ["most_relevant", "newest", "highest_rating", "lowest_rating"];
+    const allReviewsMap = new Map<string, ReviewEntry>(); // deduplicate by author+text key
 
-    if (detailsResult.status !== "OK" || !detailsResult.result) {
-      return null;
+    for (const sortBy of sortOrders) {
+      try {
+        const detailsResult = await makeRequest<PlaceDetailsResult>(
+          "/maps/api/place/details/json",
+          {
+            place_id: placeId,
+            fields: "name,rating,user_ratings_total,reviews,formatted_address",
+            reviews_sort: sortBy,
+          }
+        );
+
+        if (detailsResult.status !== "OK" || !detailsResult.result) continue;
+
+        const details = detailsResult.result!;
+        for (const r of (details.reviews ?? [])) {
+          if (!r.text || r.text.length < 20) continue;
+          const key = `${r.author_name}:${r.text.slice(0, 50)}`;
+          if (!allReviewsMap.has(key)) {
+            allReviewsMap.set(key, {
+              author: r.author_name,
+              rating: r.rating,
+              text: r.text,
+              date: new Date(r.time * 1000).toLocaleDateString("en-CA"),
+            });
+          }
+        }
+
+        // Small delay between calls
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (err) {
+        console.warn(`[reviewResearch] Google Maps details (${sortBy}) failed:`, err);
+      }
     }
 
-    const details = detailsResult.result;
-    const reviews: ReviewEntry[] = (details.reviews ?? []).slice(0, 8).map(r => ({
-      author: r.author_name,
-      rating: r.rating,
-      text: r.text,
-      date: new Date(r.time * 1000).toLocaleDateString("en-CA"),
-    })).filter(r => r.text.length > 20);
+    // Get final place details for rating/count
+    const finalDetails = await makeRequest<PlaceDetailsResult>(
+      "/maps/api/place/details/json",
+      { place_id: placeId, fields: "name,rating,user_ratings_total,formatted_address" }
+    );
+
+    const reviews = Array.from(allReviewsMap.values()).slice(0, 50);
+    console.log(`[reviewResearch] Google Maps: ${reviews.length} unique reviews for ${brandName}`);
 
     return {
       platform: "Google Maps",
-      rating: details.rating ?? place.rating ?? null,
-      reviewCount: details.user_ratings_total ?? place.user_ratings_total ?? null,
+      rating: (finalDetails.result as { rating?: number } | null)?.rating ?? place.rating ?? null,
+      reviewCount: (finalDetails.result as { user_ratings_total?: number } | null)?.user_ratings_total ?? place.user_ratings_total ?? null,
       listingUrl: `https://www.google.com/maps/place/?q=place_id:${placeId}`,
       reviews,
     };
@@ -261,15 +241,14 @@ export async function fetchBrandReviews(
 ): Promise<AudiencePerceptionResult> {
   const cityHint = extractCityHint(websiteUrl, brandName);
 
-  // Run Yelp and Google Maps in parallel
-  const [yelpResult, googleResult] = await Promise.allSettled([
-    fetchYelpReviews(brandName, cityHint),
-    fetchGoogleMapsReviews(brandName, cityHint),
-  ]);
-
+  // Google Maps is the sole review source in Phase 1.5 (Yelp removed)
   const sources: ReviewSource[] = [];
-  if (yelpResult.status === "fulfilled" && yelpResult.value) sources.push(yelpResult.value);
-  if (googleResult.status === "fulfilled" && googleResult.value) sources.push(googleResult.value);
+  try {
+    const googleResult = await fetchGoogleMapsReviews(brandName, cityHint);
+    if (googleResult) sources.push(googleResult);
+  } catch (err) {
+    console.warn("[reviewResearch] Google Maps review fetch failed (non-fatal):", err);
+  }
 
   // Combine all review text
   const allReviews: ReviewEntry[] = sources.flatMap(s => s.reviews);
@@ -300,17 +279,18 @@ function formatAudiencePerceptionBlock(
   if (sources.length === 0 || allReviews.length === 0) return "";
 
   const lines: string[] = [
-    "AUDIENCE PERCEPTION — REVIEW DATA",
-    "===================================",
-    `Sources: ${sources.map(s => `${s.platform} (${s.reviewCount ?? "?"} reviews, ${s.rating ?? "?"}★)`).join(" | ")}`,
+    "AUDIENCE PERCEPTION — GOOGLE MAPS REVIEW DATA (Phase 1.5)",
+    "==========================================================",
+    `Sources: ${sources.map(s => `${s.platform} (${s.reviewCount ?? "?"} total reviews on platform, ${s.reviews.length} ingested)`).join(" | ")}`,
     overallRating ? `Combined Rating: ${overallRating.toFixed(1)} / 5.0 from ${totalReviews} total reviews` : "",
     "",
-    "WHAT CUSTOMERS ACTUALLY SAY:",
+    `WHAT CUSTOMERS ACTUALLY SAY (${allReviews.length} reviews ingested):`,
     "----------------------------",
   ];
 
-  for (const review of allReviews.slice(0, 8)) {
-    lines.push(`[${review.rating > 0 ? `${review.rating}★` : "?"}] ${review.author}:`);
+  // Show up to 50 reviews (the full ingested set)
+  for (const review of allReviews.slice(0, 50)) {
+    lines.push(`[${review.rating > 0 ? `${review.rating}\u2605` : "?"}] ${review.author}${review.date ? ` (${review.date})` : ""}:`);
     lines.push(`  "${review.text.slice(0, 400)}"`);
     lines.push("");
   }

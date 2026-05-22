@@ -97,6 +97,11 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   // Creator pronouns (inferred from bio, transcripts, and display name)
   pronouns: mysqlEnum("pronouns", ["she/her", "he/him", "they/them", "not specified"]),
 
+  // Phase 1.5 — Longitudinal & Confidence
+  culturalVelocity: varchar("culturalVelocity", { length: 32 }),  // Focusing | Drifting | Insufficient Data
+  dataConfidenceLevel: varchar("dataConfidenceLevel", { length: 16 }), // high | medium | low
+  longitudinalSampleJson: json("longitudinalSampleJson"), // LongitudinalSample serialized
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),
@@ -225,6 +230,11 @@ export const matchRecords = mysqlTable("match_records", {
   sharedKeywords: json("sharedKeywords"),   // string[]
   sharedThemes: json("sharedThemes"),       // string[]
   qovScore: float("qovScore"),               // Quality of View — (fitScore/10) × (parrScore/100) as %
+
+  // Phase 1.5 Visual Intelligence
+  alignmentNarrative: text("alignmentNarrative"),       // 2-sentence match summary
+  culturalVelocity: varchar("culturalVelocity", { length: 32 }),  // Focusing | Drifting | Insufficient Data
+  dataConfidenceLevel: varchar("dataConfidenceLevel", { length: 16 }), // high | medium | low
 
   // Synergy Narrative + Content Directions
   synergyNarrative: text("synergyNarrative"),

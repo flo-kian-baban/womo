@@ -194,6 +194,7 @@ export type PlaceDetailsResult = {
       rating: number;
       text: string;
       time: number;
+      relative_time_description?: string;
     }>;
     opening_hours?: {
       open_now: boolean;
@@ -202,7 +203,7 @@ export type PlaceDetailsResult = {
     geometry: {
       location: LatLng;
     };
-  };
+  } | null;
   status: string;
 };
 
