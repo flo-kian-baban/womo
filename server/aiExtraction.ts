@@ -169,6 +169,14 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "aiSummary": "A 2-3 sentence cultural analyst summary covering: (1) this creator's symbolic position and what cultural identity they represent, (2) the nature of their audience relationship and parasocial dynamic grounded in the engagement data, (3) their brand partnership potential and any cultural risks or sensitivities. Use the correct pronouns throughout."
 }
 
+CAMPAIGN TYPE SELECTION GUIDE — choose the most accurate fit:
+- Heritage/Luxury: Premium/luxury goods brands with heritage positioning (fashion houses, fine jewellery, prestige spirits, luxury hotels). NOT for local restaurants or community businesses.
+- Trend-First: Brands built on cultural momentum, drops, and virality (streetwear, fast fashion, trending CPG, limited-edition launches).
+- Long-Term Ambassador: Brands seeking a sustained identity partnership over 6-12+ months (fitness brands, lifestyle brands, wellness, B2B services).
+- Product Launch: Brands with a specific new product or service to announce (tech product, new menu item, app launch, seasonal collection).
+- Community/Local: Local or neighbourhood-rooted businesses where the goal is driving foot traffic, local awareness, and community belonging (local restaurants, neighbourhood gyms, local retailers, regional service businesses). Use this for any brand that is primarily a local/physical business.
+- Awareness/Consideration: Established brands seeking broader audience reach and category education without a specific launch (financial services, insurance, healthcare, nonprofits, B2B).
+
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
 
   const response = await invokeLLM({
@@ -249,7 +257,7 @@ export interface BrandExtractionResult {
   culturalTension: string;
   barthesMyth: string;
   brandType: string;
-  campaignType: "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch";
+  campaignType: "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration";
   aiSummary: string;
 }
 
@@ -383,11 +391,19 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "barthesMyth": "This brand normalizes the belief that [complete this sentence].",
   "brandArchetypeClassification": ONE OF EXACTLY: "Trust" | "Community" | "Momentum" — the governing structural archetype for this brand based on Chapter 3 logic,
   "brandType": ONE OF EXACTLY: ${JSON.stringify(brandTypeOptions)},
-  "campaignType": "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch",
+  "campaignType": "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration",
   "aiSummary": "A 2-3 sentence cultural analyst summary of this brand's symbolic position, target audience, and creator partnership strategy. Include which Brand Archetype this is (Trust/Community/Momentum) and why."
 }
 
 IMPORTANT: brandArchetypeClassification and brandType must be consistent. Trust brands → Medical, Legal, Financial, Insurance, Children's, Home Renovation. Community brands → Fitness, Boutique Retail, Specialty Café, Wellness, Pet, Hair Care, Home Décor. Momentum brands → Makeup/Color, QSR, Streetwear, CPG, Craft Beverage, Seasonal Campaigns, Tech.
+
+CAMPAIGN TYPE SELECTION GUIDE — choose the most accurate fit:
+- Heritage/Luxury: Premium/luxury goods brands with heritage positioning (fashion houses, fine jewellery, prestige spirits, luxury hotels). NOT for local restaurants or community businesses.
+- Trend-First: Brands built on cultural momentum, drops, and virality (streetwear, fast fashion, trending CPG, limited-edition launches).
+- Long-Term Ambassador: Brands seeking a sustained identity partnership over 6-12+ months (fitness brands, lifestyle brands, wellness, B2B services).
+- Product Launch: Brands with a specific new product or service to announce (tech product, new menu item, app launch, seasonal collection).
+- Community/Local: Local or neighbourhood-rooted businesses where the goal is driving foot traffic, local awareness, and community belonging (local restaurants, neighbourhood gyms, local retailers, regional service businesses). Use this for any brand that is primarily a local/physical business.
+- Awareness/Consideration: Established brands seeking broader audience reach and category education without a specific launch (financial services, insurance, healthcare, nonprofits, B2B).
 
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
 
@@ -414,7 +430,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             barthesMyth: { type: "string" },
             brandArchetypeClassification: { type: "string", enum: ["Trust", "Community", "Momentum"] },
             brandType: { type: "string" },
-            campaignType: { type: "string", enum: ["Heritage/Luxury", "Trend-First", "Long-Term Ambassador", "Product Launch"] },
+            campaignType: { type: "string", enum: ["Heritage/Luxury", "Trend-First", "Long-Term Ambassador", "Product Launch", "Community/Local", "Awareness/Consideration"] },
             aiSummary: { type: "string" },
           },
           required: [

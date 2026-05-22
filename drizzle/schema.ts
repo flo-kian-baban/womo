@@ -143,6 +143,8 @@ export const brandProfiles = mysqlTable("brand_profiles", {
     "Trend-First",
     "Long-Term Ambassador",
     "Product Launch",
+    "Community/Local",
+    "Awareness/Consideration",
   ]),
 
   // Weights (auto-loaded from brand type)
