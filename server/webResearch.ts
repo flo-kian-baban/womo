@@ -491,13 +491,12 @@ export interface TemporalVideoEntry {
 }
 
 /**
- * Fetch videos from the creator's profile page HTML (PRIMARY SOURCE).
- * Parses __UNIVERSAL_DATA_FOR_REHYDRATION__ to extract itemList with video metadata.
- * Returns array of VideoItem objects extracted directly from the profile.
+ * Fetch videos from the TikTok API (PRIMARY SOURCE).
+ * Uses TikTok/get_user_post_list to fetch the full list of creator's videos.
+ * Returns array of VideoItem objects with full metadata.
  */
-async function fetchTikTokVideosFromProfileHTML(
-  handle: string,
-  normalizedHandle: string
+async function fetchTikTokVideosFromAPI(
+  handle: string
 ): Promise<Array<{
   id: string;
   caption: string;
@@ -530,19 +529,29 @@ async function fetchTikTokVideosFromProfileHTML(
   }> = [];
 
   try {
-    const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
-    const jsonMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
-    if (!jsonMatch) {
-      console.log(`[webResearch] @${handle}: no profile HTML rehydration data`);
+    // First get user info to get secUid
+    const userResponse = await callDataApi("TikTok/get_user_info", {
+      query: { uniqueId: handle },
+    }) as Record<string, unknown>;
+
+    const userInfoData = (userResponse?.userInfo as Record<string, unknown>) ?? {};
+    const user = (userInfoData?.user as Record<string, unknown>) ?? {};
+    const secUid = (user?.secUid as string) ?? "";
+
+    if (!secUid) {
+      console.log(`[webResearch] @${handle}: could not get secUid from user info`);
       return items;
     }
 
-    const pageData = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
-    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-    const userDetail = (defaultScope?.["webapp.user-detail"] as Record<string, unknown>) ?? {};
-    const itemList = (userDetail?.itemList as unknown[]) ?? [];
+    // Fetch user's post list (up to 30 videos)
+    const postsResponse = await callDataApi("TikTok/get_user_post_list", {
+      query: { secUid, count: "30" },
+    }) as Record<string, unknown>;
 
-    console.log(`[webResearch] @${handle}: HTML scrape found ${itemList.length} videos in profile`);
+    const dataBlock = (postsResponse?.data as Record<string, unknown>) ?? postsResponse;
+    const itemList = (dataBlock?.itemList as unknown[]) ?? [];
+
+    console.log(`[webResearch] @${handle}: API fetch found ${itemList.length} videos`);
 
     for (const item of itemList) {
       const v = item as Record<string, unknown>;
@@ -583,7 +592,7 @@ async function fetchTikTokVideosFromProfileHTML(
       });
     }
   } catch (err) {
-    console.warn(`[webResearch] @${handle}: HTML scrape failed:`, (err as Error).message);
+    console.warn(`[webResearch] @${handle}: API fetch failed:`, (err as Error).message);
   }
 
   return items;
@@ -632,9 +641,9 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   }
   const videoItems: VideoItem[] = [];
 
-  // ─── PRIMARY SOURCE: HTML scrape of creator profile page ────────────────────
-  const htmlVideos = await fetchTikTokVideosFromProfileHTML(handle, normalizedHandle);
-  for (const v of htmlVideos) {
+  // ─── PRIMARY SOURCE: TikTok API (get_user_post_list) ────────────────────────
+  const apiVideos = await fetchTikTokVideosFromAPI(handle);
+  for (const v of apiVideos) {
     if (!seen.has(v.id)) {
       seen.add(v.id);
       videoItems.push(v);
@@ -643,11 +652,11 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     }
   }
 
-  console.log(`[webResearch] @${handle}: HTML scrape yielded ${htmlVideos.length} videos`);
+  console.log(`[webResearch] @${handle}: API fetch yielded ${apiVideos.length} videos`);
 
-  // ─── FALLBACK SOURCE: TikTok search API (only if HTML scrape insufficient) ──
+  // ─── FALLBACK SOURCE: TikTok search API (only if API fetch insufficient) ──
   if (videoItems.length < 6) {
-    console.log(`[webResearch] @${handle}: HTML scrape found only ${videoItems.length} videos, falling back to search API`);
+    console.log(`[webResearch] @${handle}: API fetch found only ${videoItems.length} videos, falling back to search API`);
     const queries = [handle, `@${handle}`];
 
     for (const q of queries) {

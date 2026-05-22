@@ -365,10 +365,11 @@
 - [x] Deduplication: fill-forward never reuses a video already assigned to another bucket
 - [x] TypeScript check (0 errors) and all tests (27/27 pass)
 
-## HTML-First TikTok Video Collection (Author Contamination Fix)
-- [x] Build fetchTikTokVideosFromProfileHTML() helper to extract videos directly from creator profile HTML
-- [x] Refactor fetchTikTokTranscripts() to use HTML scrape as PRIMARY source (bypasses search API author-contamination)
-- [x] Implement fallback to TikTok search API only if HTML scrape yields < 6 videos
-- [x] Fallback search API still uses strict author-filter to prevent contamination
-- [x] Updated logging: "HTML scrape yielded X videos" + fallback status
-- [x] TypeScript check (0 errors) and all tests (27/27 pass)
+## API-Based TikTok Video Collection (Author Contamination Fix)
+- [x] **ISSUE DISCOVERED:** HTML scrape returns 0 videos (TikTok profile uses infinite scroll, initial HTML doesn't contain full itemList)
+- [x] Replace HTML scrape with TikTok API call: `TikTok/get_user_post_list` to fetch full video list (primary source)
+- [x] Use API to get all available videos for the creator, then apply 6-3-3 stratified sampling
+- [x] Keep search API as fallback only if API call fails or returns < 6 videos
+- [x] Updated logging to show "API fetch yielded X videos" instead of HTML scrape
+- [x] Run all tests to ensure no regressions (27/27 pass, 0 TypeScript errors)
+- [ ] Verify @kaylee.nhi and @alkhussein now pull full video lists (12+ videos) — MANUAL TEST NEEDED
