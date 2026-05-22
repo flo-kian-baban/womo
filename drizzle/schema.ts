@@ -3,6 +3,7 @@ import {
   mysqlEnum,
   mysqlTable,
   text,
+  mediumtext,
   timestamp,
   varchar,
   float,
@@ -89,7 +90,7 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
 
   // Transcript data (from transcript-first pipeline)
   transcriptCount: int("transcriptCount").default(0),
-  transcriptExcerpts: text("transcriptExcerpts"), // Combined excerpt text from top 3 transcripts
+  transcriptExcerpts: mediumtext("transcriptExcerpts"), // Full transcript text from all sampled videos (no truncation)
 
   // Symbol Decoder output (pre-processed cultural signals from all creator-authored text)
   decodedSymbols: json("decodedSymbols"), // DecodedSymbols | null — identityClaims, statusSignals, communityReferences, aspirationDrivers, symbolicSummary
@@ -104,7 +105,7 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   discoveredVideoPoolJson: json("discoveredVideoPoolJson"), // Array<{id,url,caption,createTime}> — unsampled confirmed videos
 
   // Raw AI summary
-  aiSummary: text("aiSummary"),
+  aiSummary: mediumtext("aiSummary"),
   rawAiResponse: json("rawAiResponse"),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
