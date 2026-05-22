@@ -448,3 +448,9 @@
 - [x] Fields fixed: archetype, platform, audienceRelationshipType, culturalCapital, goffmanStageConsistency, driftSignal, stuartHallDecoding, rogersAdopterStage, creatorNichePosition, lifecyclePhase, turnerLiminalPhase
 - [x] Tests pass, TypeScript clean
 - [x] Ready for re-testing with @joyeeyang0 and other creators
+
+## Status Threshold Fix: Alignment Floor
+- [x] Implement alignment floor logic: if Alignment < 6.0, cap status at "Proceed with Caution"
+- [x] Prevents high Pulse/Stability from masking poor cultural fit
+- [x] Example: @joyeeyang0 × Spotify now shows 7.3 score with "Proceed with Caution" status (not "Green Light")
+- [x] Tests pass (27/27), TypeScript clean

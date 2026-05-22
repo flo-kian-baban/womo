@@ -468,6 +468,12 @@ export function calculateFITScore(inputs: FITScoreInputs): {
   else if (rounded >= 6.0) fitStatus = "Proceed with Caution";
   else fitStatus = "Do Not Proceed";
 
+  // CRITICAL: If Alignment is below 6.0, cap status at "Proceed with Caution" regardless of final score
+  // This ensures that poor cultural fit cannot be masked by high Pulse/Stability scores
+  if (inputs.alignmentRaw < 6.0 && fitStatus === "Green Light") {
+    fitStatus = "Proceed with Caution";
+  }
+
   return { fitScore: rounded, fitStatus };
 }
 
