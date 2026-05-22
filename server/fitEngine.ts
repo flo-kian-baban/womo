@@ -80,11 +80,10 @@ export const ARCHETYPE_COMPATIBILITY: Record<
 };
 
 /**
- * Returns archetype match score (0–10) based on compatibility.
- * Direct same-archetype: 10
- * In "Pairs Well With": 7
- * Neutral (neither pairs nor clashes): 5
- * In "Clashes With": 1
+ * Returns archetype match score (0–10) based on three-tier compatibility.
+ * Resonant (same archetype or in "Pairs Well With"): 10
+ * Complementary (neither pairs nor clashes): 7
+ * Clashing (in "Clashes With" list): 2.5
  */
 export function getArchetypeMatchScore(
   brandArchetype: string,
@@ -92,11 +91,11 @@ export function getArchetypeMatchScore(
 ): number {
   const brand = brandArchetype as Archetype;
   const creator = creatorArchetype as Archetype;
-  if (!ARCHETYPE_COMPATIBILITY[brand]) return 5;
-  if (brand === creator) return 10;
-  if (ARCHETYPE_COMPATIBILITY[brand].pairsWith.includes(creator)) return 7;
-  if (ARCHETYPE_COMPATIBILITY[brand].clashesWith.includes(creator)) return 1;
-  return 5;
+  if (!ARCHETYPE_COMPATIBILITY[brand]) return 7; // Unknown brand archetype = neutral/complementary
+  if (brand === creator) return 10; // Resonant: same archetype
+  if (ARCHETYPE_COMPATIBILITY[brand].pairsWith.includes(creator)) return 10; // Resonant: in Pairs Well list
+  if (ARCHETYPE_COMPATIBILITY[brand].clashesWith.includes(creator)) return 2.5; // Clashing: in Clashes With list
+  return 7; // Complementary: neutral pairing
 }
 
 export function archetypeClashes(brandArchetype: string, creatorArchetype: string): boolean {
