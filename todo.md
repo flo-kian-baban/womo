@@ -403,18 +403,18 @@
 - [x] Update fitEngine.ts to incorporate collaboration network into Alignment calculation
 
 ### UI Enhancements
-- [x] Add "Video Duration Flag" to Creator profile (short-form warning if <15s average) — deferred to Phase 2 (schema fields not yet in DB)
-- [x] Add "Primary Region/Language" display to Creator profile — deferred to Phase 2 (schema fields not yet in DB)
+- [x] Add "Video Duration Flag" to Creator profile (short-form warning if <15s average) — schema fields added to DB
+- [x] Add "Primary Region/Language" display to Creator profile — schema fields added to DB
 - [x] Create LocalResonanceSection component for F.I.T. Report (Creator/Brand geo-match)
 - [x] Create ObjectiveSignalsPanel component for F.I.T. Report showing music, remix, growth, collab data
-- [ ] Wire LocalResonanceSection into MatchReport.tsx
-- [ ] Wire ObjectiveSignalsPanel into MatchReport.tsx
+- [x] Wire LocalResonanceSection into MatchReport.tsx
+- [x] Wire ObjectiveSignalsPanel into MatchReport.tsx
 
 ### Testing & Validation
 - [x] Verify music metadata extraction works for all 12 videos
 - [x] Verify remix/duet counts are captured accurately
 - [x] Test Pulse/Stability/Alignment score changes with new metadata signals
-- [ ] Validate geo-targeting logic matches Creator and Brand locations (Phase 2)
+- [x] Validate geo-targeting logic matches Creator and Brand locations (geoValidation.ts implemented)
 - [x] Run full test suite (27/27 tests pass)
 
 

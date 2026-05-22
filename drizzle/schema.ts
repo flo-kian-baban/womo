@@ -104,6 +104,10 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   longitudinalSampleJson: json("longitudinalSampleJson"), // LongitudinalSample serialized
   discoveredVideoPoolJson: json("discoveredVideoPoolJson"), // Array<{id,url,caption,createTime}> — unsampled confirmed videos
 
+  // Phase 1.6 — Metadata Intelligence
+  avgVideoDuration: float("avgVideoDuration"), // Average video duration in seconds (from 12-video sample)
+  primaryRegion: varchar("primaryRegion", { length: 128 }), // Primary geographic region (extracted from metadata + profile)
+
   // Raw AI summary
   aiSummary: mediumtext("aiSummary"),
   rawAiResponse: json("rawAiResponse"),

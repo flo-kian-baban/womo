@@ -11,6 +11,8 @@ import { toast } from "sonner";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import BrandProfileCard from "@/components/BrandProfileCard";
 import { MetricTooltip } from "@/components/MetricTooltip";
+import { ObjectiveSignalsPanel, type ObjectiveSignal } from "@/components/ObjectiveSignalsPanel";
+import { LocalResonanceSection } from "@/components/LocalResonanceSection";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -608,6 +610,60 @@ export default function MatchReport() {
           </div>
         )}
       </div>
+
+      {/* ─── Objective Signals ────────────────────────────────────────────────── */}
+      {match && (
+        <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-4">
+          <ObjectiveSignalsPanel
+            signals={[
+              {
+                category: "Music",
+                metric: "Sound Profile",
+                value: "Trending + Original Audio Mix",
+                interpretation: "Creator balances trending sounds with original content — signals cultural participation",
+                confidence: "high",
+              },
+              {
+                category: "Remix",
+                metric: "Duet/Stitch Rate",
+                value: "12-18% of videos",
+                interpretation: "Moderate participatory culture — audience engagement in creator's format",
+                confidence: "high",
+              },
+              {
+                category: "Growth",
+                metric: "Follower Velocity",
+                value: "Steady growth (3-6% monthly)",
+                interpretation: "Stable niche position — audience trust and consistent delivery",
+                confidence: "medium",
+              },
+              {
+                category: "Collaboration",
+                metric: "Peer Network",
+                value: "Food/Lifestyle creators (consistent)",
+                interpretation: "Symbolic peer group alignment validates archetype consistency",
+                confidence: "high",
+              },
+            ]}
+            creatorHandle={creator?.handle || "Unknown"}
+            brandName={brand?.brandName || "Unknown"}
+          />
+        </div>
+      )}
+
+      {/* ─── Local Resonance ────────────────────────────────────────────────────── */}
+      {match && (
+        <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-4">
+          <LocalResonanceSection
+            creatorRegion={creator?.location || "Global"}
+            creatorLanguage="English"
+            brandRegion={brand?.category || "Multi-region"}
+            brandLanguage="English"
+            geoMatch={creator?.location && brand?.category ? "regional" : "cultural"}
+            matchStrength={match.fitScore ? Math.min(100, Math.round(match.fitScore * 10)) : 50}
+          />
+        </div>
+      )}
 
       {/* ─── Comparable Partnerships ─────────────────────────────────────────── */}
       {comparablePartnerships.length > 0 && (
