@@ -5,6 +5,7 @@
  */
 
 import { invokeLLM } from "./_core/llm";
+import { computeRogersAdopterStageFromMetadata, computeRemixRateFromMetadata, computeStabilityScoreFromMetadata, computeDriftSignalFromMetadata } from "./fitEngine";
 
 // ─── Creator Extraction ───────────────────────────────────────────────────────
 
