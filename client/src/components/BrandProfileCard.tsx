@@ -4,6 +4,8 @@ import type { BrandProfile } from "../../../drizzle/schema";
 interface BrandProfileCardProps {
   profile: BrandProfile;
   compact?: boolean;
+  onReanalyze?: () => void;
+  isReanalyzing?: boolean;
 }
 
 const BRAND_FIELDS = [
@@ -23,6 +25,9 @@ const WEIGHT_FIELDS = [
   { key: "weightGamma", label: "γ — Stability Weight", type: "weight" },
   { key: "weightPriority", label: "Weight Priority", type: "text" },
 ];
+
+// Re-export for use in parent components
+export type { BrandProfileCardProps };
 
 const BRAND_ARCHETYPE_META: Record<string, { color: string; icon: string; description: string; signature: string }> = {
   Trust: {
@@ -433,26 +438,47 @@ function BrandSymbolDecoderPanel({ profile }: { profile: BrandProfile }) {
   );
 }
 
-export default function BrandProfileCard({ profile, compact = false }: BrandProfileCardProps) {
+export default function BrandProfileCard({ profile, compact = false, onReanalyze, isReanalyzing = false }: BrandProfileCardProps) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-center flex-shrink-0">
-          <span className="text-lg font-serif text-green-400">
-            {profile.brandName?.[0]?.toUpperCase() ?? "?"}
-          </span>
-        </div>
-        <div>
-          <h3 className="font-semibold text-lg text-foreground">{profile.brandName}</h3>
-          <div className="flex items-center gap-2 mt-1">
-            {profile.category && (
-              <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary text-muted-foreground">
-                {profile.category}
-              </span>
-            )}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4 flex-1">
+          <div className="w-12 h-12 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-lg font-serif text-green-400">
+              {profile.brandName?.[0]?.toUpperCase() ?? "?"}
+            </span>
+          </div>
+          <div>
+            <h3 className="font-semibold text-lg text-foreground">{profile.brandName}</h3>
+            <div className="flex items-center gap-2 mt-1">
+              {profile.category && (
+                <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary text-muted-foreground">
+                  {profile.category}
+                </span>
+              )}
+            </div>
           </div>
         </div>
+        {onReanalyze && !compact && (
+          <button
+            onClick={onReanalyze}
+            disabled={isReanalyzing}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 flex-shrink-0"
+          >
+            {isReanalyzing ? (
+              <>
+                <span className="w-3 h-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                Re-analyzing...
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                Re-analyze
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* AI Summary */}

@@ -5,7 +5,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import {
   createCreatorProfile, getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, updateCreatorProfile,
-  createBrandProfile, getBrandProfileById, listBrandProfiles, deleteBrandProfile,
+  createBrandProfile, getBrandProfileById, listBrandProfiles, deleteBrandProfile, updateBrandProfile,
   createMatchRecord, getMatchRecordById, listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
 } from "./db";
@@ -322,6 +322,71 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         await deleteBrandProfile(input.id);
         return { success: true };
+      }),
+
+    reanalyze: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const existing = await getBrandProfileById(input.id);
+        if (!existing) throw new Error("Brand profile not found");
+
+        let brandEvidenceSummary = "";
+        let reviewFields: any = {};
+        let symbolFields: any = {};
+
+        try {
+          const brandResearch = await researchBrand(existing.brandUrl || existing.brandName);
+          brandEvidenceSummary = brandResearch.evidenceSummary;
+          reviewFields = {
+            yelpRating: brandResearch.yelpRating,
+            yelpReviewCount: brandResearch.yelpReviewCount,
+            yelpReviewExcerpts: brandResearch.yelpReviewExcerpts || undefined,
+            googleRating: brandResearch.googleRating,
+            googleReviewCount: brandResearch.googleReviewCount,
+            googleReviewExcerpts: brandResearch.googleReviewExcerpts || undefined,
+            combinedReviewText: brandResearch.combinedReviewText || undefined,
+            overallRating: brandResearch.overallRating,
+            totalReviews: brandResearch.totalReviews,
+          };
+          if (brandResearch.brandDecodedSymbols) {
+            symbolFields = {
+              brandRawKeywords: brandResearch.brandRawKeywords,
+              brandThemeLabels: brandResearch.brandThemeLabels,
+              brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
+              brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
+            };
+          }
+        } catch (err) {
+          console.warn("[brand.reanalyze] Web research failed, proceeding without evidence:", err);
+        }
+
+        const extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
+        const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
+
+        await updateBrandProfile(input.id, {
+          archetype: extracted.archetype,
+          brandArchetypeClassification: extracted.brandArchetypeClassification,
+          emotionalPromise: extracted.emotionalPromise,
+          visualLanguage: extracted.visualLanguage,
+          audienceTribe: extracted.audienceTribe,
+          culturalTension: extracted.culturalTension,
+          barthesMyth: extracted.barthesMyth,
+          brandTone: extracted.brandTone,
+          brandType: extracted.brandType,
+          campaignType: extracted.campaignType,
+          weightAlpha: weights.alpha,
+          weightBeta: weights.beta,
+          weightGamma: weights.gamma,
+          weightPriority: weights.priority,
+          ...reviewFields,
+          ...symbolFields,
+          aiSummary: extracted.aiSummary,
+          rawAiResponse: extracted as unknown as Record<string, unknown>,
+          updatedAt: new Date(),
+        });
+
+        const updated = await getBrandProfileById(input.id);
+        return { profile: updated, extracted, weights };
       }),
 
     weightTable: publicProcedure.query(() => {

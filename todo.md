@@ -454,3 +454,14 @@
 - [x] Prevents high Pulse/Stability from masking poor cultural fit
 - [x] Example: @joyeeyang0 × Spotify now shows 7.3 score with "Proceed with Caution" status (not "Green Light")
 - [x] Tests pass (27/27), TypeScript clean
+
+
+## Re-analyze Feature: Brand Profile Refresh
+- [x] Add updateBrandProfile function to db.ts
+- [x] Add brand.reanalyze tRPC procedure to routers.ts
+- [x] Add onReanalyze and isReanalyzing props to BrandProfileCard component
+- [x] Add Re-analyze button to BrandProfileCard header
+- [x] Implement re-analyze mutation in BrandDetail.tsx
+- [x] Add success/error toast notifications
+- [x] Refresh profile data after re-analysis
+- [x] Tests pass (27/27), TypeScript clean

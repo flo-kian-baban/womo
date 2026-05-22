@@ -125,6 +125,13 @@ export async function listBrandProfiles(userId?: number, search?: string) {
   return db.select().from(brandProfiles).orderBy(desc(brandProfiles.createdAt)).limit(50);
 }
 
+export async function updateBrandProfile(id: number, data: Partial<InsertBrandProfile>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.update(brandProfiles).set(data).where(eq(brandProfiles.id, id));
+  return result;
+}
+
 export async function deleteBrandProfile(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
