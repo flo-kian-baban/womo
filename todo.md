@@ -357,3 +357,10 @@
 - [x] Data Confidence Warning: show "Low Data Confidence" banner when 6-3-3 incomplete or brand <2000 words
 - [x] Enhanced loading state copy: "Deep Anthropological Analysis in Progress..." (~45-60s message)
 - [x] Update internal dev docs with Phase 1.5 implementation note
+
+## 6-3-3 Fill-Forward Fallback
+- [x] If anchor bucket (18+ months) is empty or short: fill remaining slots from oldest available videos not already in recent or mid buckets
+- [x] If mid bucket (6–18 months) is empty or short: fill remaining slots from oldest available videos not already in recent bucket
+- [x] Log clearly when a bucket was filled via fallback (e.g., "anchor: 2 oldest-available videos added")
+- [x] Deduplication: fill-forward never reuses a video already assigned to another bucket
+- [x] TypeScript check (0 errors) and all tests (27/27 pass)

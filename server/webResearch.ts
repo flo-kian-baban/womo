@@ -675,6 +675,46 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     }
   }
 
+  // ─── Fill-forward fallback: if mid or anchor buckets are short, fill from oldest available ──
+  // Build a pool of videos NOT already in the recent bucket, sorted oldest-first
+  const recentIds = new Set(recentBucket.map(v => v.id));
+  const remainingOldestFirst = sortedVideos
+    .filter(v => v.createTime > 0 && !recentIds.has(v.id))
+    .reverse(); // oldest first
+
+  // Fill mid bucket to 3 using oldest available if needed
+  const midFallback = midBucket.length < 3;
+  if (midFallback) {
+    const midIds = new Set(midBucket.map(v => v.id));
+    for (const v of remainingOldestFirst) {
+      if (midBucket.length >= 3) break;
+      if (!midIds.has(v.id) && !recentIds.has(v.id)) {
+        midBucket.push(v);
+        midIds.add(v.id);
+      }
+    }
+    if (midBucket.length > midCandidates.length) {
+      console.log(`[webResearch] @${handle}: mid bucket filled via fallback (${midBucket.length - midCandidates.length} oldest-available videos added)`);
+    }
+  }
+
+  // Fill anchor bucket to 3 using oldest available if needed (excluding recent + mid)
+  const anchorFallback = anchorBucket.length < 3;
+  if (anchorFallback) {
+    const midAndRecentIds = new Set([...recentBucket, ...midBucket].map(v => v.id));
+    const anchorIds = new Set(anchorBucket.map(v => v.id));
+    for (const v of remainingOldestFirst) {
+      if (anchorBucket.length >= 3) break;
+      if (!anchorIds.has(v.id) && !midAndRecentIds.has(v.id)) {
+        anchorBucket.push(v);
+        anchorIds.add(v.id);
+      }
+    }
+    if (anchorBucket.length > anchorCandidates.length) {
+      console.log(`[webResearch] @${handle}: anchor bucket filled via fallback (${anchorBucket.length - anchorCandidates.length} oldest-available videos added)`);
+    }
+  }
+
   // Combine the 12 sampled videos (deduplicated)
   const sampledIds = new Set<string>();
   const sampledVideos: Array<{ item: typeof videoItems[0]; bucket: "recent" | "mid" | "anchor" }> = [];
@@ -688,7 +728,9 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     if (!sampledIds.has(v.id)) { sampledIds.add(v.id); sampledVideos.push({ item: v, bucket: "anchor" }); }
   }
 
-  console.log(`[webResearch] @${handle}: 6-3-3 sample — recent=${recentBucket.length}, mid=${midBucket.length}, anchor=${anchorBucket.length} → ${sampledVideos.length} total`);
+  const midUsedFallback = midFallback && midBucket.length > midCandidates.length;
+  const anchorUsedFallback = anchorFallback && anchorBucket.length > anchorCandidates.length;
+  console.log(`[webResearch] @${handle}: 6-3-3 sample — recent=${recentBucket.length}, mid=${midBucket.length}${midUsedFallback ? "(+fallback)" : ""}, anchor=${anchorBucket.length}${anchorUsedFallback ? "(+fallback)" : ""} → ${sampledVideos.length} total`);
 
   // Fetch transcripts for the 12 sampled videos in batches of 3
   const batchSize = 3;
