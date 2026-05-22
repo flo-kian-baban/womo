@@ -151,6 +151,95 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    reanalyze: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const existing = await getCreatorProfileById(input.id);
+        if (!existing) throw new Error("Creator profile not found");
+
+        let evidenceSummary = "";
+        let researchedProfileUrl: string | undefined;
+        let researchData: any = {};
+
+        try {
+          const research = await researchCreator(existing.profileUrl || existing.handle, existing.platform as any);
+          evidenceSummary = research.evidenceSummary;
+          researchedProfileUrl = research.profileUrl;
+          researchData = {
+            followerCount: research.followerCount || undefined,
+            totalLikes: research.totalLikes || undefined,
+            videoCount: research.videoCount || undefined,
+            totalViews: research.totalViews || undefined,
+            avgViews: research.avgViews || undefined,
+            engagementRate: research.engagementRate || undefined,
+            location: research.location || undefined,
+            rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+            contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+            topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+            recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+            transcriptCount: research.transcriptCount ?? 0,
+            transcriptExcerpts: research.transcriptExcerpts || undefined,
+            decodedSymbols: research.decodedSymbols ?? undefined,
+            culturalVelocity: research.culturalVelocity ?? undefined,
+            dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+            longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+            discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+          };
+        } catch (err) {
+          console.warn("[creator.reanalyze] Web research failed, proceeding without evidence:", err);
+        }
+
+        const extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+
+        await updateCreatorProfile(input.id, {
+          archetype: extracted.archetype,
+          recurringThemes: extracted.recurringThemes,
+          toneRegister: extracted.toneRegister,
+          parasocialBondStrength: extracted.parasocialBondStrength,
+          audienceRelationshipType: extracted.audienceRelationshipType,
+          barthesMyth: extracted.barthesMyth,
+          culturalCapital: extracted.culturalCapital,
+          goffmanStageConsistency: extracted.goffmanStageConsistency,
+          driftSignal: extracted.driftSignal,
+          stuartHallDecoding: extracted.stuartHallDecoding,
+          nicheTopicNode: extracted.nicheTopicNode,
+          undergroundDensity: extracted.undergroundDensity,
+          mainstreamBleed: extracted.mainstreamBleed,
+          remixRate: extracted.remixRate,
+          brandSaturation: extracted.brandSaturation,
+          rogersAdopterStage: extracted.rogersAdopterStage,
+          creatorNichePosition: extracted.creatorNichePosition,
+          lifecyclePhase: extracted.lifecyclePhase,
+          barthesNicheMeaning: extracted.barthesNicheMeaning,
+          turnerLiminalPhase: extracted.turnerLiminalPhase,
+          pronouns: extracted.pronouns,
+          aiSummary: extracted.aiSummary,
+          rawAiResponse: extracted as unknown as Record<string, unknown>,
+          followerCount: researchData?.followerCount ?? undefined,
+          totalLikes: researchData?.totalLikes ?? undefined,
+          videoCount: researchData?.videoCount ?? undefined,
+          totalViews: researchData?.totalViews ?? undefined,
+          avgViews: researchData?.avgViews ?? undefined,
+          engagementRate: researchData?.engagementRate ?? undefined,
+          location: researchData?.location ?? undefined,
+          rawKeywords: researchData?.rawKeywords ?? undefined,
+          contentThemeLabels: researchData?.contentThemeLabels ?? undefined,
+          topHashtags: researchData?.topHashtags ?? undefined,
+          recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
+          transcriptCount: researchData?.transcriptCount ?? 0,
+          transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
+          decodedSymbols: researchData?.decodedSymbols ?? undefined,
+          culturalVelocity: researchData?.culturalVelocity ?? undefined,
+          dataConfidenceLevel: researchData?.dataConfidenceLevel ?? undefined,
+          longitudinalSampleJson: researchData?.longitudinalSampleJson ?? undefined,
+          discoveredVideoPoolJson: researchData?.discoveredVideoPoolJson as unknown as Record<string, unknown> ?? undefined,
+          updatedAt: new Date(),
+        });
+
+        const updated = await getCreatorProfileById(input.id);
+        return { profile: updated, extracted };
+      }),
+
     // ─── Supplemental Video Ingestion ─────────────────────────────────────────
     // Fetches transcript for a single TikTok video URL and appends it to the
     // creator profile's transcript pool, then updates the profile's data.

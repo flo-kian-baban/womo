@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useParams } from "wouter";
 import { ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import { Button } from "@/components/ui/button";
@@ -8,11 +10,29 @@ import { Button } from "@/components/ui/button";
 export default function CreatorDetail() {
   const { id } = useParams<{ id: string }>();
   const creatorId = parseInt(id ?? "0", 10);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
 
-  const { data, isLoading, error } = trpc.creator.get.useQuery(
+  const { data, isLoading, error, refetch } = trpc.creator.get.useQuery(
     { id: creatorId },
     { enabled: !!creatorId }
   );
+
+  const reanalyzeMutation = trpc.creator.reanalyze.useMutation({
+    onSuccess: (result) => {
+      setIsReanalyzing(false);
+      toast.success("Creator re-analyzed successfully");
+      refetch();
+    },
+    onError: (err) => {
+      setIsReanalyzing(false);
+      toast.error(`Re-analysis failed: ${err.message}`);
+    },
+  });
+
+  const handleReanalyze = async () => {
+    setIsReanalyzing(true);
+    reanalyzeMutation.mutate({ id: creatorId });
+  };
 
   return (
     <div className="min-h-full px-6 py-8 lg:px-10 lg:py-10">
@@ -39,7 +59,7 @@ export default function CreatorDetail() {
       )}
 
       {data && (
-        <CreatorProfileCard profile={data} />
+        <CreatorProfileCard profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
       )}
     </div>
   );

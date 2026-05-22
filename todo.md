@@ -465,3 +465,13 @@
 - [x] Add success/error toast notifications
 - [x] Refresh profile data after re-analysis
 - [x] Tests pass (27/27), TypeScript clean
+
+
+## Re-analyze Feature: Creator Profile Refresh
+- [x] Add creator.reanalyze tRPC procedure to routers.ts
+- [x] Add onReanalyze and isReanalyzing props to CreatorProfileCard component
+- [x] Add Re-analyze button to CreatorProfileCard header
+- [x] Implement re-analyze mutation in CreatorDetail.tsx
+- [x] Add success/error toast notifications
+- [x] Refresh profile data after re-analysis
+- [x] Tests pass (27/27), TypeScript clean

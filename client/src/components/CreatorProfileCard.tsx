@@ -10,6 +10,8 @@ import { useState } from "react";
 interface CreatorProfileCardProps {
   profile: CreatorProfile;
   compact?: boolean;
+  onReanalyze?: () => void;
+  isReanalyzing?: boolean;
 }
 
 const FIELD_SECTIONS = [
@@ -258,7 +260,7 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
   );
 }
 
-export default function CreatorProfileCard({ profile, compact = false }: CreatorProfileCardProps) {
+export default function CreatorProfileCard({ profile, compact = false, onReanalyze, isReanalyzing = false }: CreatorProfileCardProps) {
   const themes = (profile.contentThemeLabels as string[] | null) ?? [];
   const hashtags = (profile.topHashtags as string[] | null) ?? [];
   const keywords = (profile.rawKeywords as string[] | null) ?? [];
@@ -274,31 +276,52 @@ export default function CreatorProfileCard({ profile, compact = false }: Creator
   return (
     <div className="space-y-6">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-          <span className="text-lg font-serif text-primary">
-            {(profile.displayName ?? profile.handle)?.[0]?.toUpperCase() ?? "?"}
-          </span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-lg text-foreground truncate">{profile.displayName ?? profile.handle}</h3>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="text-sm text-muted-foreground">@{profile.handle}</span>
-            <span className="text-muted-foreground/30">·</span>
-            <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary text-muted-foreground">
-              {profile.platform}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-lg font-serif text-primary">
+              {(profile.displayName ?? profile.handle)?.[0]?.toUpperCase() ?? "?"}
             </span>
-            {profile.location && (
-              <>
-                <span className="text-muted-foreground/30">·</span>
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <MapPin className="w-3 h-3" />
-                  {profile.location}
-                </span>
-              </>
-            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-lg text-foreground truncate">{profile.displayName ?? profile.handle}</h3>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-sm text-muted-foreground">@{profile.handle}</span>
+              <span className="text-muted-foreground/30">·</span>
+              <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary text-muted-foreground">
+                {profile.platform}
+              </span>
+              {profile.location && (
+                <>
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <MapPin className="w-3 h-3" />
+                    {profile.location}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
+        {onReanalyze && !compact && (
+          <button
+            onClick={onReanalyze}
+            disabled={isReanalyzing}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 flex-shrink-0"
+          >
+            {isReanalyzing ? (
+              <>
+                <span className="w-3 h-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                Re-analyzing...
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                Re-analyze
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* ── Transcript Badge ─────────────────────────────────────────────── */}
