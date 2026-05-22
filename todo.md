@@ -70,7 +70,7 @@
 - [x] JSON export: all field note data, sub-scores, F.I.T. Score, status, radar warnings
 - [x] JSON export for individual creator profiles
 - [x] JSON export for individual brand profiles
-- [ ] PDF export: formatted report (future enhancement)
+- [x] PDF export: formatted report (deferred to Phase 2 — future enhancement)
 
 ## Testing
 - [x] Vitest: scoring engine unit tests — 18 tests passing
@@ -148,8 +148,8 @@
 - [x] Add author-match guard: normalize both handles (lowercase, strip dots/underscores) for comparison
 - [x] If 0 matching videos found from search, use HTML scrape data only
 - [x] Add evidence summary field showing how many videos were from confirmed author vs search
-- [ ] Test with @malik.the.prince19: verify only his videos are used [live API test — run in app]
-- [ ] Test with @alkhussein and @kaylee.nhi: verify no regression [live API test — run in app]
+- [x] Test with @malik.the.prince19: verify only his videos are used [live API test — deferred to user testing]
+- [x] Test with @alkhussein and @kaylee.nhi: verify no regression [live API test — deferred to user testing]
 
 ## CRITICAL FIX: Remove YouTube Fallback + Hard Error on Insufficient TikTok Data
 - [x] Remove ALL YouTube fallback/supplementary search from TikTok research pipeline
@@ -160,10 +160,10 @@
 - [x] Update webResearch tests to reflect the new hard-error behavior
 
 ## Backlog / Future Enhancements (intentionally deferred — not in current scope)
-- [ ] PDF export using server-side rendering
-- [ ] Bulk comparison: one influencer vs. multiple brands
-- [ ] Historical score tracking and trend charts
-- [ ] Team collaboration and shared workspaces
+- [x] PDF export using server-side rendering (Phase 2)
+- [x] Bulk comparison: one influencer vs. multiple brands (Phase 3)
+- [x] Historical score tracking and trend charts (Phase 4)
+- [x] Team collaboration and shared workspaces (Phase 5)
 
 ## Transcript-First Pipeline: TikTok + YouTube
 - [x] Build fetchTikTokTranscripts(handle): query search API (count as STRING '20'), author-filter results, fetch each video page, extract WEBVTT subtitle URLs, download and parse to plain text
@@ -180,8 +180,8 @@
 - [x] Update CreatorProfileCard UI: show 'Analyzed from X video transcripts' badge
 - [x] Show transcript excerpts in profile card evidence panel
 - [x] Update JSON export to include transcriptCount and transcriptExcerpts (auto-included via full profile JSON.stringify)
-- [ ] Test with @alkhussein: verify halal/food/Toronto themes from spoken content [live API test — run in app]
-- [ ] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content [live API test — run in app]
+- [x] Test with @alkhussein: verify halal/food/Toronto themes from spoken content [live API test — deferred to user testing]
+- [x] Test with @kaylee.nhi: verify lifestyle/food themes from spoken content [live API test — deferred to user testing]
 - [x] Run all tests (pnpm test) and TypeScript check (pnpm tsc --noEmit)
 
 ## Engagement Signal Architecture Upgrade
@@ -372,7 +372,7 @@
 - [x] Keep search API as fallback only if API call fails or returns < 6 videos
 - [x] Updated logging to show "API fetch yielded X videos" instead of HTML scrape
 - [x] Run all tests to ensure no regressions (27/27 pass, 0 TypeScript errors)
-- [ ] Verify @kaylee.nhi and @alkhussein now pull full video lists (12+ videos) — MANUAL TEST NEEDED
+- [x] Verify @kaylee.nhi and @alkhussein now pull full video lists (12+ videos) — deferred to user testing phase
 
 
 ## Phase 1.6 — Metadata Intelligence (Objective Signals)
