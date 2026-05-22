@@ -286,6 +286,7 @@ export const appRouter = router({
           audienceTribe: extracted.audienceTribe,
           culturalTension: extracted.culturalTension,
           barthesMyth: extracted.barthesMyth,
+          brandTone: extracted.brandTone,
           brandType: extracted.brandType,
           campaignType: extracted.campaignType,
           weightAlpha: weights.alpha,
@@ -357,16 +358,27 @@ export const appRouter = router({
               messages: [
                 {
                   role: "system",
-                  content: `You are a cultural semiotics analyst scoring the mythological alignment between a creator and a brand.
+                  content: `You are a cultural semiotics analyst scoring the mythological alignment between a creator and a brand for an influencer marketing platform.
 
 Creator Barthes Myth: "${creator.barthesMyth}"
-Brand Barthes Myth: "${brand.barthesMyth}"
+Creator Tone Register: "${creator.toneRegister ?? "not specified"}"
 Creator Audience Relationship: "${creator.audienceRelationshipType ?? ""}"
-Brand Audience Tribe: "${brand.audienceTribe ?? ""}"
 Creator Cultural Capital: "${creator.culturalCapital ?? ""}"
-Brand Cultural Tension: "${brand.culturalTension ?? ""}"
+Creator Stuart Hall Decoding: "${creator.stuartHallDecoding ?? "Dominant"}"
 
-Score 1: mythAlignmentScore (0–10) — How closely do the creator's and brand's mythological narratives align? Same symbolic territory = 10, completely opposed = 1.
+Brand Barthes Myth: "${brand.barthesMyth}"
+Brand Tone Register: "${(brand as Record<string, unknown>).brandTone ?? "not specified"}"
+Brand Audience Tribe: "${brand.audienceTribe ?? ""}"
+Brand Cultural Tension: "${brand.culturalTension ?? ""}"
+Brand Archetype Classification: "${brand.brandArchetypeClassification ?? ""}"
+
+SCORING RULES:
+- If creator tone is anti-establishment, rebellious, or oppositional AND brand is institutional, corporate, or formal: mythAlignmentScore should be 1-3 (severe mismatch)
+- If creator and brand share the same symbolic territory (both community-driven, both aspirational, both playful): mythAlignmentScore should be 7-10
+- If creator's Stuart Hall Decoding is Oppositional: apply a -2 penalty to mythAlignmentScore
+- tribMatchScore measures whether the creator's actual audience would authentically receive this brand — not just whether the brand wants that audience
+
+Score 1: mythAlignmentScore (0–10) — How closely do the creator's and brand's mythological narratives and tones align? Same symbolic territory = 10, completely opposed = 1.
 Score 2: tribMatchScore (0–10) — How well does the creator's audience relationship type match the brand's target tribe? Perfect match = 10, mismatch = 1.
 
 Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <number>}`,

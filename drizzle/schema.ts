@@ -138,6 +138,9 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   culturalTension: text("culturalTension"), // "This brand exists in the tension between _ and _."
   barthesMyth: text("barthesMyth"), // "This brand normalizes the belief that _."
 
+  // Brand tone register (mirrors creator toneRegister — 2-3 words, e.g. "formal, institutional, aspirational")
+  brandTone: text("brandTone"),
+
   // Brand Archetype Classification (Trust / Community / Momentum) — Chapter 3 logic
   brandArchetypeClassification: mysqlEnum("brandArchetypeClassification", ["Trust", "Community", "Momentum"]),
 

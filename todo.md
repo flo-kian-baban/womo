@@ -433,3 +433,10 @@
 - [x] Add MetricTooltip import to Brand Profile component
 - [x] Test all tooltips render correctly (27/27 tests pass, TypeScript clean)
 - [x] Tooltip system ready for deployment
+
+## Scoring Accuracy Fix
+- [x] Remove 6.0 floor from F.I.T. Score calculation (let scores go to 0)
+- [x] Add brand tone/positioning extraction to brand analysis LLM prompt
+- [x] Add tone mismatch penalty to Alignment (α) calculation (via enriched myth alignment prompt)
+- [x] Add brandTone field to brand_profiles schema
+- [x] Update tests — 27/27 pass, TypeScript clean

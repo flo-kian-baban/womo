@@ -425,7 +425,7 @@ export function calculatePulseScore(inputs: PulseInputs): {
 } {
   const rogersBase = ROGERS_BASE_SCORES[inputs.rogersAdopterStage] ?? 5;
   const liminalAdj = LIMINAL_ADJUSTMENTS[inputs.turnerLiminalPhase] ?? 0;
-  const raw = Math.min(10, Math.max(1, rogersBase + liminalAdj));
+  const raw = Math.min(10, Math.max(0, rogersBase + liminalAdj));
   return { raw, rogersBase, liminalAdjustment: liminalAdj };
 }
 

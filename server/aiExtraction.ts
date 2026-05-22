@@ -257,6 +257,7 @@ export interface BrandExtractionResult {
   audienceTribe: string;
   culturalTension: string;
   barthesMyth: string;
+  brandTone: string;  // 2-3 words, e.g. "formal, institutional, aspirational"
   brandType: string;
   campaignType: "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration";
   aiSummary: string;
@@ -390,6 +391,7 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "audienceTribe": "Psychographic description of target audience — what they believe, aspire to, and reject",
   "culturalTension": "This brand exists in the tension between [X] and [Y].",
   "barthesMyth": "This brand normalizes the belief that [complete this sentence].",
+  "brandTone": "2-3 words describing the brand's tone register (e.g. 'formal, institutional, aspirational' or 'playful, irreverent, bold' or 'warm, community-driven, accessible')",
   "brandArchetypeClassification": ONE OF EXACTLY: "Trust" | "Community" | "Momentum" — the governing structural archetype for this brand based on Chapter 3 logic,
   "brandType": ONE OF EXACTLY: ${JSON.stringify(brandTypeOptions)},
   "campaignType": "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration",
@@ -429,6 +431,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             audienceTribe: { type: "string" },
             culturalTension: { type: "string" },
             barthesMyth: { type: "string" },
+            brandTone: { type: "string" },
             brandArchetypeClassification: { type: "string", enum: ["Trust", "Community", "Momentum"] },
             brandType: { type: "string" },
             campaignType: { type: "string", enum: ["Heritage/Luxury", "Trend-First", "Long-Term Ambassador", "Product Launch", "Community/Local", "Awareness/Consideration"] },
@@ -437,7 +440,7 @@ Be specific and evidence-based. Every field must be populated. Output only valid
           required: [
             "brandName", "category", "archetype", "brandArchetypeClassification",
             "emotionalPromise", "visualLanguage",
-            "audienceTribe", "culturalTension", "barthesMyth", "brandType", "campaignType", "aiSummary",
+            "audienceTribe", "culturalTension", "barthesMyth", "brandTone", "brandType", "campaignType", "aiSummary",
           ],
           additionalProperties: false,
         },
