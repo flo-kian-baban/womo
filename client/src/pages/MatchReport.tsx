@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import BrandProfileCard from "@/components/BrandProfileCard";
+import { MetricTooltip } from "@/components/MetricTooltip";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -319,8 +320,16 @@ export default function MatchReport() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 animate-fade-in-up animate-stagger-1">
         {/* F.I.T. Score */}
         <div className="fit-card rounded-xl p-8 connex-glow">
-          <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground mb-4">
-            F.I.T. Score
+          <div className="flex items-center gap-1.5 mb-4">
+            <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground">
+              F.I.T. Score
+            </div>
+            <MetricTooltip
+              title="F.I.T. Score"
+              explanation="The F.I.T. Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
+              formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
+              dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
+            />
           </div>
           <div className="flex items-center gap-3 mb-5">
             <div className="text-5xl font-serif gold-text">{Number(match.fitScore).toFixed(1)}</div>
@@ -341,11 +350,15 @@ export default function MatchReport() {
               { label: "Stability (γ)", value: Number(match.stabilityScoreRaw), color: "oklch(0.78 0.12 75)", weight: Number(match.weightGamma) },
             ].map((sub) => (
               <div key={sub.label} className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground w-28 flex-shrink-0">{sub.label}</span>
-                <div className="flex-1 h-2 rounded-full bg-border overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${(sub.value / 10) * 100}%`, background: sub.color }} />
+                <div className="flex items-center gap-1.5 w-28 flex-shrink-0">
+                  <span className="text-xs text-muted-foreground">{sub.label}</span>
+                  <MetricTooltip
+                    title={sub.label}
+                    explanation={sub.label === "Alignment (α)" ? "Measures archetype compatibility, myth alignment, and audience decoding acceptance between creator and brand." : sub.label === "Pulse (β)" ? "Measures cultural momentum: whether the creator's niche is trending, stable, or declining based on music signals and remix rates." : "Measures identity consistency: whether the creator's themes remain stable over time and whether their follower growth is accelerating or declining."}
+                    formula={sub.label === "Alignment (α)" ? "(Archetype Match × 0.4) + (Myth Alignment × 0.35) + (Decoding × 0.25)" : sub.label === "Pulse (β)" ? "(Rogers Base × 0.6) + (Liminal Adjustment × 0.4)" : "(Goffman Consistency × 0.5) + (Drift Signal × 0.5)"}
+                    dataPoints={sub.label === "Alignment (α)" ? ["Archetype compatibility", "Barthes myth alignment", "Stuart Hall decoding"] : sub.label === "Pulse (β)" ? ["Music niche/mainstream", "Remix enablement rate", "Engagement trend"] : ["Theme consistency", "Keyword drift", "Follower growth"]}
+                  />
                 </div>
-                <span className="text-xs font-mono w-8 text-right" style={{ color: sub.color }}>{sub.value.toFixed(1)}</span>
                 <span className="text-xs text-muted-foreground/50 w-12">w:{sub.weight.toFixed(1)}</span>
               </div>
             ))}

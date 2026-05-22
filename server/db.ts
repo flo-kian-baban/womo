@@ -59,8 +59,8 @@ export async function createCreatorProfile(data: InsertCreatorProfile) {
     const result = await db.insert(creatorProfiles).values(data);
     return result;
   } catch (err: unknown) {
-    const mysqlErr = err as { sqlMessage?: string; code?: string };
-    console.error('[db] createCreatorProfile INSERT failed:', mysqlErr?.code, mysqlErr?.sqlMessage);
+    const e = err as { sqlMessage?: string; code?: string; message?: string; cause?: unknown };
+    console.error('[db] createCreatorProfile INSERT failed:', JSON.stringify({ code: e?.code, sqlMessage: e?.sqlMessage, message: e?.message?.slice(0, 500) }));
     throw err;
   }
 }

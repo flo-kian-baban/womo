@@ -817,3 +817,131 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     dataConfidenceLevel,
   };
 }
+
+// ─── Phase 1.6: Pulse Score Automation ─────────────────────────────────────
+
+export interface MetadataSignals {
+  musicMetadata?: Array<{ soundName?: string; isOriginal?: boolean; isTrending?: boolean; niche?: "niche" | "mainstream" | "unknown" }>;
+  remixMetadata?: Array<{ duetCount?: number; stitchCount?: number; remixTotal?: number }>;
+  engagementRate?: number;
+  originalAudioRate?: number;
+  remixEnablementRate?: number;
+}
+
+export function computeRogersAdopterStageFromMetadata(signals: MetadataSignals): "Innovators" | "Early Adopters" | "Early Majority" | "Late Majority" | "Laggards" {
+  const musicList = signals.musicMetadata ?? [];
+  const trendingCount = musicList.filter(m => m.isTrending).length;
+  const nicheCount = musicList.filter(m => m.niche === "niche").length;
+  const mainstreamCount = musicList.filter(m => m.niche === "mainstream").length;
+  const musicRatio = musicList.length > 0 ? trendingCount / musicList.length : 0;
+  const engagement = signals.engagementRate ?? 0;
+  const originalAudio = signals.originalAudioRate ?? 0;
+  const remixEnabled = signals.remixEnablementRate ?? 0;
+
+  if (nicheCount > mainstreamCount && engagement < 2 && originalAudio > 50) return "Innovators";
+  if (nicheCount >= mainstreamCount && engagement >= 2 && engagement < 5 && remixEnabled > 40) return "Early Adopters";
+  if (Math.abs(nicheCount - mainstreamCount) <= 1 && engagement >= 5 && engagement < 8) return "Early Majority";
+  if (mainstreamCount > nicheCount && engagement >= 8 && musicRatio > 0.6) return "Late Majority";
+  if (mainstreamCount > nicheCount && engagement >= 8) return "Laggards";
+  if (engagement < 2) return "Innovators";
+  if (engagement < 5) return "Early Adopters";
+  if (engagement < 8) return "Early Majority";
+  if (engagement < 10) return "Late Majority";
+  return "Laggards";
+}
+
+export function computeRemixRateFromMetadata(signals: MetadataSignals): boolean {
+  const remixEnabled = signals.remixEnablementRate ?? 0;
+  const remixList = signals.remixMetadata ?? [];
+  const avgRemixCount = remixList.length > 0 
+    ? remixList.reduce((sum, r) => sum + (r.remixTotal ?? 0), 0) / remixList.length 
+    : 0;
+  return remixEnabled > 60 || avgRemixCount > 5;
+}
+
+export interface StabilityMetadata {
+  followerGrowthRate?: number; // percentage growth rate (e.g., 15 = 15% growth)
+  followerCount?: number; // current follower count
+  historicalFollowerCount?: number; // follower count from ~3 months ago
+  themeConsistencyScore?: number; // 0-100, how consistent themes are across 6-3-3 buckets
+  keywordDriftScore?: number; // 0-100, how stable keywords are across time buckets
+  engagementTrendDirection?: "accelerating" | "stable" | "declining"; // engagement trend
+}
+
+export function computeStabilityScoreFromMetadata(metadata: StabilityMetadata): "Consistent" | "Minor Gap" | "Significant Gap" {
+  // Goffman Stage Consistency: based on theme/keyword consistency
+  const themeConsistency = metadata.themeConsistencyScore ?? 50;
+  const keywordDrift = metadata.keywordDriftScore ?? 50;
+  const avgConsistency = (themeConsistency + keywordDrift) / 2;
+
+  // Drift Signal: based on follower growth trajectory and engagement trend
+  const followerGrowth = metadata.followerGrowthRate ?? 0;
+  const engagementTrend = metadata.engagementTrendDirection ?? "stable";
+
+  // Decision tree for Goffman Stage Consistency
+  let goffmanScore: "Consistent" | "Minor Gap" | "Significant Gap";
+  if (avgConsistency > 75) {
+    goffmanScore = "Consistent";
+  } else if (avgConsistency > 50) {
+    goffmanScore = "Minor Gap";
+  } else {
+    goffmanScore = "Significant Gap";
+  }
+
+  // Drift Signal interpretation
+  // Accelerating growth + stable themes = "Zero Change" (focused)
+  // Stable growth + stable themes = "Zero Change" (consistent)
+  // Declining growth + shifting themes = "Significant Drift" (losing identity)
+  // Accelerating growth + shifting themes = "Minor Drift" (evolving)
+
+  let driftModifier = 0;
+  if (engagementTrend === "declining" && avgConsistency < 50) {
+    driftModifier = -2; // Major drift penalty
+  } else if (engagementTrend === "accelerating" && avgConsistency < 60) {
+    driftModifier = -1; // Minor drift penalty
+  } else if (engagementTrend === "stable" && avgConsistency > 70) {
+    driftModifier = 0; // No drift
+  }
+
+  // If drift is significant, downgrade Goffman score
+  if (driftModifier < -1 && goffmanScore === "Consistent") {
+    goffmanScore = "Minor Gap";
+  } else if (driftModifier < -1 && goffmanScore === "Minor Gap") {
+    goffmanScore = "Significant Gap";
+  }
+
+  return goffmanScore;
+}
+
+export function computeDriftSignalFromMetadata(metadata: StabilityMetadata): "Zero Change" | "Minor Drift" | "Significant Drift" | "Full Pivot" {
+  const themeConsistency = metadata.themeConsistencyScore ?? 50;
+  const keywordDrift = metadata.keywordDriftScore ?? 50;
+  const avgConsistency = (themeConsistency + keywordDrift) / 2;
+  const followerGrowth = metadata.followerGrowthRate ?? 0;
+  const engagementTrend = metadata.engagementTrendDirection ?? "stable";
+
+  // Full Pivot: themes completely changed (< 30% consistency) + declining engagement
+  if (avgConsistency < 30 && engagementTrend === "declining") {
+    return "Full Pivot";
+  }
+
+  // Significant Drift: major theme shift (30-50% consistency) + declining engagement
+  if (avgConsistency < 50 && engagementTrend === "declining") {
+    return "Significant Drift";
+  }
+
+  // Minor Drift: themes shifting (50-70% consistency) + accelerating growth (evolution)
+  if (avgConsistency < 70 && engagementTrend === "accelerating") {
+    return "Minor Drift";
+  }
+
+  // Zero Change: stable themes + stable or accelerating engagement
+  if (avgConsistency > 70) {
+    return "Zero Change";
+  }
+
+  // Default fallback
+  if (avgConsistency > 60) return "Minor Drift";
+  if (avgConsistency > 40) return "Significant Drift";
+  return "Full Pivot";
+}

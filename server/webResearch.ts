@@ -44,6 +44,12 @@ export interface TranscriptEntry {
   bucket?: "recent" | "mid" | "anchor"; // 6-3-3 temporal bucket
   createTime?: number;   // Unix timestamp (seconds)
   transcriptSource?: "captions" | "whisper"; // how transcript was obtained
+  // Phase 1.6 metadata
+  musicMetadata?: { soundName?: string; isOriginal?: boolean; isTrending?: boolean; niche?: "niche" | "mainstream" | "unknown" };
+  remixMetadata?: { duetCount?: number; stitchCount?: number; remixTotal?: number };
+  videoDuration?: number;
+  region?: string;
+  collaborations?: string[];
 }
 
 export interface LongitudinalSample {
@@ -343,12 +349,18 @@ async function fetchTikTokVideoTranscriptWithWhisperFallback(
   videoId: string,
   caption: string,
   bucket: "recent" | "mid" | "anchor" = "recent",
-  createTime?: number
+  createTime?: number,
+  metadata?: { musicTitle?: string; musicOriginal?: boolean; duetEnabled?: boolean; stitchEnabled?: boolean; durationMs?: number; collaborations?: string[] }
 ): Promise<TranscriptEntry | null> {
   // First try built-in captions
   const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
   if (captionResult) {
-    return { ...captionResult, bucket, createTime, transcriptSource: "captions" };
+    const entry = { ...captionResult, bucket, createTime, transcriptSource: "captions" as const };
+    if (metadata?.musicTitle) entry.musicMetadata = { soundName: metadata.musicTitle, isOriginal: metadata.musicOriginal };
+    if (metadata?.duetEnabled || metadata?.stitchEnabled) entry.remixMetadata = { duetCount: 0, stitchCount: 0 };
+    if (metadata?.durationMs) entry.videoDuration = Math.round(metadata.durationMs / 1000);
+    if (metadata?.collaborations?.length) entry.collaborations = metadata.collaborations;
+    return entry;
   }
 
   // Whisper fallback: attempt to get the video download URL and transcribe
@@ -382,7 +394,12 @@ async function fetchTikTokVideoTranscriptWithWhisperFallback(
     const transcript = result.text.trim();
     const wordCount = transcript.split(/\s+/).length;
     console.log(`[webResearch] ✅ Whisper transcript for video ${videoId}: ${wordCount} words`);
-    return { videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "whisper" };
+    const entry: any = { videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "whisper" as const };
+    if (metadata?.musicTitle) entry.musicMetadata = { soundName: metadata.musicTitle, isOriginal: metadata.musicOriginal };
+    if (metadata?.duetEnabled || metadata?.stitchEnabled) entry.remixMetadata = { duetCount: 0, stitchCount: 0 };
+    if (metadata?.durationMs) entry.videoDuration = Math.round(metadata.durationMs / 1000);
+    if (metadata?.collaborations?.length) entry.collaborations = metadata.collaborations;
+    return entry;
   } catch (err) {
     console.warn(`[webResearch] Whisper fallback failed for video ${videoId}:`, (err as Error).message);
     return null;
@@ -870,9 +887,17 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   for (let i = 0; i < sampledVideos.length; i += batchSize) {
     const batch = sampledVideos.slice(i, i + batchSize);
     const results = await Promise.allSettled(
-      batch.map(({ item, bucket }) =>
-        fetchTikTokVideoTranscriptWithWhisperFallback(handle, item.id, item.caption, bucket, item.createTime)
-      )
+      batch.map(({ item, bucket }) => {
+        const collaborations = (item.caption.match(/@[a-zA-Z0-9_.]+/g) ?? []).map(m => m.slice(1));
+        return fetchTikTokVideoTranscriptWithWhisperFallback(handle, item.id, item.caption, bucket, item.createTime, {
+          musicTitle: (item as any).musicTitle,
+          musicOriginal: item.musicOriginal,
+          duetEnabled: item.duetEnabled,
+          stitchEnabled: item.stitchEnabled,
+          durationMs: item.durationMs,
+          collaborations: collaborations.length > 0 ? collaborations : undefined
+        });
+      })
     );
     for (const r of results) {
       if (r.status === "fulfilled" && r.value) {

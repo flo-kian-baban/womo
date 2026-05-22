@@ -373,3 +373,63 @@
 - [x] Updated logging to show "API fetch yielded X videos" instead of HTML scrape
 - [x] Run all tests to ensure no regressions (27/27 pass, 0 TypeScript errors)
 - [ ] Verify @kaylee.nhi and @alkhussein now pull full video lists (12+ videos) — MANUAL TEST NEEDED
+
+
+## Phase 1.6 — Metadata Intelligence (Objective Signals)
+
+### Metadata Extraction
+- [ ] Extract music/sound metadata from each sampled video (trending status, niche vs. mainstream, original audio)
+- [ ] Extract duet/stitch/remix counts for each video (participatory culture signal)
+- [ ] Extract video duration for each video (short-form <15s flag)
+- [ ] Extract video region/language metadata (geo-targeting signal)
+- [ ] Extract collaboration mentions and @tags from video descriptions (symbolic peer group)
+- [ ] Store all metadata in longitudinalSampleJson alongside transcript data
+- [ ] Add follower growth trajectory tracking (monthly snapshots for 6-12 months)
+
+### Pulse Score (β) Automation
+- [ ] Music niche/mainstream analysis: auto-populate Rogers Creator Position based on sound metadata
+- [ ] Remix rate signals: use duet/stitch counts to validate Remix Rate field (Field Note Three, D)
+- [ ] Update fitEngine.ts to incorporate music and remix signals into Pulse calculation
+
+### Stability Score (γ) Hardening
+- [ ] Implement follower growth trajectory analysis (acceleration/plateau/decline)
+- [ ] Generate quantitative drift signal from growth data to validate Goffman Stage Test
+- [ ] Update fitEngine.ts to incorporate growth trajectory into Stability calculation
+
+### Alignment Score (α) Corroboration
+- [ ] Extract and analyze collaboration network from video descriptions
+- [ ] Use symbolic peer group consistency to corroborate Myth Alignment and Archetype Match
+- [ ] Flag disparate collaboration categories as identity ambiguity signals
+- [ ] Update fitEngine.ts to incorporate collaboration network into Alignment calculation
+
+### UI Enhancements
+- [ ] Add "Video Duration Flag" to Creator profile (short-form warning if <15s average)
+- [ ] Add "Primary Region/Language" display to Creator profile
+- [ ] Add "Local Resonance" section to F.I.T. Report (Creator/Brand geo-match)
+- [ ] Add "Objective Signals" evidence panel to F.I.T. Report showing music, remix, growth, collab data
+- [ ] Update Creator profile detail view to show average video duration and region
+- [ ] Update F.I.T. Report to display the metadata signals that drove each score component
+
+### Testing & Validation
+- [ ] Verify music metadata extraction works for all 12 videos
+- [ ] Verify remix/duet counts are captured accurately
+- [ ] Test Pulse/Stability/Alignment score changes with new metadata signals
+- [ ] Validate geo-targeting logic matches Creator and Brand locations
+- [ ] Run full test suite (27+ tests)
+
+
+## Phase 1.6 Phase 3 — Stability Score Hardening
+- [x] Compute follower growth trajectory from creator profile data (current vs. historical)
+- [x] Implement quantitative drift signal: compare theme/keyword consistency across 6-3-3 buckets
+- [x] Add computeStabilityScoreFromMetadata() function to fitEngine.ts
+- [x] Add computeDriftSignalFromMetadata() function to fitEngine.ts
+- [x] Test and validate Stability Score calculations (27/27 tests pass, TypeScript clean)
+
+
+## Phase 1.6 Phase 4 — Metric Calculation Tooltips
+- [x] Build MetricTooltip component with standardized info icon + hover explanation
+- [x] Add tooltips to F.I.T. Report: Alignment (α), Pulse (β), Stability (γ), PARR, QoV
+- [x] Add MetricTooltip import to Creator Profile component
+- [x] Add MetricTooltip import to Brand Profile component
+- [x] Test all tooltips render correctly (27/27 tests pass, TypeScript clean)
+- [x] Tooltip system ready for deployment
