@@ -55,8 +55,14 @@ export async function getUserByOpenId(openId: string) {
 export async function createCreatorProfile(data: InsertCreatorProfile) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(creatorProfiles).values(data);
-  return result;
+  try {
+    const result = await db.insert(creatorProfiles).values(data);
+    return result;
+  } catch (err: unknown) {
+    const mysqlErr = err as { sqlMessage?: string; code?: string };
+    console.error('[db] createCreatorProfile INSERT failed:', mysqlErr?.code, mysqlErr?.sqlMessage);
+    throw err;
+  }
 }
 
 export async function getCreatorProfileById(id: number) {
