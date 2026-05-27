@@ -120,6 +120,8 @@ export interface BrandResearchResult {
   dataConfidenceLevel: "high" | "medium" | "low";
   // Phase 6 — Audience Mention Intelligence
   audienceMentionData?: import("./brandTikTokAnalysis").AudienceMentionData | null;
+  // Phase 6 — TikTok Metadata for performance signals
+  tiktokMetadata?: Record<string, unknown> | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2173,9 +2175,22 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
       // Extract metadata keywords from website text (meta tags, Open Graph, JSON-LD)
       const metadataKeywords = extractMetadataKeywords(websiteText);
       
-      // Mention keywords will be added after TikTok analysis completes
+      // Mention keywords and sentiment from TikTok audience mention analysis
       let mentionKeywords: string[] | undefined;
       let mentionSentiment: "positive" | "mixed" | "negative" | undefined;
+      
+      if (audienceMentionData) {
+        // Extract hashtags from mention data
+        mentionKeywords = audienceMentionData.mentionHashtags || [];
+        // Map sentiment signal to the expected type
+        if (audienceMentionData.sentimentSignal === "positive") {
+          mentionSentiment = "positive";
+        } else if (audienceMentionData.sentimentSignal === "negative") {
+          mentionSentiment = "negative";
+        } else {
+          mentionSentiment = "mixed";
+        }
+      }
       
       brandDecodedSymbols = await decodeBrandSymbols({
         brandName,
@@ -2210,6 +2225,17 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     semanticWordCount >= 500  ? "medium" :
     "low";
 
+  // Build tiktokMetadata object for performance signals
+  const tiktokMetadata = audienceMentionData ? {
+    mentionHashtags: audienceMentionData.mentionHashtags || [],
+    mentionCaptions: audienceMentionData.mentionCaptions || [],
+    mentionMusicTitles: audienceMentionData.mentionMusicTitles || [],
+    mentionSentiment: audienceMentionData.sentimentSignal,
+    totalMentions: audienceMentionData.totalMentions,
+    avgWeightedEngagement: audienceMentionData.avgWeightedEngagement,
+    uniqueAuthors: audienceMentionData.uniqueAuthors,
+  } : null;
+
   return {
     brandName,
     websiteUrl: isUrl ? brandNameOrUrl : "",
@@ -2233,6 +2259,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     crawledPages,
     dataConfidenceLevel: brandDataConfidenceLevel,
     audienceMentionData,
+    tiktokMetadata,
   };
 }
 
