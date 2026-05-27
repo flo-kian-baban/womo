@@ -111,16 +111,39 @@ export async function analyzeBrandTikTokChannel(
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch user info for @${handle}:`, err);
     }
 
-    // Step 2: Fetch recent videos using search API
+    // Step 2: Fetch brand's own videos using search API with pagination
+    // The search API returns videos mentioning the brand — we filter to only the brand's own posts
     try {
-      const videosResult = await callDataApi("Tiktok/search_tiktok_video_general", {
-        query: {
-          keyword: handle,
-        },
-      });
-      
-      videos = (videosResult as any)?.data || [];
-      console.info(`[analyzeBrandTikTokChannel] Fetched ${videos.length} recent videos for @${handle}`);
+      let cursor: number | undefined;
+      let searchId: string | undefined;
+      const MAX_PAGES = 5;
+      const TARGET_VIDEOS = 10;
+
+      for (let page = 0; page < MAX_PAGES && videos.length < TARGET_VIDEOS; page++) {
+        const queryParams: Record<string, string> = { keyword: `@${handle}` };
+        if (cursor !== undefined) queryParams.cursor = String(cursor);
+        if (searchId) queryParams.search_id = searchId;
+
+        const pageResult = await callDataApi("Tiktok/search_tiktok_video_general", {
+          query: queryParams,
+        }) as any;
+
+        const pageItems: any[] = pageResult?.item_list || [];
+        // Filter to only videos posted BY the brand's own handle
+        const brandVideos = pageItems.filter(
+          (v: any) => (v?.author?.uniqueId || "").toLowerCase() === handle.toLowerCase()
+        );
+        videos.push(...brandVideos);
+
+        // Pagination
+        cursor = pageResult?.cursor;
+        const logPb = pageResult?.log_pb;
+        searchId = logPb?.impr_id || undefined;
+
+        if (!pageResult?.has_more) break;
+      }
+
+      console.info(`[analyzeBrandTikTokChannel] Found ${videos.length} videos from @${handle}'s own channel`);
     } catch (err) {
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch videos for @${handle}:`, err);
     }
