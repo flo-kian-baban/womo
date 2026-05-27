@@ -11,6 +11,19 @@ import { callDataApi } from "./_core/dataApi";
  * - Social media positioning
  */
 
+export interface BrandVideoTranscript {
+  videoId: string;
+  caption: string;
+  postedDate?: string;
+}
+
+export interface BrandDecodedSymbol {
+  phrase: string;
+  meaning: string;
+  category: "identity_claim" | "status_signal" | "community_reference" | "aspiration_driver";
+  source: "caption" | "bio";
+}
+
 export interface BrandTikTokMetadata {
   channelHandle: string;
   followerCount?: number;
@@ -23,6 +36,11 @@ export interface BrandTikTokMetadata {
   postFrequency?: string; // e.g., "daily", "3x per week"
   tiktokBioAnalysis?: string;
   videoAnalysisSummary?: string; // LLM-generated summary of video analysis
+  videoTranscripts?: BrandVideoTranscript[]; // Captions from each video
+  decodedSymbols?: BrandDecodedSymbol[]; // Extracted cultural signals
+  rawKeywords?: string[]; // Keywords extracted from all captions
+  themeLabels?: string[]; // Named content themes
+  symbolicVocabulary?: string[]; // Core vocabulary/values
 }
 
 /**
@@ -111,11 +129,14 @@ export async function analyzeBrandTikTokChannel(
     let totalEngagement = 0;
     let totalViews = 0;
     const videoCaptions: string[] = [];
+    const videoTranscripts: BrandVideoTranscript[] = [];
     const videoThemes: string[] = [];
 
     if (videos.length > 0) {
       for (const video of videos) {
         const desc = video.desc || "";
+        const videoId = video.id || video.videoId || "";
+        const createTime = video.createTime || video.created_time;
         const playCount = video.stats?.playCount || 0;
         const commentCount = video.stats?.commentCount || 0;
         const shareCount = video.stats?.shareCount || 0;
@@ -126,6 +147,11 @@ export async function analyzeBrandTikTokChannel(
 
         if (desc) {
           videoCaptions.push(desc);
+          videoTranscripts.push({
+            videoId,
+            caption: desc,
+            postedDate: createTime ? new Date(createTime * 1000).toISOString() : undefined,
+          });
         }
       }
 
@@ -239,6 +265,174 @@ Format your response as JSON:
       postFrequency = "sporadic";
     }
 
+
+    // Step 5: Decode cultural symbols from captions
+    let decodedSymbols: BrandDecodedSymbol[] = [];
+    let rawKeywords: string[] = [];
+    let themeLabels: string[] = [];
+    let symbolicVocabulary: string[] = [];
+
+    if (videoCaptions.length > 0 || bioText) {
+      try {
+        const symbolPrompt = `
+You are a cultural semiotics analyst extracting symbolic meaning from brand messaging.
+
+**Brand Handle:** @${handle}
+**Bio:** ${bioText || "N/A"}
+**Video Captions (${videoCaptions.length} videos):**
+${videoCaptions.slice(0, 10).map((c, i) => `${i + 1}. ${c}`).join("\n")}
+
+Extract:
+1. **Identity Claims** - What does the brand claim about itself? (e.g., "We are sustainable", "We are luxury")
+2. **Status Signals** - What status/prestige does the brand signal? (e.g., "premium", "exclusive", "accessible")
+3. **Community References** - What communities/groups does the brand reference? (e.g., "Gen Z", "eco-conscious", "fitness enthusiasts")
+4. **Aspiration Drivers** - What aspirations does the brand appeal to? (e.g., "self-improvement", "belonging", "rebellion")
+5. **Raw Keywords** - Extract 15-20 key words/phrases from all captions
+6. **Theme Labels** - 3-5 named content themes
+7. **Symbolic Vocabulary** - 5-8 core values/concepts the brand communicates
+
+Return JSON:
+{
+  "identityClaims": [{"phrase": "...", "meaning": "..."}],
+  "statusSignals": [{"phrase": "...", "meaning": "..."}],
+  "communityReferences": [{"phrase": "...", "meaning": "..."}],
+  "aspirationDrivers": [{"phrase": "...", "meaning": "..."}],
+  "rawKeywords": ["keyword1", "keyword2"],
+  "themeLabels": ["theme1", "theme2"],
+  "symbolicVocabulary": ["value1", "value2"]
+}
+`;
+
+        const symbolResponse = await invokeLLM({
+          messages: [
+            {
+              role: "system",
+              content: "You are a cultural semiotics analyst. Extract structured symbolic meaning from brand messaging.",
+            },
+            {
+              role: "user",
+              content: symbolPrompt,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "brand_symbol_analysis",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  identityClaims: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        phrase: { type: "string" },
+                        meaning: { type: "string" },
+                      },
+                      required: ["phrase", "meaning"],
+                    },
+                  },
+                  statusSignals: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        phrase: { type: "string" },
+                        meaning: { type: "string" },
+                      },
+                      required: ["phrase", "meaning"],
+                    },
+                  },
+                  communityReferences: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        phrase: { type: "string" },
+                        meaning: { type: "string" },
+                      },
+                      required: ["phrase", "meaning"],
+                    },
+                  },
+                  aspirationDrivers: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        phrase: { type: "string" },
+                        meaning: { type: "string" },
+                      },
+                      required: ["phrase", "meaning"],
+                    },
+                  },
+                  rawKeywords: { type: "array", items: { type: "string" } },
+                  themeLabels: { type: "array", items: { type: "string" } },
+                  symbolicVocabulary: { type: "array", items: { type: "string" } },
+                },
+                required: ["identityClaims", "statusSignals", "communityReferences", "aspirationDrivers", "rawKeywords", "themeLabels", "symbolicVocabulary"],
+                additionalProperties: false,
+              },
+            },
+          },
+        });
+
+        try {
+          const content = symbolResponse.choices?.[0]?.message?.content;
+          if (content) {
+            const parsed = typeof content === "string" ? JSON.parse(content) : content;
+            
+            // Convert to BrandDecodedSymbol format
+            const allSymbols: BrandDecodedSymbol[] = [];
+            
+            parsed.identityClaims?.forEach((s: any) => {
+              allSymbols.push({
+                phrase: s.phrase,
+                meaning: s.meaning,
+                category: "identity_claim",
+                source: "caption",
+              });
+            });
+            
+            parsed.statusSignals?.forEach((s: any) => {
+              allSymbols.push({
+                phrase: s.phrase,
+                meaning: s.meaning,
+                category: "status_signal",
+                source: "caption",
+              });
+            });
+            
+            parsed.communityReferences?.forEach((s: any) => {
+              allSymbols.push({
+                phrase: s.phrase,
+                meaning: s.meaning,
+                category: "community_reference",
+                source: "caption",
+              });
+            });
+            
+            parsed.aspirationDrivers?.forEach((s: any) => {
+              allSymbols.push({
+                phrase: s.phrase,
+                meaning: s.meaning,
+                category: "aspiration_driver",
+                source: "caption",
+              });
+            });
+            
+            decodedSymbols = allSymbols;
+            rawKeywords = parsed.rawKeywords || [];
+            themeLabels = parsed.themeLabels || [];
+            symbolicVocabulary = parsed.symbolicVocabulary || [];
+          }
+        } catch (parseErr) {
+          console.warn("[analyzeBrandTikTokChannel] Failed to parse symbol response:", parseErr);
+        }
+      } catch (symbolErr) {
+        console.warn("[analyzeBrandTikTokChannel] Symbol decoding failed:", symbolErr);
+      }
+    }
     const metadata: BrandTikTokMetadata = {
       channelHandle: handle,
       followerCount,
@@ -251,6 +445,11 @@ Format your response as JSON:
       postFrequency,
       tiktokBioAnalysis: bioText,
       videoAnalysisSummary,
+      videoTranscripts,
+      decodedSymbols,
+      rawKeywords,
+      themeLabels,
+      symbolicVocabulary,
     };
 
     console.info(`[analyzeBrandTikTokChannel] Successfully analyzed @${handle}`);

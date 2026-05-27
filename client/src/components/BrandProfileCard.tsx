@@ -304,6 +304,67 @@ function SignalGroup({ signals, label, color }: { signals: DecodedSignal[]; labe
   );
 }
 
+function BrandVideoTranscriptPanel({ profile }: { profile: BrandProfile }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const transcripts = (profile.brandVideoTranscripts as Array<{ videoId: string; caption: string; postedDate?: string }> | null) ?? [];
+  if (transcripts.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-cyan-500/10 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-md bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-cyan-400 text-xs">▶</span>
+          </div>
+          <div>
+            <div className="text-xs font-semibold tracking-[0.1em] uppercase text-cyan-400/80">
+              Brand Video Transcripts
+            </div>
+            <div className="text-xs text-muted-foreground/60 mt-0.5">
+              {transcripts.length} video{transcripts.length !== 1 ? 's' : ''} analyzed
+            </div>
+          </div>
+        </div>
+        <span className="text-muted-foreground/40 text-xs">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-cyan-500/10 pt-4">
+          {transcripts.map((transcript, idx) => (
+            <div key={idx} className="rounded-lg bg-background/50 border border-border/30 p-3">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="text-xs font-mono text-muted-foreground/60">Video {idx + 1}</div>
+                {transcript.postedDate && (
+                  <div className="text-xs text-muted-foreground/40">
+                    {new Date(transcript.postedDate).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+              <p className="text-sm text-foreground/80 leading-relaxed line-clamp-3">
+                {transcript.caption}
+              </p>
+            </div>
+          ))}
+          <div className="p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/15">
+            <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-cyan-400/70 mb-1">
+              Transcript Analysis Note
+            </div>
+            <p className="text-xs text-muted-foreground/70 leading-relaxed">
+              Video captions are extracted from TikTok and analyzed for cultural signals, brand voice, and semantic meaning.
+              These transcripts feed directly into the brand's symbolic vocabulary and decoded symbols.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BrandSymbolDecoderPanel({ profile }: { profile: BrandProfile }) {
   const [expanded, setExpanded] = useState(false);
 

@@ -654,3 +654,46 @@
 - [ ] Show brand Cultural Snapshot panel (matching creator's Field Note Two/Three layout)
 - [ ] Show brand Decoded Cultural Signals panel (matching creator's signal panel)
 - [ ] Test scoring accuracy with real brand data
+
+
+## Phase 5: Brand TikTok Semantic Extraction (Transcripts & Keywords)
+
+### Video Caption & Text Extraction
+- [ ] Extract captions from brand TikTok videos (via TikTok API or OCR)
+- [ ] Extract on-screen text using vision API or OCR
+- [ ] Build `BrandVideoTranscript` interface with video_id, captions, on_screen_text, posting_date
+- [ ] Store transcripts in database (new `brandVideoTranscripts` table)
+
+### Symbol Decoding for Brands
+- [ ] Create `decodeBrandVideoSymbols()` LLM function
+- [ ] Analyze captions + on-screen text for: identity claims, status signals, community references, aspiration drivers
+- [ ] Extract brand voice tone from video messaging (playful, professional, educational, entertaining, etc.)
+- [ ] Build `BrandVideoDecodedSymbols` interface matching creator format
+- [ ] Store decoded symbols in database
+
+### Keyword & Vocabulary Extraction
+- [ ] Extract raw keywords from all brand video transcripts
+- [ ] Extract theme labels (like creator analysis)
+- [ ] Build symbolic vocabulary list
+- [ ] Update `brand_profiles` table with: `brandVideoTranscripts`, `brandRawKeywords`, `brandThemeLabels`, `brandSymbolicVocabulary`
+
+### UI Display (BrandProfileCard Parity)
+- [ ] Add "Brand Video Transcripts" panel to BrandProfileCard (like creator transcripts)
+- [ ] Show individual video captions with posting dates
+- [ ] Add "Brand Symbol Decoder" panel showing decoded signals
+- [ ] Display brand keywords and theme labels
+- [ ] Add "Symbolic Vocabulary" section
+
+### Semantic Alignment Matching
+- [ ] Create `semanticAlignmentScore()` function
+- [ ] Compare creator symbolic vocabulary with brand symbolic vocabulary
+- [ ] Calculate keyword overlap percentage
+- [ ] Identify conflicts (e.g., creator says "sustainable" but brand says "fast-fashion")
+- [ ] Update Alignment scoring to incorporate semantic match (0-10 scale)
+- [ ] Add "Symbolic Vocabulary Alignment" to scoring breakdown
+
+### Testing & Validation
+- [ ] Test with real brand data (Nike, Scotiabank, etc.)
+- [ ] Verify transcripts display correctly in UI
+- [ ] Validate semantic matching accuracy against manual review
+- [ ] Ensure Alignment scores reflect semantic conflicts

@@ -196,6 +196,9 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   brandBarthesNicheMeaning: text("brandBarthesNicheMeaning"),
   brandAudienceDecodingSplit: boolean("brandAudienceDecodingSplit"),
 
+  // Brand TikTok Video Transcripts
+  brandVideoTranscripts: json("brandVideoTranscripts"), // BrandVideoTranscript[] — captions from each video
+
   // Brand Symbol Decoder — semantic artifacts (mirrors creator-side decodedSymbols)
   // rawKeywords: flat list of culturally significant words for trend tracking over time
   brandRawKeywords: json("brandRawKeywords"),       // string[] — 10-30 keywords from website + reviews
