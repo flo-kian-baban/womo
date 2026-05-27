@@ -134,6 +134,12 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   brandUrl: text("brandUrl"),
   category: text("category"),
 
+  // Social channels (optional)
+  tiktokChannelUrl: text("tiktokChannelUrl"), // Optional TikTok channel URL
+  tiktokMetadata: json("tiktokMetadata"), // TikTok channel analysis: tone, themes, engagement style
+  tiktokEngagementRate: float("tiktokEngagementRate"), // TikTok engagement rate (0-100)
+  tiktokAudienceSize: int("tiktokAudienceSize"), // TikTok follower count
+
   // AI-extracted Field Note One: Brand Snapshot
   archetype: varchar("archetype", { length: 64 }),
   emotionalPromise: text("emotionalPromise"), // "Our audience feels _ when they engage with us."

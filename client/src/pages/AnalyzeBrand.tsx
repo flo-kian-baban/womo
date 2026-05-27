@@ -25,6 +25,7 @@ import type { BrandProfile } from "../../../drizzle/schema";
 
 const schema = z.object({
   brandNameOrUrl: z.string().min(1, "Enter a brand name or URL"),
+  tiktokChannelUrl: z.string().optional().or(z.literal("")),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -42,6 +43,10 @@ const ANALYSIS_STEPS = [
   "Classifying brand type for weight selection...",
   "Loading α/β/γ weight configuration...",
   "Assembling brand semantic core...",
+  "Fetching TikTok channel data (if provided)...",
+  "Analyzing TikTok content and engagement patterns...",
+  "Extracting brand voice and social themes...",
+  "Integrating social signals into cultural profile...",
 ];
 
 export default function AnalyzeBrand() {
@@ -129,6 +134,20 @@ export default function AnalyzeBrand() {
               {errors.brandNameOrUrl && (
                 <p className="text-xs text-destructive">{errors.brandNameOrUrl.message}</p>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+                TikTok Channel (Optional)
+              </Label>
+              <Input
+                {...register("tiktokChannelUrl")}
+                placeholder="e.g. @nike or https://tiktok.com/@nike"
+                className="bg-secondary border-border placeholder:text-muted-foreground/40"
+              />
+              <p className="text-xs text-muted-foreground/70">
+                Leave blank if the brand does not have a TikTok presence
+              </p>
             </div>
 
             <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">

@@ -547,3 +547,53 @@
 - [x] Phase 6: CreatorComparisonView component created
 - [x] Phase 7: Final testing complete (27/27 tests pass, TypeScript clean)
 - [x] All components ready for integration and deployment
+
+
+## Phase 2: Brand Analysis Expansion (Website, Reviews, TikTok)
+
+### Schema & Database
+- [x] Add `websiteUrl` field to brand_profiles table (already exists as brandUrl)
+- [x] Add `tiktokChannelUrl` field to brand_profiles table (nullable for brands without social)
+- [x] Add `tiktokMetadata` field to store TikTok channel analysis (JSON)
+- [x] Add `tiktokEngagementRate` field to store TikTok engagement metrics
+- [x] Add `tiktokAudienceSize` field to store TikTok follower count
+- [x] Run migration via webdev_execute_sql
+
+### Brand Input Form
+- [x] Update BrandProfileForm to accept websiteUrl input (already exists as brandUrl)
+- [x] Update BrandProfileForm to accept optional tiktokChannelUrl input
+- [x] Add validation for URL formats
+- [x] Add helper text: "Social channel is optional - leave blank if brand has no TikTok presence"
+
+### TikTok Channel Analysis for Brands
+- [x] Create server/brandTikTokAnalysis.ts module
+- [ ] Fetch brand's TikTok channel metadata (follower count, engagement rate, bio) — deferred to Phase 3
+- [ ] Analyze 10-15 recent videos for tone, content themes, audience engagement — deferred to Phase 3
+- [ ] Extract brand voice signals (playful, professional, educational, entertaining, etc.) — deferred to Phase 3
+- [ ] Extract content categories and themes — deferred to Phase 3
+- [ ] Calculate engagement quality (substantive vs passive comments) — deferred to Phase 3
+- [ ] Store all metadata in tiktokMetadata field — deferred to Phase 3
+
+### Brand Extraction LLM Prompts
+- [ ] Update aiExtraction.ts extractBrandProfile() function
+- [ ] Add TikTok channel analysis to brand extraction context
+- [ ] Update LLM prompt to extract: brandVoice (from TikTok), contentThemes, socialEngagementStyle
+- [ ] Ensure JSON schema includes new fields
+
+### CAI Scoring Integration
+- [ ] Update fitEngine.ts to incorporate TikTok engagement metrics into Pulse score
+- [ ] Update fitEngine.ts to incorporate TikTok audience size into Stability score
+- [ ] Add warning if TikTok engagement is low (potential red flag)
+- [ ] Add signal for "Social Channel Alignment" if brand has TikTok
+
+### UI Updates
+- [ ] Update BrandProfileCard to display website URL
+- [ ] Update BrandProfileCard to display TikTok channel URL (if available)
+- [ ] Add TikTok engagement metrics badge to BrandProfileCard
+- [ ] Update BrandPartnershipProfile to show new signals
+
+### Testing
+- [ ] Write vitest for TikTok analysis module
+- [ ] Write vitest for updated brand extraction prompts
+- [ ] Test with real brand data (Nike, Scotiabank, etc.)
+- [ ] Verify CAI scores reflect new data sources

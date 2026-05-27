@@ -13,6 +13,7 @@ import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
+import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata } from "./brandTikTokAnalysis";
 
 export const appRouter = router({
   system: systemRouter,
@@ -312,10 +313,14 @@ export const appRouter = router({
   // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
     analyze: publicProcedure
-      .input(z.object({ brandNameOrUrl: z.string().min(1) }))
+      .input(z.object({
+        brandNameOrUrl: z.string().min(1),
+        tiktokChannelUrl: z.string().optional().or(z.literal("")),
+      }))
       .mutation(async ({ input }) => {
-        // Step 1: Gather real evidence from the brand's website/web presence + review data
+        // Step 1: Gather real evidence from the brand's website/web presence + review data + TikTok
         let brandEvidenceSummary: string | undefined;
+        let tiktokMetadata: BrandTikTokMetadata | null = null;
         let reviewFields: {
           yelpRating?: number | null;
           yelpReviewCount?: number | null;
@@ -360,6 +365,19 @@ export const appRouter = router({
           console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
         }
 
+        // Step 1b: Analyze TikTok channel if provided
+        if (input.tiktokChannelUrl && input.tiktokChannelUrl.trim() !== "") {
+          try {
+            tiktokMetadata = await analyzeBrandTikTokChannel(input.tiktokChannelUrl);
+            if (tiktokMetadata) {
+              const tiktokEvidenceBlock = formatBrandTikTokEvidenceBlock(tiktokMetadata);
+              brandEvidenceSummary = (brandEvidenceSummary || "") + "\n\n" + tiktokEvidenceBlock;
+            }
+          } catch (err) {
+            console.warn("[brand.analyze] TikTok analysis failed, proceeding without TikTok data:", err);
+          }
+        }
+
         // Step 2: AI extraction grounded in real evidence
         const extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
         // Apply campaign modifier (Rule 5) when campaignType is Long-Term Ambassador or Product Launch
@@ -384,6 +402,10 @@ export const appRouter = router({
           weightPriority: weights.priority,
           ...reviewFields,
           ...symbolFields,
+          tiktokChannelUrl: input.tiktokChannelUrl || undefined,
+          tiktokMetadata: tiktokMetadata as unknown as Record<string, unknown> || undefined,
+          tiktokEngagementRate: tiktokMetadata?.engagementRate || undefined,
+          tiktokAudienceSize: tiktokMetadata?.followerCount || undefined,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
         });
