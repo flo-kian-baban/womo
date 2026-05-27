@@ -544,6 +544,7 @@ export const appRouter = router({
         let brandEvidenceSummary = "";
         let reviewFields: any = {};
         let symbolFields: any = {};
+        let tiktokMetadata: BrandTikTokMetadata | null = null;
 
         try {
           const brandResearch = await researchBrand(existing.brandUrl || existing.brandName);
@@ -569,6 +570,21 @@ export const appRouter = router({
           }
         } catch (err) {
           console.warn("[brand.reanalyze] Web research failed, proceeding without evidence:", err);
+        }
+
+        // Re-run TikTok analysis if the brand has a stored TikTok handle
+        if (existing.tiktokChannelUrl) {
+          try {
+            tiktokMetadata = await analyzeBrandTikTokChannel(existing.tiktokChannelUrl);
+            if (tiktokMetadata) {
+              const tiktokEvidenceBlock = formatBrandTikTokEvidenceBlock(tiktokMetadata);
+              if (tiktokEvidenceBlock) {
+                brandEvidenceSummary = brandEvidenceSummary + "\n\n" + tiktokEvidenceBlock;
+              }
+            }
+          } catch (err) {
+            console.warn("[brand.reanalyze] TikTok analysis failed, proceeding without TikTok data:", err);
+          }
         }
 
         const extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
@@ -600,7 +616,20 @@ export const appRouter = router({
           brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
           brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
           ...reviewFields,
+          // Symbol fields: website-derived first, TikTok overrides if available
           ...symbolFields,
+          // TikTok fields
+          tiktokMetadata: tiktokMetadata as unknown as Record<string, unknown> || undefined,
+          tiktokEngagementRate: tiktokMetadata?.engagementRate || undefined,
+          tiktokAudienceSize: tiktokMetadata?.followerCount || undefined,
+          // TikTok video transcripts — only set when TikTok data was fetched
+          ...(tiktokMetadata?.videoTranscripts && tiktokMetadata.videoTranscripts.length > 0 ? {
+            brandVideoTranscripts: tiktokMetadata.videoTranscripts as unknown as Record<string, unknown>[],
+            brandDecodedSymbols: tiktokMetadata.decodedSymbols as unknown as Record<string, unknown>[],
+            brandRawKeywords: tiktokMetadata.rawKeywords,
+            brandThemeLabels: tiktokMetadata.themeLabels,
+            brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
+          } : {}),
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
           updatedAt: new Date(),
