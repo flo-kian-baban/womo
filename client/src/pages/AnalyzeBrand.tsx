@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle } from "lucide-react";
+import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,9 +23,45 @@ import { ApiStatusPanel } from "@/components/ApiStatusPanel";
 import { Link } from "wouter";
 import type { BrandProfile } from "../../../drizzle/schema";
 
+const validateTikTokHandle = (value: string | undefined): true | string => {
+  if (!value || value.trim() === "") return true; // Optional field
+  
+  const trimmed = value.trim();
+  
+  // Check for hashtag
+  if (trimmed.startsWith("#")) {
+    return "TikTok handle cannot start with #. Enter just the username (e.g., 'nike' not '#nike')";
+  }
+  
+  // Check for discover/tag URLs
+  if (trimmed.includes("discover/") || trimmed.includes("/tag/")) {
+    return "This is a hashtag/discover page, not a brand channel. Enter the brand's TikTok handle instead (e.g., '@nike' or 'nike')";
+  }
+  
+  // Check for full TikTok URLs
+  if (trimmed.includes("tiktok.com")) {
+    // Try to extract handle from URL
+    const match = trimmed.match(/@([a-zA-Z0-9._-]+)/);
+    if (match) {
+      return `Enter just the handle '@${match[1]}' instead of the full URL`;
+    }
+    return "Enter just the TikTok handle (e.g., '@nike'), not the full URL";
+  }
+  
+  return true;
+};
+
 const schema = z.object({
   brandNameOrUrl: z.string().min(1, "Enter a brand name or URL"),
-  tiktokChannelUrl: z.string().optional().or(z.literal("")),
+  tiktokChannelUrl: z.string().optional().or(z.literal("")).superRefine((val, ctx) => {
+    const result = validateTikTokHandle(val);
+    if (result !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result,
+      });
+    }
+  }),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -145,9 +181,16 @@ export default function AnalyzeBrand() {
                 placeholder="e.g. @nike or nike"
                 className="bg-secondary border-border placeholder:text-muted-foreground/40"
               />
-              <p className="text-xs text-muted-foreground/70">
-                Leave blank if the brand does not have a TikTok presence
-              </p>
+              {errors.tiktokChannelUrl ? (
+                <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/30">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-amber-600 dark:text-amber-400">{errors.tiktokChannelUrl.message}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground/70">
+                  Leave blank if the brand does not have a TikTok presence. Enter the brand's handle (e.g., 'nike'), not a hashtag or discover page.
+                </p>
+              )}
             </div>
 
             <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
