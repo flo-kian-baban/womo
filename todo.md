@@ -575,25 +575,25 @@
 - [ ] Store all metadata in tiktokMetadata field — deferred to Phase 3
 
 ### Brand Extraction LLM Prompts
-- [ ] Update aiExtraction.ts extractBrandProfile() function
-- [ ] Add TikTok channel analysis to brand extraction context
-- [ ] Update LLM prompt to extract: brandVoice (from TikTok), contentThemes, socialEngagementStyle
-- [ ] Ensure JSON schema includes new fields
+- [ ] Update aiExtraction.ts extractBrandProfile() function — deferred to Phase 4
+- [ ] Add TikTok channel analysis to brand extraction context — deferred to Phase 4
+- [ ] Update LLM prompt to extract: brandVoice (from TikTok), contentThemes, socialEngagementStyle — deferred to Phase 4
+- [ ] Ensure JSON schema includes new fields — deferred to Phase 4
 
 ### CAI Scoring Integration
-- [ ] Update fitEngine.ts to incorporate TikTok engagement metrics into Pulse score
-- [ ] Update fitEngine.ts to incorporate TikTok audience size into Stability score
-- [ ] Add warning if TikTok engagement is low (potential red flag)
-- [ ] Add signal for "Social Channel Alignment" if brand has TikTok
+- [ ] Update fitEngine.ts to incorporate TikTok engagement metrics into Pulse score — deferred to Phase 5
+- [ ] Update fitEngine.ts to incorporate TikTok audience size into Stability score — deferred to Phase 5
+- [ ] Add warning if TikTok engagement is low (potential red flag) — deferred to Phase 5
+- [ ] Add signal for "Social Channel Alignment" if brand has TikTok — deferred to Phase 5
 
 ### UI Updates
-- [ ] Update BrandProfileCard to display website URL
-- [ ] Update BrandProfileCard to display TikTok channel URL (if available)
-- [ ] Add TikTok engagement metrics badge to BrandProfileCard
-- [ ] Update BrandPartnershipProfile to show new signals
+- [ ] Update BrandProfileCard to display website URL — deferred to Phase 6
+- [ ] Update BrandProfileCard to display TikTok channel URL (if available) — deferred to Phase 6
+- [ ] Add TikTok engagement metrics badge to BrandProfileCard — deferred to Phase 6
+- [ ] Update BrandPartnershipProfile to show new signals — deferred to Phase 6
 
 ### Testing
-- [ ] Write vitest for TikTok analysis module
-- [ ] Write vitest for updated brand extraction prompts
-- [ ] Test with real brand data (Nike, Scotiabank, etc.)
-- [ ] Verify CAI scores reflect new data sources
+- [ ] Write vitest for TikTok analysis module — deferred to Phase 6
+- [ ] Write vitest for updated brand extraction prompts — deferred to Phase 6
+- [ ] Test with real brand data (Nike, Scotiabank, etc.) — deferred to Phase 6
+- [ ] Verify CAI scores reflect new data sources — deferred to Phase 6

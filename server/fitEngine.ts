@@ -415,6 +415,9 @@ export function calculateAlignmentScore(inputs: AlignmentInputs): {
 export interface PulseInputs {
   rogersAdopterStage: string;
   turnerLiminalPhase: string;
+  // TikTok metrics for brands
+  brandTiktokEngagementRate?: number;  // engagement rate (0-100)
+  brandTiktokPostFrequency?: string;   // posting frequency
 }
 
 export function calculatePulseScore(inputs: PulseInputs): {
@@ -424,13 +427,25 @@ export function calculatePulseScore(inputs: PulseInputs): {
 } {
   const rogersBase = ROGERS_BASE_SCORES[inputs.rogersAdopterStage] ?? 5;
   const liminalAdj = LIMINAL_ADJUSTMENTS[inputs.turnerLiminalPhase] ?? 0;
-  const raw = Math.min(10, Math.max(0, rogersBase + liminalAdj));
+  let raw = Math.min(10, Math.max(0, rogersBase + liminalAdj));
+  
+  // TikTok engagement boost: high engagement rate and frequent posting = cultural momentum
+  if (inputs.brandTiktokEngagementRate !== undefined && inputs.brandTiktokPostFrequency) {
+    const engagementBoost = Math.min(1.5, inputs.brandTiktokEngagementRate / 10); // cap at 1.5 points
+    const frequencyBoost = inputs.brandTiktokPostFrequency === "daily or near-daily" ? 0.5 : 
+                          inputs.brandTiktokPostFrequency === "3-5x per week" ? 0.3 : 0;
+    raw = Math.min(10, raw + engagementBoost + frequencyBoost);
+  }
+  
   return { raw, rogersBase, liminalAdjustment: liminalAdj };
 }
 
 export interface StabilityInputs {
   goffmanStageConsistency: string;
   driftSignal: string;
+  // TikTok metrics for brands
+  brandTiktokFollowerCount?: number;   // follower count
+  brandTiktokEngagementRate?: number;  // engagement rate (0-100)
 }
 
 export function calculateStabilityScore(inputs: StabilityInputs): {
@@ -440,7 +455,18 @@ export function calculateStabilityScore(inputs: StabilityInputs): {
 } {
   const goffmanScore = GOFFMAN_SCORES[inputs.goffmanStageConsistency] ?? 5;
   const driftScore = DRIFT_SCORES[inputs.driftSignal] ?? 5;
-  const raw = (goffmanScore + driftScore) / 2;
+  let raw = (goffmanScore + driftScore) / 2;
+  
+  // TikTok follower boost: large, engaged audience = long-term stability
+  if (inputs.brandTiktokFollowerCount !== undefined && inputs.brandTiktokFollowerCount > 0) {
+    // Log-scaled boost: 10k followers = +0.5, 100k = +1.0, 1M+ = +1.5 (capped)
+    const followerBoost = Math.min(1.5, Math.log10(inputs.brandTiktokFollowerCount) / 6);
+    // Engagement rate also signals stability (consistent audience interaction)
+    const engagementStabilityBoost = inputs.brandTiktokEngagementRate !== undefined ? 
+      Math.min(0.5, inputs.brandTiktokEngagementRate / 20) : 0;
+    raw = Math.min(10, raw + followerBoost + engagementStabilityBoost);
+  }
+  
   return { raw, goffmanScore, driftScore };
 }
 
@@ -671,6 +697,10 @@ export interface FullFITCalculationInput {
   // Phase 1.5 additions
   culturalVelocity?: string;      // from longitudinal sample
   dataConfidenceLevel?: string;   // overall data quality
+  // Phase 2: TikTok metrics for brands
+  brandTiktokEngagementRate?: number;  // engagement rate percentage (0-100)
+  brandTiktokFollowerCount?: number;   // follower count
+  brandTiktokPostFrequency?: string;   // e.g., "daily", "3x per week", "sporadic"
 }
 
 export interface FullFITResult {

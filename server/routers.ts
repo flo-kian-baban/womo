@@ -625,6 +625,10 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           brandThemes,
           culturalVelocity: (creator.culturalVelocity as string | null) ?? "Insufficient Data",
           dataConfidenceLevel: (creator.dataConfidenceLevel as string | null) ?? "low",
+          // TikTok metrics for brands
+          brandTiktokEngagementRate: brand.tiktokEngagementRate ?? undefined,
+          brandTiktokFollowerCount: brand.tiktokAudienceSize ?? undefined,
+          brandTiktokPostFrequency: brand.tiktokMetadata ? (brand.tiktokMetadata as any).postFrequency : undefined,
         });
 
         // Generate Synergy Narrative + Content Directions

@@ -138,11 +138,11 @@ export default function AnalyzeBrand() {
 
             <div className="space-y-2">
               <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
-                TikTok Channel (Optional)
+                TikTok Handle (Optional)
               </Label>
               <Input
                 {...register("tiktokChannelUrl")}
-                placeholder="e.g. @nike or https://tiktok.com/@nike"
+                placeholder="e.g. @nike or nike"
                 className="bg-secondary border-border placeholder:text-muted-foreground/40"
               />
               <p className="text-xs text-muted-foreground/70">

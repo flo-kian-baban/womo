@@ -370,7 +370,17 @@ When the evidence includes an AUDIENCE PERCEPTION section with Yelp and/or Googl
 - Detect any in-group vs. out-group decoding split in the reviews
 - Flag cultural risks visible in negative reviews (inconsistency, unmet expectations, service gaps)
 - Let review evidence directly inform: audienceTribe, barthesMyth, emotionalPromise, culturalTension, and aiSummary
-- Use the Brand Archetype classification to validate your brandType selection: if reviews show high trust-dependency, lean Trust; if reviews show community belonging, lean Community; if reviews show trend-chasing, lean Momentum.`;
+- Use the Brand Archetype classification to validate your brandType selection: if reviews show high trust-dependency, lean Trust; if reviews show community belonging, lean Community; if reviews show trend-chasing, lean Momentum.
+
+When the evidence includes a TIKTOK CHANNEL ANALYSIS section:
+- Treat TikTok data as PRIMARY EVIDENCE for brand voice, tone, and cultural positioning
+- TikTok reveals how the brand ACTUALLY communicates to its audience in real-time
+- Use TikTok engagement metrics (followers, engagement rate, post frequency) to validate brandArchetypeClassification
+- High engagement + daily posting + playful voice = likely MOMENTUM or COMMUNITY
+- Low engagement + sporadic posting + formal voice = likely TRUST or COMMUNITY
+- Let TikTok evidence directly inform: brandTone (use the extracted brand voice), emotionalPromise, audienceTribe, and culturalTension
+- If TikTok shows content themes, use these to refine the brand's actual positioning vs. self-presentation
+- Flag any Goffman Stage Gap: does the brand's website/self-presentation match how they actually show up on TikTok?`;
 
   const evidenceBlock = evidenceSummary
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
