@@ -82,7 +82,7 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
           </div>
           <div className="text-right">
             <div className={`text-5xl font-bold ${getStatusTextColor(caiStatus)}`}>
-              {caiScore.toFixed(1)}
+              {caiScore.toFixed(2)}
             </div>
             <p className="text-xs text-gray-600 mt-1">/ 10</p>
           </div>
@@ -114,7 +114,7 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                       />
                     </div>
                     <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                      {signal.score.toFixed(1)}
+                      {signal.score.toFixed(2)}
                     </span>
                   </div>
 
@@ -151,7 +151,7 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                       />
                     </div>
                     <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                      {signal.score.toFixed(1)}
+                      {signal.score.toFixed(2)}
                     </span>
                   </div>
 

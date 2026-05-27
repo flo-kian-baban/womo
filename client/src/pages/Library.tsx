@@ -355,7 +355,7 @@ export default function Library() {
 
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <div className="text-xl font-serif gold-text">{Number(match.caiScore).toFixed(1)}</div>
+                        <div className="text-xl font-serif gold-text">{Number(match.caiScore).toFixed(2)}</div>
                         <div className="text-[10px] text-muted-foreground">F.I.T.</div>
                       </div>
 

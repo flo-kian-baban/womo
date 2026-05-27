@@ -338,7 +338,7 @@ export default function FITScore() {
                 </div>
               </div>
               <div className="flex flex-col items-center gap-3">
-                <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(1)}</div>
+                <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(2)}</div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-muted-foreground">Cultural Alignment Index (CAI) / 10</span>
                   <Tooltip>

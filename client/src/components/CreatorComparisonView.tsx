@@ -110,7 +110,7 @@ export const CreatorComparisonView: React.FC<CreatorComparisonViewProps> = ({
 
               <div className="text-right">
                 <div className={`text-3xl font-bold ${getScoreColor(match.caiScore)}`}>
-                  {match.caiScore.toFixed(1)}
+                  {match.caiScore.toFixed(2)}
                 </div>
                 <Badge variant={getStatusBadgeVariant(match.caiStatus)} className="mt-2">
                   {match.caiStatus}
@@ -129,7 +129,7 @@ export const CreatorComparisonView: React.FC<CreatorComparisonViewProps> = ({
                       style={{ width: `${match.alignmentScore * 10}%` }}
                     />
                   </div>
-                  <span className="text-sm font-bold text-gray-900">{match.alignmentScore.toFixed(1)}</span>
+                  <span className="text-sm font-bold text-gray-900">{match.alignmentScore.toFixed(2)}</span>
                 </div>
               </div>
 
@@ -142,7 +142,7 @@ export const CreatorComparisonView: React.FC<CreatorComparisonViewProps> = ({
                       style={{ width: `${match.pulseScore * 10}%` }}
                     />
                   </div>
-                  <span className="text-sm font-bold text-gray-900">{match.pulseScore.toFixed(1)}</span>
+                  <span className="text-sm font-bold text-gray-900">{match.pulseScore.toFixed(2)}</span>
                 </div>
               </div>
 
@@ -155,7 +155,7 @@ export const CreatorComparisonView: React.FC<CreatorComparisonViewProps> = ({
                       style={{ width: `${match.stabilityScore * 10}%` }}
                     />
                   </div>
-                  <span className="text-sm font-bold text-gray-900">{match.stabilityScore.toFixed(1)}</span>
+                  <span className="text-sm font-bold text-gray-900">{match.stabilityScore.toFixed(2)}</span>
                 </div>
               </div>
             </div>

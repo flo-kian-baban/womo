@@ -348,7 +348,7 @@ export default function MatchReport() {
             />
           </div>
           <div className="flex items-center gap-3 mb-5">
-            <div className="text-5xl font-serif gold-text">{Number(match.caiScore).toFixed(1)}</div>
+            <div className="text-5xl font-serif gold-text">{Number(match.caiScore).toFixed(2)}</div>
             <div>
               <div className="text-xs text-muted-foreground">/ 10</div>
               <div className={`text-sm font-semibold mt-0.5 ${caiStatusColor}`}>
@@ -706,7 +706,7 @@ export default function MatchReport() {
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <div className="text-right">
-                        <div className="text-lg font-serif gold-text">{Number(cm.caiScore).toFixed(1)}</div>
+                        <div className="text-lg font-serif gold-text">{Number(cm.caiScore).toFixed(2)}</div>
                         <div className={`text-[10px] font-semibold ${cmStatus}`}>{cm.caiStatus}</div>
                       </div>
                       {cm.parrScore != null && (
