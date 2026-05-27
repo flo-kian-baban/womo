@@ -323,7 +323,7 @@ function BrandVideoTranscriptPanel({ profile }: { profile: BrandProfile }) {
           </div>
           <div>
             <div className="text-xs font-semibold tracking-[0.1em] uppercase text-cyan-400/80">
-              Brand Video Transcripts
+              Brand Video Captions
             </div>
             <div className="text-xs text-muted-foreground/60 mt-0.5">
               {transcripts.length} video{transcripts.length !== 1 ? 's' : ''} analyzed
@@ -355,8 +355,7 @@ function BrandVideoTranscriptPanel({ profile }: { profile: BrandProfile }) {
               Transcript Analysis Note
             </div>
             <p className="text-xs text-muted-foreground/70 leading-relaxed">
-              Video captions are extracted from TikTok and analyzed for cultural signals, brand voice, and semantic meaning.
-              These transcripts feed directly into the brand's symbolic vocabulary and decoded symbols.
+              Video captions are the descriptions brands write when posting on TikTok — intentional messaging that signals brand voice, values, and cultural positioning. These captions feed directly into the brand's symbolic vocabulary and decoded symbols.
             </p>
           </div>
         </div>
@@ -686,7 +685,7 @@ export default function BrandProfileCard({ profile, compact = false, onReanalyze
             </div>
           )}
 
-          {/* Brand Video Transcripts Panel */}
+          {/* Brand Video Captions Panel */}
           <BrandVideoTranscriptPanel profile={profile} />
 
           {/* Brand Symbol Decoder Panel */}
