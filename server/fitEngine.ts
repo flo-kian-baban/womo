@@ -510,7 +510,8 @@ export type RadarWarning =
   | "Archetype Tension"
   | "Identity Instability"
   | "Low Pulse"
-  | "Trajectory Divergence";
+  | "Trajectory Divergence"
+  | "Low Social Engagement";  // TikTok engagement below threshold
 
 export interface RadarWarningInputs {
   alignmentRaw: number;
@@ -521,6 +522,9 @@ export interface RadarWarningInputs {
   driftSignal: string;
   goffmanStageConsistency: string;
   creatorNichePosition: string;
+  // TikTok metrics for brands
+  brandTiktokEngagementRate?: number;
+  brandTiktokFollowerCount?: number;
 }
 
 export function evaluateRadarWarnings(inputs: RadarWarningInputs): RadarWarning[] {
@@ -552,6 +556,11 @@ export function evaluateRadarWarnings(inputs: RadarWarningInputs): RadarWarning[
   // Trajectory Divergence: creator is "Behind" the niche
   if (inputs.creatorNichePosition === "Behind") {
     warnings.push("Trajectory Divergence");
+  }
+
+  // Low Social Engagement: TikTok engagement rate below 0.5% (very low)
+  if (inputs.brandTiktokEngagementRate !== undefined && inputs.brandTiktokEngagementRate < 0.5) {
+    warnings.push("Low Social Engagement");
   }
 
   return warnings;
@@ -778,6 +787,9 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     driftSignal: input.driftSignal,
     goffmanStageConsistency: input.goffmanStageConsistency,
     creatorNichePosition: input.creatorNichePosition,
+    // TikTok metrics for warnings
+    brandTiktokEngagementRate: input.brandTiktokEngagementRate,
+    brandTiktokFollowerCount: input.brandTiktokFollowerCount,
   });
 
   // Symbolic vocabulary overlap (uses decoded symbol data if available)
