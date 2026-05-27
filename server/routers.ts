@@ -718,6 +718,34 @@ export const appRouter = router({
 
         if (creator.barthesMyth && brand.barthesMyth) {
           try {
+            // Extract semantic overlap data for richer tribe matching
+            const creatorKeywords = (creator.rawKeywords as string[] | null) ?? [];
+            const creatorVocab = (creator.decodedSymbols as Record<string, unknown> | null)?.symbolicVocabulary as string[] ?? [];
+            const brandKeywords = (brand.brandRawKeywords as string[] | null) ?? [];
+            const brandVocab = (brand.brandDecodedSymbols as Record<string, unknown> | null)?.symbolicVocabulary as string[] ?? [];
+            
+            // Extract mention keywords if available
+            let brandMentionKeywords: string[] = [];
+            if (brand.tiktokMetadata) {
+              try {
+                const metadata = typeof brand.tiktokMetadata === 'string' 
+                  ? JSON.parse(brand.tiktokMetadata) 
+                  : brand.tiktokMetadata;
+                if (metadata.mentionHashtags) {
+                  brandMentionKeywords = metadata.mentionHashtags.slice(0, 10);
+                }
+              } catch {}
+            }
+            
+            // Build semantic context for the LLM
+            const semanticContext = `
+ADDITIONAL SEMANTIC SIGNALS:
+Creator Keywords: ${creatorKeywords.slice(0, 10).join(", ") || "none"}
+Creator Vocabulary: ${creatorVocab.slice(0, 10).join(", ") || "none"}
+Brand Keywords: ${brandKeywords.slice(0, 10).join(", ") || "none"}
+Brand Vocabulary: ${brandVocab.slice(0, 10).join(", ") || "none"}
+Brand Audience Mentions (TikTok): ${brandMentionKeywords.join(", ") || "none"}`;
+            
             const mythResponse = await invokeLLM({
               messages: [
                 {
@@ -736,11 +764,15 @@ Brand Audience Tribe: "${brand.audienceTribe ?? ""}"
 Brand Cultural Tension: "${brand.culturalTension ?? ""}"
 Brand Archetype Classification: "${brand.brandArchetypeClassification ?? ""}"
 
+${semanticContext}
+
 SCORING RULES:
 - If creator tone is anti-establishment, rebellious, or oppositional AND brand is institutional, corporate, or formal: mythAlignmentScore should be 1-3 (severe mismatch)
 - If creator and brand share the same symbolic territory (both community-driven, both aspirational, both playful): mythAlignmentScore should be 7-10
 - If creator's Stuart Hall Decoding is Oppositional: apply a -2 penalty to mythAlignmentScore
 - tribMatchScore measures whether the creator's actual audience would authentically receive this brand — not just whether the brand wants that audience
+- Use semantic keyword overlap as an additional signal: shared keywords between creator and brand vocabulary suggest stronger tribe match
+- Consider brand audience mentions (TikTok): if audiences are talking about the brand in positive terms, boost tribMatchScore
 
 Score 1: mythAlignmentScore (0–10) — How closely do the creator's and brand's mythological narratives and tones align? Same symbolic territory = 10, completely opposed = 1.
 Score 2: tribMatchScore (0–10) — How well does the creator's audience relationship type match the brand's target tribe? Perfect match = 10, mismatch = 1.

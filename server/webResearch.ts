@@ -1975,6 +1975,45 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
 
 // ─── Brand Research ───────────────────────────────────────────────────────────
 
+// ─── Metadata Extraction Helper ────────────────────────────────────────────────
+
+/**
+ * Extract metadata keywords from website HTML/text.
+ * Looks for meta tags, Open Graph, and JSON-LD structured data.
+ */
+function extractMetadataKeywords(websiteText: string): string[] {
+  const keywords: Set<string> = new Set();
+  
+  // Extract from meta keywords tag
+  const metaKeywordsMatch = websiteText.match(/<meta\s+name=["']keywords["'']\s+content=["'']([^"']+)["'']>/i);
+  if (metaKeywordsMatch) {
+    metaKeywordsMatch[1].split(',').forEach(k => {
+      const trimmed = k.trim().toLowerCase();
+      if (trimmed.length > 2 && trimmed.length < 50) keywords.add(trimmed);
+    });
+  }
+  
+  // Extract from Open Graph description and title
+  const ogDescMatch = websiteText.match(/<meta\s+property=["']og:description["'']\s+content=["'']([^"']+)["'']>/i);
+  if (ogDescMatch) {
+    ogDescMatch[1].split(/\s+/).slice(0, 15).forEach(word => {
+      const clean = word.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+      if (clean.length > 2 && clean.length < 30) keywords.add(clean);
+    });
+  }
+  
+  // Extract from schema.org description
+  const schemaMatch = websiteText.match(/"description"\s*:\s*"([^"]+)"/i);
+  if (schemaMatch) {
+    schemaMatch[1].split(/\s+/).slice(0, 15).forEach(word => {
+      const clean = word.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+      if (clean.length > 2 && clean.length < 30) keywords.add(clean);
+    });
+  }
+  
+  return Array.from(keywords).slice(0, 25);
+}
+
 export async function researchBrand(brandNameOrUrl: string): Promise<BrandResearchResult> {
   const isUrl = brandNameOrUrl.startsWith("http");
   const brandName = isUrl
@@ -2131,10 +2170,20 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   const combinedTextLength = websiteText.length + reviewText.length;
   try {
     if (combinedTextLength >= 80) {
+      // Extract metadata keywords from website text (meta tags, Open Graph, JSON-LD)
+      const metadataKeywords = extractMetadataKeywords(websiteText);
+      
+      // Mention keywords will be added after TikTok analysis completes
+      let mentionKeywords: string[] | undefined;
+      let mentionSentiment: "positive" | "mixed" | "negative" | undefined;
+      
       brandDecodedSymbols = await decodeBrandSymbols({
         brandName,
         websiteText,
         reviewText,
+        metadataKeywords,
+        mentionKeywords,
+        mentionSentiment,
       });
     } else {
       console.warn(`[webResearch] Brand Symbol Decoder skipped — insufficient text (${combinedTextLength} chars) for ${brandName}`);

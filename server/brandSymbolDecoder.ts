@@ -69,8 +69,11 @@ export async function decodeBrandSymbols(input: {
   brandName: string;
   websiteText: string;
   reviewText: string;
+  metadataKeywords?: string[]; // From website metadata, Open Graph, JSON-LD
+  mentionKeywords?: string[]; // From TikTok audience mentions
+  mentionSentiment?: "positive" | "mixed" | "negative"; // Audience sentiment signal
 }): Promise<BrandDecodedSymbols | null> {
-  const { brandName, websiteText, reviewText } = input;
+  const { brandName, websiteText, reviewText, metadataKeywords, mentionKeywords, mentionSentiment } = input;
 
   // If no text at all, skip — caller already guards with combinedTextLength >= 80
   if (!websiteText && !reviewText) return null;
@@ -88,13 +91,33 @@ export async function decodeBrandSymbols(input: {
     ? `AUDIENCE-AUTHORED TEXT (Yelp + Google Maps reviews — how customers talk about this brand):\n${reviewText.slice(0, 2000)}`
     : "AUDIENCE-AUTHORED TEXT: [no reviews available]";
 
-  const corpus = `${websiteBlock}\n\n${reviewBlock}`;
+  // Build enhanced corpus with structured data sources
+  const metadataBlock = metadataKeywords && metadataKeywords.length > 0
+    ? `
+WEBSITE METADATA SIGNALS (from meta tags, Open Graph, structured data):
+${metadataKeywords.join(", ")}`
+    : "";
+  
+  const mentionBlock = mentionKeywords && mentionKeywords.length > 0
+    ? `
+AUDIENCE MENTION SIGNALS (from TikTok video captions and hashtags):
+${mentionKeywords.join(", ")}
+Audience Sentiment: ${mentionSentiment || "unknown"}`
+    : "";
+
+  const corpus = `${websiteBlock}
+
+${reviewBlock}${metadataBlock}${mentionBlock}`;
 
   const systemPrompt = `You are a cultural semiotician and brand anthropologist. Your job is to decode the symbolic language used by brands — not just what they sell, but what their words reveal about their cultural identity, social positioning, and relationship with their audience.
 
-You will receive two types of text:
+You will receive up to FOUR types of text:
 1. BRAND-AUTHORED TEXT: The words the brand uses to describe itself (website copy, taglines, about pages)
 2. AUDIENCE-AUTHORED TEXT: The words customers use to describe the brand (reviews)
+3. WEBSITE METADATA SIGNALS: Structured data from website meta tags, Open Graph, JSON-LD (keywords extracted from metadata)
+4. AUDIENCE MENTION SIGNALS: How audiences talk about the brand on social media (TikTok captions, hashtags)
+
+These sources often tell different stories. Your job is to decode all of them and identify where brand self-presentation diverges from audience perception (Goffman's "front stage" vs "back stage").
 
 These two sources often tell different stories. Your job is to decode both.
 

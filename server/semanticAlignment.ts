@@ -17,6 +17,8 @@ export interface SemanticAlignmentResult {
   conflictingKeywords: string[]; // Keywords that suggest opposing values
   alignmentModifier: number; // -2.0 to +2.0: adjustment to Alignment score
   explanation: string; // Human-readable summary
+  dataQualityScore: number; // 0-10: richness of input data
+  confidenceLevel: "High" | "Medium" | "Low"; // Confidence in the alignment result
 }
 
 /**
@@ -37,7 +39,9 @@ export function calculateSemanticAlignment(
   creatorKeywords: string[] | null | undefined,
   creatorVocabulary: string[] | null | undefined,
   brandKeywords: string[] | null | undefined,
-  brandVocabulary: string[] | null | undefined
+  brandVocabulary: string[] | null | undefined,
+  brandWebsiteKeywords?: string[] | null,
+  brandMentionKeywords?: string[] | null
 ): SemanticAlignmentResult {
   // Combine all creator signals
   const creatorAll = [
@@ -45,10 +49,14 @@ export function calculateSemanticAlignment(
     ...(creatorVocabulary ?? []),
   ].map(normalizeKeyword);
 
-  // Combine all brand signals
+  // Combine all brand signals with weighted importance
   const brandAll = [
     ...(brandKeywords ?? []),
     ...(brandVocabulary ?? []),
+    ...(brandWebsiteKeywords ?? []), // Higher weight
+    ...(brandWebsiteKeywords ?? []), // Double weight for website data
+    ...(brandMentionKeywords ?? []), // Higher weight
+    ...(brandMentionKeywords ?? []), // Double weight for mention data
   ].map(normalizeKeyword);
 
   if (creatorAll.length === 0 || brandAll.length === 0) {
@@ -60,7 +68,20 @@ export function calculateSemanticAlignment(
       conflictingKeywords: [],
       alignmentModifier: 0,
       explanation: "Insufficient vocabulary data to calculate semantic alignment.",
+      dataQualityScore: 0,
+      confidenceLevel: "Low",
     };
+  
+  // Calculate data quality score based on richness of input sources
+  const sourceCount = [
+    creatorKeywords?.length ?? 0,
+    creatorVocabulary?.length ?? 0,
+    brandKeywords?.length ?? 0,
+    brandVocabulary?.length ?? 0,
+    brandWebsiteKeywords?.length ?? 0,
+    brandMentionKeywords?.length ?? 0,
+  ].filter((x) => x > 0).length;
+  const dataQualityScore = Math.min(10, (sourceCount / 6) * 10 + (brandAll.length / 20));
   }
 
   // Find shared keywords
@@ -138,6 +159,27 @@ export function calculateSemanticAlignment(
     explanation += "Limited semantic overlap.";
   }
 
+  // Calculate data quality score based on richness of input sources
+  const sourceCount = [
+    creatorKeywords?.length ?? 0,
+    creatorVocabulary?.length ?? 0,
+    brandKeywords?.length ?? 0,
+    brandVocabulary?.length ?? 0,
+    brandWebsiteKeywords?.length ?? 0,
+    brandMentionKeywords?.length ?? 0,
+  ].filter((x) => x > 0).length;
+  const dataQualityScore = Math.min(10, (sourceCount / 6) * 10 + (brandAll.length / 20));
+
+  // Determine confidence level based on data richness
+  let confidenceLevel: "High" | "Medium" | "Low";
+  if (brandWebsiteKeywords && brandMentionKeywords && brandAll.length > 30) {
+    confidenceLevel = "High";
+  } else if (brandAll.length > 15) {
+    confidenceLevel = "Medium";
+  } else {
+    confidenceLevel = "Low";
+  }
+
   return {
     overlapScore,
     conflictScore,
@@ -146,5 +188,7 @@ export function calculateSemanticAlignment(
     conflictingKeywords,
     alignmentModifier,
     explanation,
+    dataQualityScore,
+    confidenceLevel,
   };
 }

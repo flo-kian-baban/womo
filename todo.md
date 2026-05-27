@@ -782,3 +782,16 @@
 - [x] Write Phase 8 vitest tests (14 tests covering all new signal variations)
 - [x] All 60 tests pass
 - [x] Save checkpoint
+
+
+## Phase 9: Semantic Alignment & Symbol Decoder Enrichment
+- [ ] Update semanticAlignment.ts to use richer brand keyword sources: website metadata + Open Graph + JSON-LD + Google Search results
+- [ ] Enhance tribMatchScore calculation: weight recent/primary keywords higher than fallback keywords
+- [ ] Update brandSymbolDecoder.ts to extract deeper symbolic meaning from enriched website text
+- [ ] Add confidence level tracking: "High" when website data is rich, "Medium" when partial, "Low" when minimal
+- [ ] Improve Goffman gap detection: compare brand website claims vs audience mention sentiment with higher precision
+- [ ] Update archetype extraction: boost confidence from "Estimated" to "Verified" when website data exceeds 2000 chars
+- [ ] Update emotional promise extraction: use metadata + structured data for more accurate emotional positioning
+- [ ] Write Phase 9 vitest tests for semantic alignment with enriched data
+- [ ] Run all tests and verify no regressions
+- [ ] Save checkpoint
