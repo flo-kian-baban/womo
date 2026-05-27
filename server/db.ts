@@ -194,7 +194,7 @@ export async function getMatchWithProfiles(id: number) {
  * Returns up to 5 comparable partnerships from the database that share:
  * - the same brand type OR brand archetype classification, OR
  * - the same creator niche/archetype
- * Ordered by fitScore descending. Excludes the current match.
+ * Ordered by caiScore descending. Excludes the current match.
  */
 export async function getComparablePartnerships(input: {
   excludeMatchId: number;
@@ -212,7 +212,7 @@ export async function getComparablePartnerships(input: {
     .select()
     .from(matchRecords)
     .where(ne(matchRecords.id, input.excludeMatchId))
-    .orderBy(desc(matchRecords.fitScore))
+    .orderBy(desc(matchRecords.caiScore))
     .limit(100);
 
   if (allMatches.length === 0) return [];
@@ -238,7 +238,7 @@ export async function getComparablePartnerships(input: {
       return { match, creator: creator!, brand: brand!, similarityScore };
     })
     .filter(({ similarityScore }) => similarityScore > 0)
-    .sort((a, b) => b.similarityScore - a.similarityScore || (b.match.fitScore ?? 0) - (a.match.fitScore ?? 0));
+    .sort((a, b) => b.similarityScore - a.similarityScore || (b.match.caiScore ?? 0) - (a.match.caiScore ?? 0));
 
   return scored.slice(0, 5);
 }

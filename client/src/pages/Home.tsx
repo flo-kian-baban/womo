@@ -22,7 +22,7 @@ const FEATURE_CARDS = [
   {
     href: "/fit-score",
     icon: BarChart3,
-    label: "F.I.T. Score",
+    label: "Cultural Alignment Index (CAI)",
     description: "Calculate the Alignment, Pulse, and Stability scores for any creator-brand pair with full radar warnings.",
     color: "oklch(0.78 0.12 75)",
     delay: "animate-stagger-3",
@@ -57,7 +57,7 @@ export default function Home() {
           <span className="text-xs font-medium text-primary tracking-wide">Cultural Intelligence Platform</span>
         </div>
         <h1 className="text-4xl lg:text-5xl font-serif mb-4 leading-tight">
-          The F.I.T. Score<br />
+          The Cultural Alignment Index (CAI)<br />
           <span className="gold-text">Engine</span>
         </h1>
         <p className="text-muted-foreground text-lg max-w-xl leading-relaxed">
@@ -71,7 +71,7 @@ export default function Home() {
         {[
           { label: "Creators", value: creators?.length ?? 0, href: "/library" },
           { label: "Brands", value: brands?.length ?? 0, href: "/library" },
-          { label: "F.I.T. Reports", value: matches?.length ?? 0, href: "/library" },
+          { label: "CAI Reports", value: matches?.length ?? 0, href: "/library" },
         ].map((stat) => (
           <Link key={stat.label} href={stat.href}>
             <div className="fit-card rounded-xl p-4 cursor-pointer hover:border-primary/30 transition-all duration-200 hover:connex-glow-sm">

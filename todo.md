@@ -475,3 +475,64 @@
 - [x] Add success/error toast notifications
 - [x] Refresh profile data after re-analysis
 - [x] Tests pass (27/27), TypeScript clean
+
+
+## Version 2: Cultural Alignment Index (CAI) Upgrade
+
+### Phase 1: Rename F.I.T. to CAI
+- [x] Rename fitScore → caiScore in database schema
+- [x] Rename fitStatus → caiStatus in database schema
+- [x] Update all UI labels: "F.I.T. Score" → "Cultural Alignment Index (CAI)"
+- [x] Update all UI labels: "F.I.T. Report" → "CAI Report"
+- [x] Rename FITScore.tsx → CAIScore.tsx
+- [x] Update App.tsx to reference CAIScore
+- [x] Update all TypeScript references (56 total) from fitScore/fitStatus to caiScore/caiStatus
+- [x] TypeScript clean, all 27 tests pass
+
+### Phase 2: Implement Five Performance Signals
+- [x] Create performanceSignals.ts module with five signal calculation functions
+- [x] Signal 1: Creative Integrity Signal (creator tone + goffman + cultural capital + brand tone + archetype)
+- [x] Signal 2: Performance Consistency Signal (engagement rate + lifecycle + brand saturation)
+- [x] Signal 3: Community Quality Signal (audience tribe + PARR + stuart hall decoding + location)
+- [x] Signal 4: Audience Receptivity Signal (PARR + QoV + decoding modifier + brand emotional promise)
+- [x] Signal 5: Brand Trust Signal (goffman + drift + data confidence + brand saturation)
+- [x] Add all five signals to match_records schema (16 new columns)
+- [x] Add confidence tier field to each signal (Verified/Estimated/Insufficient Data)
+- [x] TypeScript clean, all 27 tests pass
+
+### Phase 3: Add Engagement Quality Score from TikTok API
+- [x] Create engagementQuality.ts module with comment analysis functions
+- [x] Implement substantive vs passive comment classification
+- [x] Calculate engagement quality ratio: substantive comments / total comments (0.0-1.0)
+- [x] Add engagementQualityScore and engagementQualityConfidence fields to creator_profiles schema
+- [x] Implement modifier for Performance Consistency Signal (high score = +15, medium = +5, low = -10)
+- [x] TypeScript clean, all 27 tests pass
+
+### Phase 4: Build Eight-Signal Display (Default View)
+- [x] Create SignalPanel.tsx component with two-layer layout (Performance + Cultural)
+- [x] Add confidence tier badge next to each signal score
+- [x] Display CAI score prominently at top with status label and color coding
+- [x] Integrate SignalPanel into CAIScore.tsx as default view
+- [x] Retain all existing outputs below signal panel: PARR, QoV, Symbolic Overlap, Shared Keywords, Shared Themes, Radar Warnings, Narratives, Content Directions
+- [x] TypeScript clean, all 27 tests pass
+
+### Phase 5: Add Brand Partnership Profile View
+- [ ] Create BrandPartnershipProfile component
+- [ ] Display brand-side signal inputs: Creative Identity, Campaign Consistency, Community Clarity, Message Receptivity, Brand Trust
+- [ ] Show one-line assessment for each (e.g., "clear and consistent" vs "vague and inconsistent")
+- [ ] Add to brand detail page alongside existing cultural profile data
+- [ ] Explain that brand-side scores inform every creator pairing calculation
+
+### Phase 6: Update Side-by-Side Creator Comparison View
+- [ ] Build/update comparison view for multiple creators vs. same brand
+- [ ] Layer 1: Signal Panel — all eight signals side by side for each creator with CAI score and status
+- [ ] Layer 2: Meaning Narrative — 3-4 sentences explaining why each pairing scores as it does (from Alignment Narrative + Synergy Narrative)
+- [ ] Layer 3: Brief Recommendations — Lead with / Include / Avoid / Recommended format (from Content Directions + Radar Warnings)
+- [ ] Make comparison view accessible from Profile Library or CAI Score page
+
+### Phase 7: Testing & Delivery
+- [ ] Run full test suite (target: 30+ tests pass)
+- [ ] TypeScript strict mode clean
+- [ ] Test with @alkhussein, @kaylee.nhi, @malik.the.prince19 to validate new signals
+- [ ] Verify engagement quality score calculation works correctly
+- [ ] Create Version 2 checkpoint with detailed description

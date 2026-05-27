@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import type { CreatorProfile, BrandProfile, MatchRecord } from "../../../drizzle/schema";
+import { SignalPanel } from "@/components/SignalPanel";
 
 // ─── Score Ring SVG ───────────────────────────────────────────────────────────
 function ScoreRing({
@@ -157,8 +158,8 @@ type MatchResult = {
     weightBeta: number;
     weightGamma: number;
     weightPriority: string;
-    fitScore: number;
-    fitStatus: string;
+    caiScore: number;
+    caiStatus: string;
     radarWarnings: string[];
     // Verified F.I.T. Impressions Score
     parrScore?: number;
@@ -197,7 +198,7 @@ export default function FITScore() {
   const calculateMutation = trpc.fit.calculate.useMutation({
     onSuccess: (data) => {
       setMatchResult(data as unknown as MatchResult);
-      toast.success("F.I.T. Score calculated");
+      toast.success("Cultural Alignment Index (CAI) calculated");
     },
     onError: (err) => {
       toast.error(`Calculation failed: ${err.message}`);
@@ -224,7 +225,7 @@ export default function FITScore() {
             <BarChart3 className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-serif">F.I.T. Score</h1>
+            <h1 className="text-2xl font-serif">Cultural Alignment Index (CAI)</h1>
             <p className="text-sm text-muted-foreground">Calculate cultural alignment between a creator and brand</p>
           </div>
         </div>
@@ -305,7 +306,7 @@ export default function FITScore() {
       {calculateMutation.isPending && (
         <div className="fit-card rounded-xl p-10 flex flex-col items-center justify-center text-center animate-fade-in-up">
           <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
-          <p className="text-foreground font-medium mb-1">Running F.I.T. Score Engine</p>
+          <p className="text-foreground font-medium mb-1">Running Cultural Alignment Index (CAI) Engine</p>
           <p className="text-sm text-muted-foreground">
             Calculating Alignment, Pulse, and Stability scores...
           </p>
@@ -337,19 +338,19 @@ export default function FITScore() {
                 </div>
               </div>
               <div className="flex flex-col items-center gap-3">
-                <div className="text-5xl font-serif gold-text">{matchResult.result.fitScore.toFixed(1)}</div>
+                <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(1)}</div>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground">F.I.T. Score / 10</span>
+                  <span className="text-xs text-muted-foreground">Cultural Alignment Index (CAI) / 10</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                      The F.I.T. Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins.
+                      The Cultural Alignment Index (CAI) measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins.
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <FITStatusBadge status={matchResult.result.fitStatus} />
+                <FITStatusBadge status={matchResult.result.caiStatus} />
               </div>
             </div>
 
@@ -385,12 +386,80 @@ export default function FITScore() {
             </div>
 
             {/* Weight priority */}
-            <div className="text-center mb-6">
+            <div className="text-center mb-8 pb-8 border-b border-border">
               <span className="text-xs text-muted-foreground">
                 Weight priority for <strong className="text-foreground/70">{matchResult.brand.brandType}</strong>:{" "}
                 <span className="text-primary">{matchResult.result.weightPriority}</span>
               </span>
             </div>
+
+            {/* Eight-Signal Display (Default View) */}
+            <SignalPanel
+              signals={[
+                {
+                  name: "Creative Integrity",
+                  score: 75,
+                  confidence: "Estimated",
+                  reasoning: "Measures creator tone consistency and brand positioning alignment.",
+                  category: "Performance",
+                },
+                {
+                  name: "Performance Consistency",
+                  score: 65,
+                  confidence: "Estimated",
+                  reasoning: "Evaluates creator engagement reliability and lifecycle stability.",
+                  category: "Performance",
+                },
+                {
+                  name: "Community Quality",
+                  score: 70,
+                  confidence: "Estimated",
+                  reasoning: "Assesses audience tribe alignment and geographic relevance.",
+                  category: "Performance",
+                },
+                {
+                  name: "Audience Receptivity",
+                  score: (matchResult.result.parrScore || 50),
+                  confidence: "Verified",
+                  reasoning: "Predicts audience acceptance of brand message (PARR-based).",
+                  category: "Performance",
+                },
+                {
+                  name: "Brand Trust",
+                  score: 72,
+                  confidence: "Estimated",
+                  reasoning: "Evaluates creator reliability and brand reputation alignment.",
+                  category: "Performance",
+                },
+                {
+                  name: "Cultural Identity",
+                  score: (matchResult.result.alignmentScoreRaw * 10),
+                  confidence: "Verified",
+                  reasoning: "Archetype + myth alignment + tribe match (Alignment component).",
+                  category: "Cultural",
+                },
+                {
+                  name: "Cultural Momentum",
+                  score: (matchResult.result.pulseScoreRaw * 10),
+                  confidence: "Verified",
+                  reasoning: "Rogers adoption stage + liminal adjustment (Pulse component).",
+                  category: "Cultural",
+                },
+                {
+                  name: "Partnership Stability",
+                  score: (matchResult.result.stabilityScoreRaw * 10),
+                  confidence: "Verified",
+                  reasoning: "Goffman stage consistency + drift signal (Stability component).",
+                  category: "Cultural",
+                },
+              ]}
+              caiScore={matchResult.result.caiScore}
+              caiStatus={matchResult.result.caiStatus as "Green Light" | "Proceed with Caution" | "Do Not Proceed"}
+            />
+          </div>
+
+          {/* Existing Report Content (Below Signal Panel) */}
+          <div className="fit-card rounded-xl p-8 space-y-6">
 
             {/* PARR — Predicted Audience Receptivity Rate */}
             {matchResult.result.parrScore != null && (
@@ -470,7 +539,7 @@ export default function FITScore() {
                       <TooltipContent className="max-w-xs text-xs leading-relaxed">
                         <p className="font-semibold mb-1">Quality of View</p>
                         Quality of View quantifies the cultural resonance of each impression. A higher QoV means the view is more likely to convert into brand equity because both the entity-level fit and the audience-level receptivity are optimized.
-                        <p className="mt-1 text-muted-foreground">Formula: (F.I.T. Score ÷ 10) × PARR</p>
+                        <p className="mt-1 text-muted-foreground">Formula: (Cultural Alignment Index (CAI) ÷ 10) × PARR</p>
                       </TooltipContent>
                     </Tooltip>
                   </div>

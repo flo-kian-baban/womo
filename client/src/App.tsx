@@ -8,7 +8,7 @@ import ConnexLayout from "./components/ConnexLayout";
 import Home from "./pages/Home";
 import AnalyzeCreator from "./pages/AnalyzeCreator";
 import AnalyzeBrand from "./pages/AnalyzeBrand";
-import FITScore from "./pages/FITScore";
+import CAIScore from "./pages/CAIScore";
 import Library from "./pages/Library";
 import CreatorDetail from "./pages/CreatorDetail";
 import BrandDetail from "./pages/BrandDetail";
@@ -21,7 +21,7 @@ function Router() {
         <Route path="/" component={Home} />
         <Route path="/analyze/creator" component={AnalyzeCreator} />
         <Route path="/analyze/brand" component={AnalyzeBrand} />
-        <Route path="/fit-score" component={FITScore} />
+        <Route path="/fit-score" component={CAIScore} />
         <Route path="/report/:id" component={MatchReport} />
         <Route path="/library" component={Library} />
           <Route path="/creator/:id" component={CreatorDetail} />

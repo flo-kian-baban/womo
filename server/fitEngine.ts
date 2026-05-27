@@ -452,28 +452,28 @@ export interface FITScoreInputs {
 }
 
 export function calculateFITScore(inputs: FITScoreInputs): {
-  fitScore: number;
-  fitStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
+  caiScore: number;
+  caiStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
 } {
-  const fitScore =
+  const caiScore =
     inputs.alignmentRaw * inputs.weights.alpha +
     inputs.pulseRaw * inputs.weights.beta +
     inputs.stabilityRaw * inputs.weights.gamma;
 
-  const rounded = Math.round(fitScore * 10) / 10;
+  const rounded = Math.round(caiScore * 10) / 10;
 
-  let fitStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
-  if (rounded >= 7.5) fitStatus = "Green Light";
-  else if (rounded >= 6.0) fitStatus = "Proceed with Caution";
-  else fitStatus = "Do Not Proceed";
+  let caiStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
+  if (rounded >= 7.5) caiStatus = "Green Light";
+  else if (rounded >= 6.0) caiStatus = "Proceed with Caution";
+  else caiStatus = "Do Not Proceed";
 
   // CRITICAL: If Alignment is below 6.0, cap status at "Proceed with Caution" regardless of final score
   // This ensures that poor cultural fit cannot be masked by high Pulse/Stability scores
-  if (inputs.alignmentRaw < 6.0 && fitStatus === "Green Light") {
-    fitStatus = "Proceed with Caution";
+  if (inputs.alignmentRaw < 6.0 && caiStatus === "Green Light") {
+    caiStatus = "Proceed with Caution";
   }
 
-  return { fitScore: rounded, fitStatus };
+  return { caiScore: rounded, caiStatus };
 }
 
 // ─── Radar Warnings ───────────────────────────────────────────────────────────
@@ -692,8 +692,8 @@ export interface FullFITResult {
   weightGamma: number;
   weightPriority: string;
   // Final
-  fitScore: number;
-  fitStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
+  caiScore: number;
+  caiStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
   radarWarnings: RadarWarning[];
   // PARR — Predicted Audience Receptivity Rate
   parrScore: number;
@@ -732,7 +732,7 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     driftSignal: input.driftSignal,
   });
 
-  const { fitScore, fitStatus } = calculateFITScore({
+  const { caiScore, caiStatus } = calculateFITScore({
     alignmentRaw,
     pulseRaw,
     stabilityRaw,
@@ -769,8 +769,8 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
       goffmanStageConsistency: input.goffmanStageConsistency,
     });
 
-  // QoV = (fitScore / 10) × (parrScore / 100) — expressed as a percentage (0–100)
-  const qovScore = Math.round((fitScore / 10) * (parrScore / 100) * 100 * 10) / 10;
+  // QoV = (caiScore / 10) × (parrScore / 100) — expressed as a percentage (0–100)
+  const qovScore = Math.round((caiScore / 10) * (parrScore / 100) * 100 * 10) / 10;
 
   // Phase 1.5: Alignment Narrative — AI-generated 2-sentence match summary
   // This is a synchronous rule-based summary; LLM-generated version is computed in the router
@@ -807,8 +807,8 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     weightBeta: weights.beta,
     weightGamma: weights.gamma,
     weightPriority: weights.priority,
-    fitScore,
-    fitStatus,
+    caiScore,
+    caiStatus,
     radarWarnings,
     parrScore,
     parrLabel,

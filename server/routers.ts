@@ -652,7 +652,7 @@ SHARED SIGNALS:
 - How much they overlap: ${result.symbolicOverlapScore}/10
 
 SCORES:
-- F.I.T. Score: ${result.fitScore}/10 (${result.fitStatus})
+- F.I.T. Score: ${result.caiScore}/10 (${result.caiStatus})
 - Audience Acceptance Score: ${result.parrScore}/100 (${result.parrLabel})
 - Alignment: ${result.alignmentScoreRaw.toFixed(1)}/10 | Momentum: ${result.pulseScoreRaw.toFixed(1)}/10 | Consistency: ${result.stabilityScoreRaw.toFixed(1)}/10
 
@@ -702,8 +702,8 @@ Write the following in JSON format:
         const narrative = await generateFITNarrative({
           creatorHandle: creator.handle,
           brandName: brand.brandName,
-          fitScore: result.fitScore,
-          fitStatus: result.fitStatus,
+          caiScore: result.caiScore,
+          caiStatus: result.caiStatus,
           alignmentRaw: result.alignmentScoreRaw,
           pulseRaw: result.pulseScoreRaw,
           stabilityRaw: result.stabilityScoreRaw,
@@ -736,8 +736,8 @@ Write the following in JSON format:
           weightAlpha: result.weightAlpha,
           weightBeta: result.weightBeta,
           weightGamma: result.weightGamma,
-          fitScore: result.fitScore,
-          fitStatus: result.fitStatus,
+          caiScore: result.caiScore,
+          caiStatus: result.caiStatus,
           radarWarnings: result.radarWarnings,
           narrativeSummary: narrative.narrativeSummary,
           alignmentNotes: narrative.alignmentNotes as unknown as Record<string, unknown>,

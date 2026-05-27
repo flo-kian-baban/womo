@@ -23,7 +23,7 @@ const NAV_ITEMS = [
     icon: Building2,
   },
   {
-    label: "F.I.T. Score",
+    label: "Cultural Alignment Index (CAI)",
     href: "/fit-score",
     icon: BarChart3,
   },

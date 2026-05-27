@@ -459,8 +459,8 @@ Be specific and evidence-based. Every field must be populated. Output only valid
 export interface NarrativeInput {
   creatorHandle: string;
   brandName: string;
-  fitScore: number;
-  fitStatus: string;
+  caiScore: number;
+  caiStatus: string;
   alignmentRaw: number;
   pulseRaw: number;
   stabilityRaw: number;
@@ -506,7 +506,7 @@ IMPORTANT WRITING RULES:
   const userPrompt = `Write a match report for this creator-brand pairing:
 Creator: ${input.creatorHandle} (Personality type: ${input.creatorArchetype}, Pronouns: ${input.creatorPronouns ?? "not specified"})
 Brand: ${input.brandName} (Personality type: ${input.brandArchetype})
-F.I.T. Score: ${input.fitScore}/10 — ${input.fitStatus}
+F.I.T. Score: ${input.caiScore}/10 — ${input.caiStatus}
 Alignment: ${input.alignmentRaw.toFixed(1)}/10 | Momentum: ${input.pulseRaw.toFixed(1)}/10 | Consistency: ${input.stabilityRaw.toFixed(1)}/10
 Flags: ${input.radarWarnings.length > 0 ? input.radarWarnings.join(", ") : "None"}
 Creator story: ${input.creatorBarthesMyth}

@@ -94,13 +94,13 @@ describe("runFullFITCalculation", () => {
 
   it("returns a valid F.I.T. score between 0 and 10", () => {
     const result = runFullFITCalculation(baseInput);
-    expect(result.fitScore).toBeGreaterThanOrEqual(0);
-    expect(result.fitScore).toBeLessThanOrEqual(10);
+    expect(result.caiScore).toBeGreaterThanOrEqual(0);
+    expect(result.caiScore).toBeLessThanOrEqual(10);
   });
 
-  it("returns a fitStatus string", () => {
+  it("returns a caiStatus string", () => {
     const result = runFullFITCalculation(baseInput);
-    expect(["Green Light", "Proceed with Caution", "Do Not Proceed"]).toContain(result.fitStatus);
+    expect(["Green Light", "Proceed with Caution", "Do Not Proceed"]).toContain(result.caiStatus);
   });
 
   it("returns three sub-scores between 0 and 10", () => {
@@ -152,7 +152,7 @@ describe("runFullFITCalculation", () => {
   it("Green Light status for high-scoring compatible pair", () => {
     const result = runFullFITCalculation(baseInput);
     // Hero x Hero with high myth/trib scores should be green
-    expect(result.fitScore).toBeGreaterThan(6);
+    expect(result.caiScore).toBeGreaterThan(6);
   });
 
   it("weights sum to approximately 1.0", () => {

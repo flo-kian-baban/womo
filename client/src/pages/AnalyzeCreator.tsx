@@ -227,11 +227,11 @@ export default function AnalyzeCreator() {
                 Next Step
               </div>
               <p className="text-xs text-muted-foreground mb-3">
-                Profile saved to library. Ready to run a F.I.T. Score?
+                Profile saved to library. Ready to run a Cultural Alignment Index (CAI)?
               </p>
               <Link href="/fit-score">
                 <Button size="sm" variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
-                  Run F.I.T. Score <ArrowRight className="w-3 h-3 ml-2" />
+                  Run Cultural Alignment Index (CAI) <ArrowRight className="w-3 h-3 ml-2" />
                 </Button>
               </Link>
             </div>

@@ -108,6 +108,10 @@ export const creatorProfiles = mysqlTable("creator_profiles", {
   avgVideoDuration: float("avgVideoDuration"), // Average video duration in seconds (from 12-video sample)
   primaryRegion: varchar("primaryRegion", { length: 128 }), // Primary geographic region (extracted from metadata + profile)
 
+  // Phase 2 — Engagement Quality Score (from TikTok comment analysis)
+  engagementQualityScore: float("engagementQualityScore"), // 0.0-1.0 ratio of substantive to passive comments
+  engagementQualityConfidence: varchar("engagementQualityConfidence", { length: 16 }), // Verified | Estimated | Insufficient Data
+
   // Raw AI summary
   aiSummary: mediumtext("aiSummary"),
   rawAiResponse: json("rawAiResponse"),
@@ -202,10 +206,10 @@ export const matchRecords = mysqlTable("match_records", {
   creatorProfileId: int("creatorProfileId").notNull(),
   brandProfileId: int("brandProfileId").notNull(),
 
-  // Sub-scores (raw, 0–10)
-  alignmentScoreRaw: float("alignmentScoreRaw"),
-  pulseScoreRaw: float("pulseScoreRaw"),
-  stabilityScoreRaw: float("stabilityScoreRaw"),
+  // Sub-scores (raw, 0–10) — now called Cultural Signals
+  alignmentScoreRaw: float("alignmentScoreRaw"), // aka culturalIdentitySignal
+  pulseScoreRaw: float("pulseScoreRaw"), // aka culturalMomentumSignal
+  stabilityScoreRaw: float("stabilityScoreRaw"), // aka partnershipStabilitySignal
 
   // Sub-score components
   archetypeMatchScore: float("archetypeMatchScore"),
@@ -222,9 +226,9 @@ export const matchRecords = mysqlTable("match_records", {
   weightBeta: float("weightBeta"),
   weightGamma: float("weightGamma"),
 
-  // Final F.I.T. Score
-  fitScore: float("fitScore"),
-  fitStatus: mysqlEnum("fitStatus", ["Green Light", "Proceed with Caution", "Do Not Proceed"]),
+  // Final CAI Score (Cultural Alignment Index)
+  caiScore: float("caiScore"),
+  caiStatus: mysqlEnum("caiStatus", ["Green Light", "Proceed with Caution", "Do Not Proceed"]),
 
   // Radar Warnings (exact names from spec)
   radarWarnings: json("radarWarnings"), // string[]
@@ -240,7 +244,7 @@ export const matchRecords = mysqlTable("match_records", {
   symbolicOverlapScore: float("symbolicOverlapScore"),
   sharedKeywords: json("sharedKeywords"),   // string[]
   sharedThemes: json("sharedThemes"),       // string[]
-  qovScore: float("qovScore"),               // Quality of View — (fitScore/10) × (parrScore/100) as %
+  qovScore: float("qovScore"),               // Quality of View — (caiScore/10) × (parrScore/100) as %
 
   // Phase 1.5 Visual Intelligence
   alignmentNarrative: text("alignmentNarrative"),       // 2-sentence match summary
@@ -250,6 +254,26 @@ export const matchRecords = mysqlTable("match_records", {
   // Synergy Narrative + Content Directions
   synergyNarrative: text("synergyNarrative"),
   contentDirections: json("contentDirections"), // { title, rationale, exampleAngle }[]
+
+  // Five Performance Signals (0–100 scale)
+  creativeIntegritySignal: float("creativeIntegritySignal"),
+  creativeIntegrityConfidence: varchar("creativeIntegrityConfidence", { length: 16 }), // Verified | Estimated | Insufficient Data
+  performanceConsistencySignal: float("performanceConsistencySignal"),
+  performanceConsistencyConfidence: varchar("performanceConsistencyConfidence", { length: 16 }),
+  communityQualitySignal: float("communityQualitySignal"),
+  communityQualityConfidence: varchar("communityQualityConfidence", { length: 16 }),
+  audienceReceptivitySignal: float("audienceReceptivitySignal"),
+  audienceReceptivityConfidence: varchar("audienceReceptivityConfidence", { length: 16 }),
+  brandTrustSignal: float("brandTrustSignal"),
+  brandTrustConfidence: varchar("brandTrustConfidence", { length: 16 }),
+
+  // Three Cultural Signals (renamed from Alignment/Pulse/Stability with confidence tiers)
+  culturalIdentitySignal: float("culturalIdentitySignal"),
+  culturalIdentityConfidence: varchar("culturalIdentityConfidence", { length: 16 }),
+  culturalMomentumSignal: float("culturalMomentumSignal"),
+  culturalMomentumConfidence: varchar("culturalMomentumConfidence", { length: 16 }),
+  partnershipStabilitySignal: float("partnershipStabilitySignal"),
+  partnershipStabilityConfidence: varchar("partnershipStabilityConfidence", { length: 16 }),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

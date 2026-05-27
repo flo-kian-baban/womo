@@ -204,12 +204,12 @@ export default function MatchReport() {
     const exportData = {
       generatedAt: new Date().toISOString(),
       reportVersion: "3.0",
-      framework: "Connex F.I.T. Score",
+      framework: "Connex Cultural Alignment Index (CAI)",
       creator: data.creator,
       brand: data.brand,
       match: {
-        fitScore: data.match.fitScore,
-        fitStatus: data.match.fitStatus,
+        caiScore: data.match.caiScore,
+        caiStatus: data.match.caiStatus,
         parrScore: data.match.parrScore,
         parrLabel: data.match.parrLabel,
         symbolicOverlapScore: data.match.symbolicOverlapScore,
@@ -276,9 +276,9 @@ export default function MatchReport() {
   const culturalVelocity = ((match as Record<string, unknown>).culturalVelocity as string | null) ?? "Insufficient Data";
   const dataConfidenceLevel = ((match as Record<string, unknown>).dataConfidenceLevel as string | null) ?? "low";
 
-  const fitStatusColor = match.fitStatus === "Green Light"
+  const caiStatusColor = match.caiStatus === "Green Light"
     ? "text-green-400"
-    : match.fitStatus === "Proceed with Caution"
+    : match.caiStatus === "Proceed with Caution"
     ? "text-yellow-400"
     : "text-red-400";
 
@@ -318,30 +318,30 @@ export default function MatchReport() {
         </div>
       </div>
 
-      {/* ─── Hero: F.I.T. Score + Verified F.I.T. Impressions Score ─────────── */}
+      {/* ─── Hero: Cultural Alignment Index (CAI) + Verified F.I.T. Impressions Score ─────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 animate-fade-in-up animate-stagger-1">
-        {/* F.I.T. Score */}
+        {/* Cultural Alignment Index (CAI) */}
         <div className="fit-card rounded-xl p-8 connex-glow">
           <div className="flex items-center gap-1.5 mb-4">
             <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground">
-              F.I.T. Score
+              Cultural Alignment Index (CAI)
             </div>
             <MetricTooltip
-              title="F.I.T. Score"
-              explanation="The F.I.T. Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
+              title="Cultural Alignment Index (CAI)"
+              explanation="The Cultural Alignment Index (CAI) measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
               formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
               dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
             />
           </div>
           <div className="flex items-center gap-3 mb-5">
-            <div className="text-5xl font-serif gold-text">{Number(match.fitScore).toFixed(1)}</div>
+            <div className="text-5xl font-serif gold-text">{Number(match.caiScore).toFixed(1)}</div>
             <div>
               <div className="text-xs text-muted-foreground">/ 10</div>
-              <div className={`text-sm font-semibold mt-0.5 ${fitStatusColor}`}>
-                {match.fitStatus === "Green Light" && "🟢 "}
-                {match.fitStatus === "Proceed with Caution" && "🟡 "}
-                {match.fitStatus === "Do Not Proceed" && "🔴 "}
-                {match.fitStatus}
+              <div className={`text-sm font-semibold mt-0.5 ${caiStatusColor}`}>
+                {match.caiStatus === "Green Light" && "🟢 "}
+                {match.caiStatus === "Proceed with Caution" && "🟡 "}
+                {match.caiStatus === "Do Not Proceed" && "🔴 "}
+                {match.caiStatus}
               </div>
             </div>
           </div>
@@ -414,7 +414,7 @@ export default function MatchReport() {
                         <TooltipContent className="max-w-xs text-xs leading-relaxed">
                           <p className="font-semibold mb-1">Quality of View</p>
                           QoV predicts how good a view is likely to be, based on creator-brand fit and audience receptivity.
-                          <p className="mt-1 text-muted-foreground">Formula: (F.I.T. Score ÷ 10) × PARR</p>
+                          <p className="mt-1 text-muted-foreground">Formula: (Cultural Alignment Index (CAI) ÷ 10) × PARR</p>
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -660,7 +660,7 @@ export default function MatchReport() {
             brandRegion={brand?.category || "Multi-region"}
             brandLanguage="English"
             geoMatch={creator?.location && brand?.category ? "regional" : "cultural"}
-            matchStrength={match.fitScore ? Math.min(100, Math.round(match.fitScore * 10)) : 50}
+            matchStrength={match.caiScore ? Math.min(100, Math.round(match.caiScore * 10)) : 50}
           />
         </div>
       )}
@@ -677,8 +677,8 @@ export default function MatchReport() {
           </div>
           <div className="space-y-3">
             {comparablePartnerships.map(({ match: cm, creator: cc, brand: cb }) => {
-              const cmStatus = cm.fitStatus === "Green Light" ? "text-green-400" :
-                cm.fitStatus === "Proceed with Caution" ? "text-yellow-400" : "text-red-400";
+              const cmStatus = cm.caiStatus === "Green Light" ? "text-green-400" :
+                cm.caiStatus === "Proceed with Caution" ? "text-yellow-400" : "text-red-400";
               return (
                 <Link key={cm.id} href={`/report/${cm.id}`}>
                   <div className="flex items-center gap-4 p-4 rounded-xl border border-border/50 bg-muted/10 hover:bg-muted/20 transition-colors cursor-pointer group">
@@ -692,8 +692,8 @@ export default function MatchReport() {
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <div className="text-right">
-                        <div className="text-lg font-serif gold-text">{Number(cm.fitScore).toFixed(1)}</div>
-                        <div className={`text-[10px] font-semibold ${cmStatus}`}>{cm.fitStatus}</div>
+                        <div className="text-lg font-serif gold-text">{Number(cm.caiScore).toFixed(1)}</div>
+                        <div className={`text-[10px] font-semibold ${cmStatus}`}>{cm.caiStatus}</div>
                       </div>
                       {cm.parrScore != null && (
                         <div className="text-right">

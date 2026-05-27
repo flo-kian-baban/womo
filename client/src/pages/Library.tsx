@@ -87,7 +87,7 @@ export default function Library() {
           </TabsTrigger>
           <TabsTrigger value="matches" className="gap-2">
             <BarChart3 className="w-3.5 h-3.5" />
-            F.I.T. Reports
+            CAI Reports
             {matches && <span className="ml-1 text-xs text-muted-foreground">({matches.length})</span>}
           </TabsTrigger>
         </TabsList>
@@ -312,10 +312,10 @@ export default function Library() {
         {/* ─── Matches Tab ──────────────────────────────────────────────────── */}
         <TabsContent value="matches">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-sm text-muted-foreground">All calculated F.I.T. Score reports</p>
+            <p className="text-sm text-muted-foreground">All calculated Cultural Alignment Index (CAI) reports</p>
             <Link href="/fit-score">
               <Button size="sm" className="gold-gradient text-background font-semibold">
-                + New F.I.T. Score
+                + New Cultural Alignment Index (CAI)
               </Button>
             </Link>
           </div>
@@ -328,7 +328,7 @@ export default function Library() {
               <p className="text-muted-foreground">No F.I.T. reports yet</p>
               <Link href="/fit-score">
                 <Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">
-                  Calculate your first F.I.T. Score
+                  Calculate your first Cultural Alignment Index (CAI)
                 </Button>
               </Link>
             </div>
@@ -338,7 +338,7 @@ export default function Library() {
                 <div key={match.id} className="fit-card rounded-xl p-5 hover:border-primary/30 transition-all duration-200 group">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <FITStatusDot status={match.fitStatus} />
+                      <FITStatusDot status={match.caiStatus} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium">
                           {match.creatorHandle ? `@${match.creatorHandle}` : `Creator #${match.creatorProfileId}`}
@@ -348,14 +348,14 @@ export default function Library() {
                         <div className="text-xs text-muted-foreground mt-0.5">
                           {new Date(match.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
                           {" · "}
-                          {match.fitStatus}
+                          {match.caiStatus}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <div className="text-xl font-serif gold-text">{Number(match.fitScore).toFixed(1)}</div>
+                        <div className="text-xl font-serif gold-text">{Number(match.caiScore).toFixed(1)}</div>
                         <div className="text-[10px] text-muted-foreground">F.I.T.</div>
                       </div>
 
