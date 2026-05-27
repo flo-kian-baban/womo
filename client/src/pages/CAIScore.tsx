@@ -184,6 +184,14 @@ type MatchResult = {
   // Synergy narrative and content directions
   synergyNarrative?: string;
   contentDirections?: Array<{ title: string; rationale: string; exampleAngle: string }>;
+  // Computed performance signals
+  performanceSignals?: {
+    creativeIntegrity: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
+    performanceConsistency: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
+    communityQuality: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
+    audienceReceptivity: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
+    brandTrust: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
+  };
 };
 
 export default function FITScore() {
@@ -398,37 +406,37 @@ export default function FITScore() {
               signals={[
                 {
                   name: "Creative Integrity",
-                  score: 75,
-                  confidence: "Estimated",
-                  reasoning: "Measures creator tone consistency and brand positioning alignment.",
+                  score: matchResult.performanceSignals?.creativeIntegrity.score ?? 50,
+                  confidence: matchResult.performanceSignals?.creativeIntegrity.confidence ?? "Estimated",
+                  reasoning: matchResult.performanceSignals?.creativeIntegrity.reasoning ?? "Measures creator tone consistency and brand positioning alignment.",
                   category: "Performance",
                 },
                 {
                   name: "Performance Consistency",
-                  score: 65,
-                  confidence: "Estimated",
-                  reasoning: "Evaluates creator engagement reliability and lifecycle stability.",
+                  score: matchResult.performanceSignals?.performanceConsistency.score ?? 50,
+                  confidence: matchResult.performanceSignals?.performanceConsistency.confidence ?? "Estimated",
+                  reasoning: matchResult.performanceSignals?.performanceConsistency.reasoning ?? "Evaluates creator engagement reliability and lifecycle stability.",
                   category: "Performance",
                 },
                 {
                   name: "Community Quality",
-                  score: 70,
-                  confidence: "Estimated",
-                  reasoning: "Assesses audience tribe alignment and geographic relevance.",
+                  score: matchResult.performanceSignals?.communityQuality.score ?? 50,
+                  confidence: matchResult.performanceSignals?.communityQuality.confidence ?? "Estimated",
+                  reasoning: matchResult.performanceSignals?.communityQuality.reasoning ?? "Assesses audience tribe alignment and geographic relevance.",
                   category: "Performance",
                 },
                 {
                   name: "Audience Receptivity",
-                  score: (matchResult.result.parrScore || 50),
-                  confidence: "Verified",
-                  reasoning: "Predicts audience acceptance of brand message (PARR-based).",
+                  score: matchResult.performanceSignals?.audienceReceptivity.score ?? (matchResult.result.parrScore || 50),
+                  confidence: matchResult.performanceSignals?.audienceReceptivity.confidence ?? "Verified",
+                  reasoning: matchResult.performanceSignals?.audienceReceptivity.reasoning ?? "Predicts audience acceptance of brand message (PARR-based).",
                   category: "Performance",
                 },
                 {
                   name: "Brand Trust",
-                  score: 72,
-                  confidence: "Estimated",
-                  reasoning: "Evaluates creator reliability and brand reputation alignment.",
+                  score: matchResult.performanceSignals?.brandTrust.score ?? 50,
+                  confidence: matchResult.performanceSignals?.brandTrust.confidence ?? "Estimated",
+                  reasoning: matchResult.performanceSignals?.brandTrust.reasoning ?? "Evaluates creator reliability and brand reputation alignment.",
                   category: "Performance",
                 },
                 {

@@ -11,6 +11,7 @@ import {
 } from "./db";
 import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from "./aiExtraction";
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
+import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata } from "./brandTikTokAnalysis";
@@ -881,6 +882,18 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorMusicArtists,
         });
 
+        // Calculate performance signals using actual brand + creator data
+        const performanceSignals = calculateAllSignals(
+          creator,
+          brand,
+          result.parrScore,
+          result.qovScore,
+          result.alignmentScoreRaw,
+          result.pulseScoreRaw,
+          result.stabilityScoreRaw,
+          result.dataConfidenceLevel,
+        );
+
         // Generate Synergy Narrative + Content Directions
         let synergyNarrative = "";
         let contentDirections: Array<{ title: string; rationale: string; exampleAngle: string }> = [];
@@ -1080,6 +1093,17 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           // Phase 6: Music Overlap + Cultural Borrowing
           musicOverlap: result.musicOverlap as unknown as Record<string, unknown>,
           culturalBorrowingSummary: culturalBorrowingSummary || null,
+          // Five Performance Signals (computed from actual brand + creator data)
+          creativeIntegritySignal: performanceSignals.creativeIntegrity.score,
+          creativeIntegrityConfidence: performanceSignals.creativeIntegrity.confidence,
+          performanceConsistencySignal: performanceSignals.performanceConsistency.score,
+          performanceConsistencyConfidence: performanceSignals.performanceConsistency.confidence,
+          communityQualitySignal: performanceSignals.communityQuality.score,
+          communityQualityConfidence: performanceSignals.communityQuality.confidence,
+          audienceReceptivitySignal: performanceSignals.audienceReceptivity.score,
+          audienceReceptivityConfidence: performanceSignals.audienceReceptivity.confidence,
+          brandTrustSignal: performanceSignals.brandTrust.score,
+          brandTrustConfidence: performanceSignals.brandTrust.confidence,
         });
 
         const matches = await listMatchRecords();
@@ -1091,6 +1115,7 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           brand,
           result,
           narrative,
+          performanceSignals,
         };
       }),
 
