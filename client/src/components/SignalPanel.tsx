@@ -78,15 +78,13 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
             <h2 className="text-lg font-semibold text-gray-900">
               Cultural Alignment Index (CAI)
             </h2>
-            <p className={`text-sm ${getStatusTextColor(caiStatus)}`}>
-              {caiStatus}
-            </p>
+            <p className="text-sm text-gray-600 mt-1">{caiStatus}</p>
           </div>
           <div className="text-right">
-            <div className={`text-5xl font-bold ${getScoreColor(caiScore)}`}>
+            <div className={`text-5xl font-bold ${getStatusTextColor(caiStatus)}`}>
               {caiScore.toFixed(1)}
             </div>
-            <p className="text-sm text-gray-600">/ 10</p>
+            <p className="text-xs text-gray-600 mt-1">/ 10</p>
           </div>
         </div>
       </Card>
@@ -94,22 +92,22 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
       {/* Performance Signals */}
       {performanceSignals.length > 0 && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 className="text-lg font-semibold text-white">
             Performance Signals
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {performanceSignals.map((signal, idx) => (
-              <Card key={idx} className="p-4 hover:shadow-md transition-shadow">
+              <Card key={idx} className="p-4 hover:shadow-md transition-shadow bg-gray-900 border-gray-700">
                 <div className="space-y-3">
                   <div className="flex items-start justify-between">
-                    <h4 className="font-medium text-gray-900">{signal.name}</h4>
+                    <h4 className="font-medium text-white">{signal.name}</h4>
                     <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
                       {signal.confidence}
                     </Badge>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                    <div className="flex-1 bg-gray-700 rounded-full h-2">
                       <div
                         className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
                         style={{ width: `${signal.score}%` }}
@@ -120,7 +118,7 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                     </span>
                   </div>
 
-                  <p className="text-sm text-gray-600">{signal.reasoning}</p>
+                  <p className="text-sm text-gray-300">{signal.reasoning}</p>
                 </div>
               </Card>
             ))}
@@ -131,22 +129,22 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
       {/* Cultural Signals */}
       {culturalSignals.length > 0 && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 className="text-lg font-semibold text-white">
             Cultural Signals
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {culturalSignals.map((signal, idx) => (
-              <Card key={idx} className="p-4 hover:shadow-md transition-shadow">
+              <Card key={idx} className="p-4 hover:shadow-md transition-shadow bg-gray-900 border-gray-700">
                 <div className="space-y-3">
                   <div className="flex items-start justify-between">
-                    <h4 className="font-medium text-gray-900">{signal.name}</h4>
+                    <h4 className="font-medium text-white">{signal.name}</h4>
                     <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
                       {signal.confidence}
                     </Badge>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                    <div className="flex-1 bg-gray-700 rounded-full h-2">
                       <div
                         className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
                         style={{ width: `${signal.score}%` }}
@@ -157,7 +155,7 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                     </span>
                   </div>
 
-                  <p className="text-sm text-gray-600">{signal.reasoning}</p>
+                  <p className="text-sm text-gray-300">{signal.reasoning}</p>
                 </div>
               </Card>
             ))}
