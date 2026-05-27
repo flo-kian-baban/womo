@@ -486,7 +486,7 @@ export function calculateFITScore(inputs: FITScoreInputs): {
     inputs.pulseRaw * inputs.weights.beta +
     inputs.stabilityRaw * inputs.weights.gamma;
 
-  const rounded = Math.round(caiScore * 10) / 10;
+  const rounded = Math.round(caiScore * 100) / 100;
 
   let caiStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
   if (rounded >= 7.5) caiStatus = "Green Light";
