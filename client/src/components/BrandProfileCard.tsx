@@ -686,6 +686,9 @@ export default function BrandProfileCard({ profile, compact = false, onReanalyze
             </div>
           )}
 
+          {/* Brand Video Transcripts Panel */}
+          <BrandVideoTranscriptPanel profile={profile} />
+
           {/* Brand Symbol Decoder Panel */}
           <BrandSymbolDecoderPanel profile={profile} />
 
