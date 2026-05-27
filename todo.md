@@ -597,3 +597,60 @@
 - [x] Write vitest for updated brand extraction prompts — all 27 tests pass
 - [ ] Test with real brand data (Nike, Scotiabank, etc.) — manual testing recommended
 - [x] Verify CAI scores reflect new data sources — integrated and tested
+
+
+## Phase 3: Bulk Analysis Features (Batch Processing)
+
+### Bulk Creator Analysis
+- [ ] Create BulkAnalyzeCreators.tsx form component
+- [ ] Add textarea input for pasting creator handles (one per line or comma-separated)
+- [ ] Parse handles and validate format
+- [ ] Create backend endpoint for bulk creator analysis
+- [ ] Implement queue-based processing (process 2-3 at a time to avoid rate limits)
+- [ ] Store bulk analysis job metadata in database
+- [ ] Return job ID for progress tracking
+
+### Bulk Brand Analysis
+- [ ] Create BulkAnalyzeBrands.tsx form component
+- [ ] Add textarea input for brand names/URLs and TikTok handles (CSV format: name,url,tiktok_handle)
+- [ ] Parse CSV and validate entries
+- [ ] Create backend endpoint for bulk brand analysis
+- [ ] Implement queue-based processing (process 2-3 at a time)
+- [ ] Store bulk analysis job metadata in database
+- [ ] Return job ID for progress tracking
+
+### Batch Processing & Progress
+- [ ] Create job queue system for bulk analyses
+- [ ] Add progress tracking (X of Y completed)
+- [ ] Implement error handling and retry logic
+- [ ] Store results in database with job ID reference
+- [ ] Create WebSocket or polling endpoint for real-time progress updates
+
+### Results Dashboard
+- [ ] Create BulkAnalysisResults.tsx component
+- [ ] Display all profiles from bulk analysis in table format
+- [ ] Show CAI scores, status, and radar warnings
+- [ ] Add export to CSV functionality
+- [ ] Add ability to compare multiple profiles side-by-side
+- [ ] Link to individual profile details
+
+### Testing
+- [ ] Write tests for bulk creator parsing
+- [ ] Write tests for bulk brand parsing
+- [ ] Test queue processing with multiple jobs
+- [ ] Test error handling and retries
+- [ ] Manual testing with 10+ profiles
+
+## Phase 4: Brand Analysis Depth Upgrade (Creator Parity)
+
+- [ ] Expand BrandExtractionResult with goffmanStageConsistency, driftSignal, stuartHallDecoding, culturalCapital, rogersAdopterStage, brandLifecyclePhase, audienceDecodingSplit, brandNichePosition, turnerLiminalPhase, barthesNicheMeaning
+- [ ] Upgrade brand extraction LLM prompt to apply same Jungian/Bourdieu/Goffman/Stuart Hall/Rogers frameworks used for creators
+- [ ] Add brand-specific versions of: Identity Coherence, Symbolic Capital type, Audience Decoding Split, Stage Consistency
+- [ ] Update drizzle schema with new brand fields
+- [ ] Run migration via webdev_execute_sql
+- [ ] Update db.ts createBrandProfile/updateBrandProfile helpers
+- [ ] Wire new brand fields into fitEngine.ts scoring (Alignment, Pulse, Stability)
+- [ ] Update BrandProfileCard to show Field Note Two and Field Note Three equivalent panels
+- [ ] Show brand Cultural Snapshot panel (matching creator's Field Note Two/Three layout)
+- [ ] Show brand Decoded Cultural Signals panel (matching creator's signal panel)
+- [ ] Test scoring accuracy with real brand data

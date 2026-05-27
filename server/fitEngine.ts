@@ -683,6 +683,24 @@ export function calculatePARR(inputs: PARRInputs): {
 
 // ─── Full Engine Entry Point ──────────────────────────────────────────────────
 
+/**
+ * Blends two Stuart Hall decoding signals (creator-side + brand-side) into a single
+ * bilateral signal. The blended signal represents the combined cultural reception
+ * of both the creator AND the brand by their respective audiences.
+ *
+ * Logic:
+ *   Both Dominant → Dominant (both audiences fully accept their respective entity)
+ *   Both Oppositional → Oppositional (both audiences resist)
+ *   Mixed → Negotiated (audiences are split or partially accepting)
+ */
+function blendDecodingSignals(creatorDecoding: string, brandDecoding: string): string {
+  if (creatorDecoding === "Dominant" && brandDecoding === "Dominant") return "Dominant";
+  if (creatorDecoding === "Oppositional" || brandDecoding === "Oppositional") return "Oppositional";
+  if (creatorDecoding === "Dominant" && brandDecoding === "Negotiated") return "Negotiated";
+  if (creatorDecoding === "Negotiated" && brandDecoding === "Dominant") return "Negotiated";
+  return "Negotiated"; // default: any ambiguity = negotiated
+}
+
 export interface FullFITCalculationInput {
   // Creator fields
   creatorArchetype: string;
@@ -710,6 +728,20 @@ export interface FullFITCalculationInput {
   brandTiktokEngagementRate?: number;  // engagement rate percentage (0-100)
   brandTiktokFollowerCount?: number;   // follower count
   brandTiktokPostFrequency?: string;   // e.g., "daily", "3x per week", "sporadic"
+  // Phase 4: Creator-parity brand sociological framework fields
+  // These are used to improve scoring accuracy by providing brand-side equivalents
+  // of the creator framework signals. When present, they are used to:
+  //   - Alignment: brand's own Stuart Hall decoding (how audience receives the brand)
+  //   - Pulse: brand's Rogers stage + Turner liminal phase (brand's cultural momentum)
+  //   - Stability: brand's Goffman consistency + Drift signal (brand's identity stability)
+  brandGoffmanStageConsistency?: string;  // Consistent / Minor Gap / Significant Gap
+  brandDriftSignal?: string;              // Zero Change / Minor Drift / Significant Drift / Full Pivot
+  brandStuartHallDecoding?: string;       // Dominant / Negotiated / Oppositional
+  brandRogersAdopterStage?: string;       // Innovators / Early Adopters / Early Majority / Late Majority / Laggards
+  brandTurnerLiminalPhase?: string;       // Pre-Liminal / Liminal / Post-Liminal Reintegration
+  brandLifecyclePhase?: string;           // Emergence / Growth / Maturity / Decline
+  brandCulturalCapital?: string;          // Produce / Relay
+  brandAudienceDecodingSplit?: boolean;   // true if audience decoding is split
 }
 
 export interface FullFITResult {
@@ -754,22 +786,74 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
 
   const archetypeMatchScore = getArchetypeMatchScore(input.brandArchetype, input.creatorArchetype);
 
+  // ── BRAND-SIDE FRAMEWORK BLENDING ─────────────────────────────────────────────
+  // When brand-side framework fields are available, we blend them with the
+  // creator-side signals to produce a more accurate bilateral score.
+  //
+  // Scoring logic:
+  //   Alignment: if brand has its own Stuart Hall decoding, average it with creator's
+  //              (brand's audience reception + creator's audience reception = bilateral signal)
+  //   Pulse:     if brand has Rogers/Turner, average brand's pulse with creator's pulse
+  //              (brand's cultural momentum + creator's momentum = combined trajectory)
+  //   Stability: if brand has Goffman/Drift, average brand's stability with creator's stability
+  //              (brand's identity stability + creator's identity stability = partnership durability)
+  //
+  // This bilateral approach is more accurate than using only creator-side signals because
+  // a partnership's success depends on BOTH sides being culturally coherent.
+
+  // Alignment: blend creator's Stuart Hall with brand's Stuart Hall (if available)
+  const effectiveStuartHall = input.brandStuartHallDecoding
+    ? blendDecodingSignals(input.stuartHallDecoding, input.brandStuartHallDecoding)
+    : input.stuartHallDecoding;
+
   const { raw: alignmentRaw, decodingModifier } = calculateAlignmentScore({
     archetypeMatchScore,
     mythAlignmentScore: input.mythAlignmentScore,
     tribMatchScore: input.tribMatchScore,
-    stuartHallDecoding: input.stuartHallDecoding,
+    stuartHallDecoding: effectiveStuartHall,
   });
 
-  const { raw: pulseRaw, rogersBase, liminalAdjustment } = calculatePulseScore({
+  // Pulse: blend creator's Rogers/Turner with brand's Rogers/Turner (if available)
+  const creatorPulse = calculatePulseScore({
     rogersAdopterStage: input.rogersAdopterStage,
     turnerLiminalPhase: input.turnerLiminalPhase,
+    brandTiktokEngagementRate: input.brandTiktokEngagementRate,
+    brandTiktokPostFrequency: input.brandTiktokPostFrequency,
   });
+  let pulseRaw = creatorPulse.raw;
+  const rogersBase = creatorPulse.rogersBase;
+  const liminalAdjustment = creatorPulse.liminalAdjustment;
 
-  const { raw: stabilityRaw, goffmanScore, driftScore } = calculateStabilityScore({
+  if (input.brandRogersAdopterStage && input.brandTurnerLiminalPhase) {
+    const brandPulse = calculatePulseScore({
+      rogersAdopterStage: input.brandRogersAdopterStage,
+      turnerLiminalPhase: input.brandTurnerLiminalPhase,
+    });
+    // Weighted blend: creator pulse (60%) + brand pulse (40%)
+    // Creator momentum matters more because they are the cultural carrier
+    pulseRaw = Math.round((creatorPulse.raw * 0.6 + brandPulse.raw * 0.4) * 10) / 10;
+  }
+
+  // Stability: blend creator's Goffman/Drift with brand's Goffman/Drift (if available)
+  const creatorStability = calculateStabilityScore({
     goffmanStageConsistency: input.goffmanStageConsistency,
     driftSignal: input.driftSignal,
+    brandTiktokFollowerCount: input.brandTiktokFollowerCount,
+    brandTiktokEngagementRate: input.brandTiktokEngagementRate,
   });
+  let stabilityRaw = creatorStability.raw;
+  const goffmanScore = creatorStability.goffmanScore;
+  const driftScore = creatorStability.driftScore;
+
+  if (input.brandGoffmanStageConsistency && input.brandDriftSignal) {
+    const brandStability = calculateStabilityScore({
+      goffmanStageConsistency: input.brandGoffmanStageConsistency,
+      driftSignal: input.brandDriftSignal,
+    });
+    // Weighted blend: creator stability (50%) + brand stability (50%)
+    // Equal weight: both sides must be stable for a durable partnership
+    stabilityRaw = Math.round((creatorStability.raw * 0.5 + brandStability.raw * 0.5) * 10) / 10;
+  }
 
   const { caiScore, caiStatus } = calculateFITScore({
     alignmentRaw,

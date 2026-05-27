@@ -260,6 +260,38 @@ export interface BrandExtractionResult {
   brandTone: string;  // 2-3 words, e.g. "formal, institutional, aspirational"
   brandType: string;
   campaignType: "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration";
+
+  // ── Creator-parity sociological framework fields ──────────────────────────
+  // These mirror the creator extraction fields so both sides of a match
+  // are evaluated using the same analytical frameworks.
+
+  /** Bourdieu: does the brand produce original cultural content or relay/amplify others? */
+  brandCulturalCapital: "Produce" | "Relay";
+
+  /** Goffman: does the brand's self-presentation match how customers/audience actually experience it? */
+  brandGoffmanStageConsistency: "Consistent" | "Minor Gap" | "Significant Gap";
+
+  /** Brand identity drift over the past 6-12 months — is the brand's positioning stable or shifting? */
+  brandDriftSignal: "Zero Change" | "Minor Drift" | "Significant Drift" | "Full Pivot";
+
+  /** Stuart Hall: how does the brand's target audience decode its messaging? */
+  brandStuartHallDecoding: "Dominant" | "Negotiated" | "Oppositional";
+
+  /** Rogers: where is this brand in the cultural adoption curve? */
+  brandRogersAdopterStage: "Innovators" | "Early Adopters" | "Early Majority" | "Late Majority" | "Laggards";
+
+  /** Turner: what liminal phase is the brand currently in? */
+  brandTurnerLiminalPhase: "Pre-Liminal" | "Liminal" | "Post-Liminal Reintegration";
+
+  /** Where is this brand in its category lifecycle? */
+  brandLifecyclePhase: "Emergence" | "Growth" | "Maturity" | "Decline";
+
+  /** The symbolic/mythic meaning this brand's category occupies in culture (Barthes niche layer) */
+  brandBarthesNicheMeaning: string;
+
+  /** Is there a split in how different audience segments decode this brand? */
+  brandAudienceDecodingSplit: boolean;
+
   aiSummary: string;
 }
 
@@ -405,7 +437,56 @@ Based on the evidence above, output a JSON object with EXACTLY these fields:
   "brandArchetypeClassification": ONE OF EXACTLY: "Trust" | "Community" | "Momentum" — the governing structural archetype for this brand based on Chapter 3 logic,
   "brandType": ONE OF EXACTLY: ${JSON.stringify(brandTypeOptions)},
   "campaignType": "Heritage/Luxury" | "Trend-First" | "Long-Term Ambassador" | "Product Launch" | "Community/Local" | "Awareness/Consideration",
-  "aiSummary": "A 2-3 sentence cultural analyst summary of this brand's symbolic position, target audience, and creator partnership strategy. Include which Brand Archetype this is (Trust/Community/Momentum) and why."
+
+  // ── SOCIOLOGICAL FRAMEWORK FIELDS (creator-parity analysis) ──
+  // These apply the same analytical frameworks used for creators, but from the brand's perspective.
+  // They directly improve scoring accuracy by giving the engine brand-side equivalents of creator signals.
+
+  "brandCulturalCapital": ONE OF EXACTLY: "Produce" | "Relay"
+    — Bourdieu: Does this brand PRODUCE original cultural content (original campaigns, thought leadership, proprietary aesthetics, cultural movements) or does it RELAY/amplify existing culture (trend-chasing, influencer-dependent, reactive)?
+    — PRODUCE: brand creates the culture others follow. RELAY: brand borrows and amplifies culture others created.
+    — Evidence: original brand campaigns, proprietary content, cultural IP vs. heavy influencer dependency, trend-following.
+
+  "brandGoffmanStageConsistency": ONE OF EXACTLY: "Consistent" | "Minor Gap" | "Significant Gap"
+    — Goffman: Does the brand's FRONT STAGE (website, marketing, self-presentation) match its BACK STAGE (how customers actually experience it in reviews, social media, word of mouth)?
+    — Consistent: marketing matches reality. Minor Gap: small discrepancy. Significant Gap: major mismatch (e.g. claims premium quality but reviews show inconsistency).
+    — Evidence: compare website/marketing claims against review language and customer experience.
+
+  "brandDriftSignal": ONE OF EXACTLY: "Zero Change" | "Minor Drift" | "Significant Drift" | "Full Pivot"
+    — Is this brand's cultural positioning STABLE or SHIFTING over the past 6-12 months?
+    — Zero Change: consistent identity. Minor Drift: small evolution. Significant Drift: noticeable repositioning. Full Pivot: complete identity change.
+    — Evidence: TikTok content evolution, website rebrand signals, campaign history, category shifts.
+
+  "brandStuartHallDecoding": ONE OF EXACTLY: "Dominant" | "Negotiated" | "Oppositional"
+    — Stuart Hall: How does the brand's PRIMARY TARGET AUDIENCE decode its messaging?
+    — Dominant: audience fully accepts the brand's intended meaning (e.g. Nike = achievement, universally accepted). Negotiated: audience partially accepts but adapts (e.g. luxury brand decoded as aspirational but not attainable). Oppositional: audience resists or rejects the brand's self-presentation (e.g. brand claims community but audience sees it as corporate).
+    — Evidence: review sentiment, social media response, gap between brand claims and audience language.
+
+  "brandRogersAdopterStage": ONE OF EXACTLY: "Innovators" | "Early Adopters" | "Early Majority" | "Late Majority" | "Laggards"
+    — Rogers: Where is this brand in the cultural adoption curve within its category?
+    — Innovators: brand is pioneering a new category or approach. Early Adopters: brand is ahead of mainstream, sought by tastemakers. Early Majority: brand is mainstream and widely adopted. Late Majority: brand is declining in cultural relevance. Laggards: brand is behind the curve.
+    — Evidence: category position, competitor landscape, cultural momentum signals, TikTok engagement trends.
+
+  "brandTurnerLiminalPhase": ONE OF EXACTLY: "Pre-Liminal" | "Liminal" | "Post-Liminal Reintegration"
+    — Turner: What transitional phase is this brand currently in?
+    — Pre-Liminal: brand is stable, established, not in transition. Liminal: brand is in active transition (rebrand, repositioning, new market entry, post-crisis recovery). Post-Liminal Reintegration: brand has completed a transition and is re-establishing its identity.
+    — Evidence: recent rebrands, new product lines, market expansion, crisis recovery, ownership changes.
+
+  "brandLifecyclePhase": ONE OF EXACTLY: "Emergence" | "Growth" | "Maturity" | "Decline"
+    — Where is this brand in its overall business and cultural lifecycle?
+    — Emergence: new brand, building awareness. Growth: expanding rapidly, gaining market share. Maturity: established, stable, defending position. Decline: losing relevance, shrinking.
+    — Evidence: founding year, growth trajectory, market position, category saturation.
+
+  "brandBarthesNicheMeaning": string
+    — Barthes niche layer: What symbolic/mythic meaning does this brand's CATEGORY occupy in culture?
+    — Complete this sentence: "In culture, [brand category] symbolizes ___."
+    — Example: "In culture, luxury skincare symbolizes the belief that self-care is a form of social status."
+    — This is about the CATEGORY myth, not the brand's individual myth (which is barthesMyth above).
+
+  "brandAudienceDecodingSplit": boolean
+    — Is there evidence of a SPLIT in how different audience segments decode this brand?
+    — true: different groups interpret the brand very differently (e.g. one group sees it as authentic, another as corporate). false: audience decoding is relatively unified.
+    — Evidence: review polarity, social media debate, demographic differences in brand perception.
 }
 
 IMPORTANT: brandArchetypeClassification and brandType must be consistent. Trust brands → Medical, Legal, Financial, Insurance, Children's, Home Renovation. Community brands → Fitness, Boutique Retail, Specialty Café, Wellness, Pet, Hair Care, Home Décor. Momentum brands → Makeup/Color, QSR, Streetwear, CPG, Craft Beverage, Seasonal Campaigns, Tech.
@@ -445,12 +526,25 @@ Be specific and evidence-based. Every field must be populated. Output only valid
             brandArchetypeClassification: { type: "string", enum: ["Trust", "Community", "Momentum"] },
             brandType: { type: "string" },
             campaignType: { type: "string", enum: ["Heritage/Luxury", "Trend-First", "Long-Term Ambassador", "Product Launch", "Community/Local", "Awareness/Consideration"] },
+            // Creator-parity sociological framework fields
+            brandCulturalCapital: { type: "string", enum: ["Produce", "Relay"] },
+            brandGoffmanStageConsistency: { type: "string", enum: ["Consistent", "Minor Gap", "Significant Gap"] },
+            brandDriftSignal: { type: "string", enum: ["Zero Change", "Minor Drift", "Significant Drift", "Full Pivot"] },
+            brandStuartHallDecoding: { type: "string", enum: ["Dominant", "Negotiated", "Oppositional"] },
+            brandRogersAdopterStage: { type: "string", enum: ["Innovators", "Early Adopters", "Early Majority", "Late Majority", "Laggards"] },
+            brandTurnerLiminalPhase: { type: "string", enum: ["Pre-Liminal", "Liminal", "Post-Liminal Reintegration"] },
+            brandLifecyclePhase: { type: "string", enum: ["Emergence", "Growth", "Maturity", "Decline"] },
+            brandBarthesNicheMeaning: { type: "string" },
+            brandAudienceDecodingSplit: { type: "boolean" },
             aiSummary: { type: "string" },
           },
           required: [
             "brandName", "category", "archetype", "brandArchetypeClassification",
             "emotionalPromise", "visualLanguage",
-            "audienceTribe", "culturalTension", "barthesMyth", "brandTone", "brandType", "campaignType", "aiSummary",
+            "audienceTribe", "culturalTension", "barthesMyth", "brandTone", "brandType", "campaignType",
+            "brandCulturalCapital", "brandGoffmanStageConsistency", "brandDriftSignal", "brandStuartHallDecoding",
+            "brandRogersAdopterStage", "brandTurnerLiminalPhase", "brandLifecyclePhase",
+            "brandBarthesNicheMeaning", "brandAudienceDecodingSplit", "aiSummary",
           ],
           additionalProperties: false,
         },

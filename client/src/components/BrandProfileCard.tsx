@@ -517,6 +517,114 @@ export default function BrandProfileCard({ profile, compact = false, onReanalyze
           {/* Audience Perception Panel */}
           <AudiencePerceptionPanel profile={profile} />
 
+          {/* Field Note Two: Brand Identity Framework */}
+          {((profile as any).brandGoffmanStageConsistency || (profile as any).brandStuartHallDecoding || (profile as any).brandCulturalCapital) && (
+            <div>
+              <div className="mb-4">
+                <h4 className="text-xs font-semibold tracking-[0.1em] uppercase text-muted-foreground">
+                  Field Note Two: Brand Identity Framework
+                </h4>
+                <p className="text-xs text-muted-foreground/60 mt-0.5">Bourdieu · Goffman · Stuart Hall · Symbolic Capital</p>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { key: "brandCulturalCapital", label: "Cultural Capital [Bourdieu]", type: "badge" },
+                  { key: "brandGoffmanStageConsistency", label: "Stage Test [Goffman]", type: "status" },
+                  { key: "brandDriftSignal", label: "Brand Drift Signal", type: "status" },
+                  { key: "brandStuartHallDecoding", label: "Audience Decoding [Stuart Hall]", type: "status" },
+                  { key: "brandAudienceDecodingSplit", label: "Audience Decoding Split", type: "boolean" },
+                ].map((field) => {
+                  const raw = (profile as any)[field.key];
+                  if (raw === null || raw === undefined) return null;
+                  let displayValue: React.ReactNode;
+                  if (field.type === "status") {
+                    const statusColors: Record<string, string> = {
+                      Consistent: "text-green-400 bg-green-400/10 border-green-400/30",
+                      "Minor Gap": "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
+                      "Significant Gap": "text-red-400 bg-red-400/10 border-red-400/30",
+                      "Zero Change": "text-green-400 bg-green-400/10 border-green-400/30",
+                      "Minor Drift": "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
+                      "Significant Drift": "text-orange-400 bg-orange-400/10 border-orange-400/30",
+                      "Full Pivot": "text-red-400 bg-red-400/10 border-red-400/30",
+                      Dominant: "text-green-400 bg-green-400/10 border-green-400/30",
+                      Negotiated: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
+                      Oppositional: "text-red-400 bg-red-400/10 border-red-400/30",
+                    };
+                    const colorClass = statusColors[String(raw)] ?? "text-primary bg-primary/10 border-primary/30";
+                    displayValue = (
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${colorClass}`}>
+                        {String(raw)}
+                      </span>
+                    );
+                  } else if (field.type === "boolean") {
+                    displayValue = (
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                        raw ? "text-amber-400 bg-amber-400/10 border-amber-400/30" : "text-green-400 bg-green-400/10 border-green-400/30"
+                      }`}>
+                        {raw ? "Split Detected" : "Unified"}
+                      </span>
+                    );
+                  } else {
+                    displayValue = (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-primary/30 bg-primary/10 text-primary">
+                        {String(raw)}
+                      </span>
+                    );
+                  }
+                  return (
+                    <div key={field.key} className="grid grid-cols-[1fr_1.5fr] gap-4 items-start py-2 border-b border-border/30 last:border-0">
+                      <span className="text-xs text-muted-foreground pt-0.5">{field.label}</span>
+                      {displayValue}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Field Note Three: Brand Cultural Trajectory */}
+          {((profile as any).brandRogersAdopterStage || (profile as any).brandLifecyclePhase || (profile as any).brandBarthesNicheMeaning) && (
+            <div>
+              <div className="mb-4">
+                <h4 className="text-xs font-semibold tracking-[0.1em] uppercase text-muted-foreground">
+                  Field Note Three: Brand Cultural Trajectory
+                </h4>
+                <p className="text-xs text-muted-foreground/60 mt-0.5">Rogers · Turner · Barthes — Lifecycle & Momentum Analysis</p>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { key: "brandRogersAdopterStage", label: "Rogers Adopter Stage", type: "badge" },
+                  { key: "brandTurnerLiminalPhase", label: "Liminal Phase [Turner]", type: "badge" },
+                  { key: "brandLifecyclePhase", label: "Lifecycle Phase", type: "badge" },
+                  { key: "brandBarthesNicheMeaning", label: "Meaning Check [Barthes]", type: "quote" },
+                ].map((field) => {
+                  const raw = (profile as any)[field.key];
+                  if (raw === null || raw === undefined) return null;
+                  let displayValue: React.ReactNode;
+                  if (field.type === "quote") {
+                    displayValue = (
+                      <blockquote className="border-l-2 border-primary/30 pl-3 text-sm text-foreground/80 italic leading-relaxed">
+                        {String(raw)}
+                      </blockquote>
+                    );
+                  } else {
+                    displayValue = (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-primary/30 bg-primary/10 text-primary">
+                        {String(raw)}
+                      </span>
+                    );
+                  }
+                  return (
+                    <div key={field.key} className="grid grid-cols-[1fr_1.5fr] gap-4 items-start py-2 border-b border-border/30 last:border-0">
+                      <span className="text-xs text-muted-foreground pt-0.5">{field.label}</span>
+                      {displayValue}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Brand Symbol Decoder Panel */}
           <BrandSymbolDecoderPanel profile={profile} />
 

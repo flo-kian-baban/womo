@@ -14,6 +14,7 @@ import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES 
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata } from "./brandTikTokAnalysis";
+import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
 
 export const appRouter = router({
   system: systemRouter,
@@ -310,7 +311,86 @@ export const appRouter = router({
       }),
   }),
 
-  // ─── Brand Routes ───────────────────────────────────────────────────────────
+
+    bulkAnalyze: publicProcedure
+      .input(z.object({
+        handles: z.array(z.string().min(1)),
+        platform: z.enum(["TikTok", "YouTube", "Multi"]),
+      }))
+      .mutation(async ({ input }) => {
+        // Create a bulk job
+        const job = createBulkCreatorJob(input.handles, input.platform);
+        
+        // Start processing in background (non-blocking)
+        // In production, this would be queued to a job processor
+        (async () => {
+          markJobProcessing(job.jobId);
+          
+          for (let i = 0; i < input.handles.length; i++) {
+            try {
+              const handle = input.handles[i];
+              // Call the regular analyze endpoint
+              const research = await researchCreator(handle, input.platform);
+              const extracted = await extractCreatorProfile(handle, input.platform, research.evidenceSummary);
+              
+              const result = await createCreatorProfile({
+                handle: handle,
+                platform: input.platform,
+                profileUrl: research.profileUrl ?? "",
+                archetype: extracted.archetype ?? "The Everyman",
+                audienceRelationshipType: extracted.audienceRelationshipType,
+                barthesMyth: extracted.barthesMyth,
+                culturalCapital: extracted.culturalCapital,
+                goffmanStageConsistency: extracted.goffmanStageConsistency,
+                driftSignal: extracted.driftSignal,
+                stuartHallDecoding: extracted.stuartHallDecoding,
+                nicheTopicNode: extracted.nicheTopicNode,
+                undergroundDensity: extracted.undergroundDensity,
+                mainstreamBleed: extracted.mainstreamBleed,
+                remixRate: extracted.remixRate,
+                brandSaturation: extracted.brandSaturation,
+                rogersAdopterStage: extracted.rogersAdopterStage,
+                creatorNichePosition: extracted.creatorNichePosition,
+                lifecyclePhase: extracted.lifecyclePhase,
+                barthesNicheMeaning: extracted.barthesNicheMeaning,
+                turnerLiminalPhase: extracted.turnerLiminalPhase,
+                pronouns: extracted.pronouns,
+                aiSummary: extracted.aiSummary,
+                rawAiResponse: extracted as unknown as Record<string, unknown>,
+                followerCount: research.followerCount ?? undefined,
+                totalLikes: research.totalLikes ?? undefined,
+                videoCount: research.videoCount ?? undefined,
+                totalViews: research.totalViews ?? undefined,
+                avgViews: research.avgViews ?? undefined,
+                engagementRate: research.engagementRate ?? undefined,
+                location: research.location ?? undefined,
+                rawKeywords: research.rawKeywords ?? undefined,
+                contentThemeLabels: research.contentThemeLabels ?? undefined,
+                topHashtags: research.topHashtags ?? undefined,
+                recentVideoTitles: research.recentVideoTitles ?? undefined,
+                transcriptCount: research.transcriptCount ?? 0,
+                transcriptExcerpts: research.transcriptExcerpts ?? undefined,
+                decodedSymbols: research.decodedSymbols ?? undefined,
+                culturalVelocity: research.culturalVelocity ?? undefined,
+                dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+                longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+                discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+              });
+              
+              updateJobResult(job.jobId, i, { creatorId: (result as any).id ?? (result as any).insertId });
+              updateJobProgress(job.jobId, { completed: job.progress.completed + 1 });
+            } catch (err) {
+              recordJobError(job.jobId, i, input.handles[i], String(err));
+            }
+          }
+          
+          markJobCompleted(job.jobId);
+        })().catch(err => console.error("Bulk creator analysis failed:", err));
+        
+        return { jobId: job.jobId };
+      }),
+
+    // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
     analyze: publicProcedure
       .input(z.object({
@@ -400,6 +480,16 @@ export const appRouter = router({
           weightBeta: weights.beta,
           weightGamma: weights.gamma,
           weightPriority: weights.priority,
+          // Creator-parity sociological framework fields
+          brandCulturalCapital: extracted.brandCulturalCapital,
+          brandGoffmanStageConsistency: extracted.brandGoffmanStageConsistency,
+          brandDriftSignal: extracted.brandDriftSignal,
+          brandStuartHallDecoding: extracted.brandStuartHallDecoding,
+          brandRogersAdopterStage: extracted.brandRogersAdopterStage,
+          brandTurnerLiminalPhase: extracted.brandTurnerLiminalPhase,
+          brandLifecyclePhase: extracted.brandLifecyclePhase,
+          brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
+          brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
           ...reviewFields,
           ...symbolFields,
           tiktokChannelUrl: input.tiktokChannelUrl || undefined,
@@ -489,6 +579,16 @@ export const appRouter = router({
           weightBeta: weights.beta,
           weightGamma: weights.gamma,
           weightPriority: weights.priority,
+          // Creator-parity sociological framework fields
+          brandCulturalCapital: extracted.brandCulturalCapital,
+          brandGoffmanStageConsistency: extracted.brandGoffmanStageConsistency,
+          brandDriftSignal: extracted.brandDriftSignal,
+          brandStuartHallDecoding: extracted.brandStuartHallDecoding,
+          brandRogersAdopterStage: extracted.brandRogersAdopterStage,
+          brandTurnerLiminalPhase: extracted.brandTurnerLiminalPhase,
+          brandLifecyclePhase: extracted.brandLifecyclePhase,
+          brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
+          brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
           ...reviewFields,
           ...symbolFields,
           aiSummary: extracted.aiSummary,
@@ -508,7 +608,7 @@ export const appRouter = router({
     }),
   }),
 
-  // ─── F.I.T. Score Routes ────────────────────────────────────────────────────
+    // ─── F.I.T. Score Routes ─────────────────────────────────────────────────────────────────────────────
   fit: router({
     calculate: publicProcedure
       .input(z.object({
@@ -629,6 +729,15 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           brandTiktokEngagementRate: brand.tiktokEngagementRate ?? undefined,
           brandTiktokFollowerCount: brand.tiktokAudienceSize ?? undefined,
           brandTiktokPostFrequency: brand.tiktokMetadata ? (brand.tiktokMetadata as any).postFrequency : undefined,
+          // Phase 4: Brand-side sociological framework fields (bilateral scoring)
+          brandGoffmanStageConsistency: (brand as any).brandGoffmanStageConsistency ?? undefined,
+          brandDriftSignal: (brand as any).brandDriftSignal ?? undefined,
+          brandStuartHallDecoding: (brand as any).brandStuartHallDecoding ?? undefined,
+          brandRogersAdopterStage: (brand as any).brandRogersAdopterStage ?? undefined,
+          brandTurnerLiminalPhase: (brand as any).brandTurnerLiminalPhase ?? undefined,
+          brandLifecyclePhase: (brand as any).brandLifecyclePhase ?? undefined,
+          brandCulturalCapital: (brand as any).brandCulturalCapital ?? undefined,
+          brandAudienceDecodingSplit: (brand as any).brandAudienceDecodingSplit ?? undefined,
         });
 
         // Generate Synergy Narrative + Content Directions
@@ -794,6 +903,21 @@ Write the following in JSON format:
           brand,
           result,
           narrative,
+        };
+      }),
+
+    getJobProgress: publicProcedure
+      .input(z.object({ jobId: z.string() }))
+      .query(({ input }) => {
+        const job = getJob(input.jobId);
+        if (!job) {
+          throw new Error("Job not found");
+        }
+        return {
+          jobId: job.jobId,
+          type: job.type,
+          progress: job.progress,
+          results: job.results,
         };
       }),
 

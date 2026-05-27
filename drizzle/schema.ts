@@ -182,6 +182,20 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   overallRating: float("overallRating"),
   totalReviews: int("totalReviews").default(0),
 
+  // ── Creator-parity sociological framework fields ──────────────────────────────
+  // These mirror the creator extraction fields so both sides of a match use the same frameworks.
+  // They feed directly into Alignment (stuartHallDecoding), Pulse (rogersAdopterStage + turnerLiminalPhase),
+  // and Stability (goffmanStageConsistency + driftSignal) scoring.
+  brandCulturalCapital: mysqlEnum("brandCulturalCapital", ["Produce", "Relay"]),
+  brandGoffmanStageConsistency: mysqlEnum("brandGoffmanStageConsistency", ["Consistent", "Minor Gap", "Significant Gap"]),
+  brandDriftSignal: mysqlEnum("brandDriftSignal", ["Zero Change", "Minor Drift", "Significant Drift", "Full Pivot"]),
+  brandStuartHallDecoding: mysqlEnum("brandStuartHallDecoding", ["Dominant", "Negotiated", "Oppositional"]),
+  brandRogersAdopterStage: mysqlEnum("brandRogersAdopterStage", ["Innovators", "Early Adopters", "Early Majority", "Late Majority", "Laggards"]),
+  brandTurnerLiminalPhase: mysqlEnum("brandTurnerLiminalPhase", ["Pre-Liminal", "Liminal", "Post-Liminal Reintegration"]),
+  brandLifecyclePhase: mysqlEnum("brandLifecyclePhase", ["Emergence", "Growth", "Maturity", "Decline"]),
+  brandBarthesNicheMeaning: text("brandBarthesNicheMeaning"),
+  brandAudienceDecodingSplit: boolean("brandAudienceDecodingSplit"),
+
   // Brand Symbol Decoder — semantic artifacts (mirrors creator-side decodedSymbols)
   // rawKeywords: flat list of culturally significant words for trend tracking over time
   brandRawKeywords: json("brandRawKeywords"),       // string[] — 10-30 keywords from website + reviews
