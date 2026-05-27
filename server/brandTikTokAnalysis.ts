@@ -97,29 +97,29 @@ export async function analyzeBrandTikTokChannel(
     let averageViews: number | undefined;
 
     try {
-      userInfo = await callDataApi("TikTok/get_user_info", {
-        query: { username: handle },
+      userInfo = await callDataApi("Tiktok/get_user_info", {
+        query: { uniqueId: handle },
       });
       
-      if (userInfo?.user) {
-        followerCount = userInfo.user.stats?.followerCount;
-        bioText = userInfo.user.signature;
+      if (userInfo?.userInfo?.user) {
+        const user = userInfo.userInfo.user;
+        followerCount = userInfo.userInfo.stats?.followerCount;
+        bioText = user.signature || user.desc;
         console.info(`[analyzeBrandTikTokChannel] Found @${handle} with ${followerCount?.toLocaleString()} followers`);
       }
     } catch (err) {
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch user info for @${handle}:`, err);
     }
 
-    // Step 2: Fetch recent videos
+    // Step 2: Fetch recent videos using search API
     try {
-      const videosResult = await callDataApi("TikTok/get_user_post_list", {
+      const videosResult = await callDataApi("Tiktok/search_tiktok_video_general", {
         query: {
-          username: handle,
-          count: "15",
+          keyword: handle,
         },
       });
       
-      videos = (videosResult as any)?.videos || [];
+      videos = (videosResult as any)?.data || [];
       console.info(`[analyzeBrandTikTokChannel] Fetched ${videos.length} recent videos for @${handle}`);
     } catch (err) {
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch videos for @${handle}:`, err);
@@ -135,12 +135,12 @@ export async function analyzeBrandTikTokChannel(
     if (videos.length > 0) {
       for (const video of videos) {
         const desc = video.desc || "";
-        const videoId = video.id || video.videoId || "";
-        const createTime = video.createTime || video.created_time;
-        const playCount = video.stats?.playCount || 0;
-        const commentCount = video.stats?.commentCount || 0;
-        const shareCount = video.stats?.shareCount || 0;
-        const diggCount = video.stats?.diggCount || 0;
+        const videoId = video.aweme_id || video.id || video.videoId || "";
+        const createTime = video.create_time || video.createTime || video.created_time;
+        const playCount = video.statistics?.play_count || video.stats?.playCount || 0;
+        const commentCount = video.statistics?.comment_count || video.stats?.commentCount || 0;
+        const shareCount = video.statistics?.share_count || video.stats?.shareCount || 0;
+        const diggCount = video.statistics?.digg_count || video.stats?.diggCount || 0;
 
         totalViews += playCount;
         totalEngagement += commentCount + shareCount + diggCount;
