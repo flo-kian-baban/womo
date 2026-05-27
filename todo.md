@@ -770,3 +770,15 @@
 - [x] Update SignalPanel.tsx, CreatorComparisonView.tsx, Library.tsx, MatchReport.tsx, CAIScore.tsx to use toFixed(2)
 - [x] Maintain one decimal place for other metrics (engagement rates, follower counts, ratings, weights)
 - [x] TypeScript check: 0 errors
+
+
+## Phase 8: Enhanced Brand Data Extraction & Performance Signals
+- [x] Enhance brand website crawling: extract metadata, Open Graph tags, keywords, structured data (JSON-LD)
+- [x] Add Google Search API fallback for brand descriptions when website crawl is insufficient
+- [x] Extract keywords from TikTok mention data (hashtags, captions) and make available for performance signals
+- [x] Update Creative Integrity signal: boost score when brand has positive mention sentiment
+- [x] Update Community Quality signal: boost score when creator and brand mention hashtags overlap
+- [x] Update Brand Trust signal: apply mention sentiment modifiers and review rating bonuses
+- [x] Write Phase 8 vitest tests (14 tests covering all new signal variations)
+- [x] All 60 tests pass
+- [x] Save checkpoint

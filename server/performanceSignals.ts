@@ -38,12 +38,24 @@ export function calculateCreativeIntegritySignal(
     score += creatorIntegrity * 0.3; // 30% weight to creator side
   }
 
-  // Brand side: tone clarity + archetype strength
+  // Brand side: tone clarity + archetype strength + mention consistency
   if (brand.brandTone && brand.archetype) {
     const toneClarity =
       brand.brandTone && brand.brandTone.length > 10 ? 10 : 5;
     const archetypeStrength = brand.archetype ? 8 : 4;
-    const brandIntegrity = (toneClarity + archetypeStrength) / 2;
+    
+    // Bonus: if brand has TikTok mention data showing consistent audience perception
+    let mentionBonus = 0;
+    const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
+    const mentionSentiment = tiktokMeta?.mentionSentiment as string | undefined;
+    const mentionCount = (tiktokMeta?.totalMentions as number) ?? 0;
+    if (mentionSentiment === "positive" && mentionCount >= 5) {
+      mentionBonus = 3; // audience confirms brand identity
+    } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
+      mentionBonus = 1; // some audience confirmation
+    }
+    
+    const brandIntegrity = (toneClarity + archetypeStrength + mentionBonus) / 3;
     score += brandIntegrity * 0.3; // 30% weight to brand side
   }
 
@@ -164,6 +176,23 @@ export function calculateCommunityQualitySignal(
     // Check if creator's audience relationship aligns with brand positioning
     score += 5; // bonus for having audience relationship data
   }
+  
+  // TikTok mention keyword overlap: if brand mentions show audience keywords that match creator's audience
+  const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
+  const mentionHashtags = (tiktokMeta?.mentionHashtags as string[]) ?? [];
+  const creatorKeywords = (creator.rawKeywords as string[]) ?? [];
+  if (mentionHashtags.length > 0 && creatorKeywords.length > 0) {
+    const hashtagSet = new Set(mentionHashtags.map(h => h.toLowerCase()));
+    const keywordSet = new Set(creatorKeywords.map(k => k.toLowerCase()));
+    const overlap = Array.from(hashtagSet).filter(h => keywordSet.has(h)).length;
+    const overlapRatio = overlap / Math.max(hashtagSet.size, keywordSet.size);
+    if (overlapRatio > 0.3) {
+      score += 10; // strong audience alignment
+      confidence = "Verified";
+    } else if (overlapRatio > 0.1) {
+      score += 5; // some audience alignment
+    }
+  }
 
   return {
     score: Math.max(0, Math.min(100, score)),
@@ -267,9 +296,27 @@ export function calculateBrandTrustSignal(
   }
 
   // Brand trustworthiness (if review data available)
-  // This would be derived from brand's review sentiment
   if (brand.archetype) {
     score += 5; // brand has clear identity
+  }
+  
+  // Brand mention sentiment: positive mentions boost trust, negative reduce it
+  const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
+  const mentionSentiment = tiktokMeta?.mentionSentiment as string | undefined;
+  const mentionCount = (tiktokMeta?.totalMentions as number) ?? 0;
+  if (mentionSentiment === "positive" && mentionCount >= 5) {
+    score += 15; // audience confirms brand trustworthiness
+    confidence = "Verified";
+  } else if (mentionSentiment === "negative" && mentionCount >= 5) {
+    score -= 15; // audience signals distrust
+  } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
+    score += 5; // mixed signals
+  }
+  
+  // Brand review rating (if available)
+  if (brand.overallRating !== null && brand.overallRating !== undefined) {
+    const ratingBonus = Math.min((brand.overallRating - 3) * 10, 15); // 3.0 = 0 bonus, 5.0 = 20 bonus
+    score += ratingBonus;
   }
 
   return {

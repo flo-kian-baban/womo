@@ -1849,7 +1849,9 @@ function extractSemanticLinks(html: string, baseUrl: string): string[] {
   const semanticPatterns = [
     /about/i, /story/i, /mission/i, /values/i, /culture/i, /blog/i,
     /journal/i, /manifesto/i, /philosophy/i, /vision/i, /team/i, /who-we-are/i,
+    /products?/i, /services?/i, /solutions?/i, /features?/i, /why-us/i, /our-story/i,
   ];
+
 
   const links: string[] = [];
   const seen = new Set<string>();
@@ -1909,17 +1911,36 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
       const html = await fetchHtml(url);
       crawledPages.push(url);
 
-      // Extract metadata
+      // Extract metadata (standard + Open Graph + keywords)
       const metaDesc = html.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
+      const ogDesc = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1] ?? "";
+      const keywords = html.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i)?.[1] ?? "";
       const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
+      const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1] ?? "";
+      
       if (metaDesc) snippets.push(`Page description (${new URL(url).pathname}): ${metaDesc}`);
+      if (ogDesc && ogDesc !== metaDesc) snippets.push(`OG description: ${ogDesc}`);
+      if (keywords) snippets.push(`Keywords: ${keywords}`);
       if (title && crawledPages.length === 1) snippets.push(`Website title: ${title}`);
+      if (ogTitle && ogTitle !== title && crawledPages.length === 1) snippets.push(`OG title: ${ogTitle}`);
 
-      // Extract headings
+      // Extract headings (h1-h3)
       const headings = html.match(/<h[123][^>]*>([^<]+)<\/h[123]>/gi) ?? [];
-      for (const h of headings.slice(0, 8)) {
+      for (const h of headings.slice(0, 10)) {
         const text = h.replace(/<[^>]+>/g, "").trim();
         if (text.length > 5) snippets.push(`Heading (${new URL(url).pathname}): ${text}`);
+      }
+      
+      // Extract structured data (JSON-LD schema.org)
+      const jsonLdMatches = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([^<]+)<\/script>/gi) ?? [];
+      for (const jsonLd of jsonLdMatches.slice(0, 2)) {
+        try {
+          const jsonStr = jsonLd.replace(/<[^>]+>/g, "");
+          const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+          if (parsed.description) snippets.push(`Schema description: ${parsed.description}`);
+          if (parsed.name) snippets.push(`Schema name: ${parsed.name}`);
+          if (parsed.sameAs) snippets.push(`Schema social: ${JSON.stringify(parsed.sameAs)}`);
+        } catch { /* ignore parse errors */ }
       }
 
       // Extract body text
@@ -1980,7 +2001,31 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     }
   }
 
-  if (!isUrl || snippets.length < 2) {
+  // Fallback: If crawl was insufficient or no URL provided, use Google Search API first
+  if (!isUrl || semanticWordCount < 500) {
+    try {
+      const googleResponse = await callDataApi("Google/search", {
+        query: { q: `${brandName} company about mission values`, gl: "US", hl: "en" },
+      }) as Record<string, unknown>;
+      const results = (googleResponse?.results as unknown[]) ?? [];
+      for (const result of results.slice(0, 3)) {
+        const item = result as Record<string, unknown>;
+        const title = (item?.title as string) ?? "";
+        const snippet = (item?.snippet as string) ?? "";
+        if (title) snippets.push(`Google: ${title}`);
+        if (snippet) snippets.push(`${snippet}`);
+      }
+      if (!description && snippets.length > 0) {
+        description = snippets.join(" | ").slice(0, 2000);
+      }
+      console.log(`[webResearch] Brand ${brandName}: supplemented with Google Search results`);
+    } catch (err) {
+      console.warn("[webResearch] Brand Google search failed (non-fatal):", err);
+    }
+  }
+
+  // Secondary fallback: YouTube search if still insufficient
+  if (!isUrl || (snippets.length < 3 && semanticWordCount < 300)) {
     try {
       const ytResponse = await callDataApi("Youtube/search", {
         query: { q: `${brandName} brand about`, hl: "en", gl: "US" },
@@ -1991,15 +2036,15 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
         if (videoData) {
           const title = (videoData?.title as string) ?? "";
           const desc = (videoData?.descriptionSnippet as string) ?? "";
-          if (title) snippets.push(`YouTube result: ${title}`);
-          if (desc) snippets.push(`YouTube description: ${desc}`);
+          if (title) snippets.push(`YouTube: ${title}`);
+          if (desc) snippets.push(`${desc}`);
         }
       }
       if (!description && snippets.length > 0) {
         description = snippets.join(" | ").slice(0, 1000);
       }
     } catch (err) {
-      console.warn("[webResearch] Brand YouTube search failed:", err);
+      console.warn("[webResearch] Brand YouTube search failed (non-fatal):", err);
     }
   }
 
