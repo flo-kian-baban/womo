@@ -695,3 +695,71 @@
 - [x] All 27 tests passing
 - [x] TypeScript clean
 - [x] Semantic matching integrated into Alignment scoring
+
+
+## Phase 6: Audience-Mention Intelligence + Cultural Exchange Report
+
+### Phase 6A: Full TikTok Mention Data Capture
+- [x] Update brandTikTokAnalysis.ts: search by brand name (not @handle) to capture audience-generated mentions
+- [x] Capture ALL available fields per mention video: desc, textExtra (hashtags), stats, music, createTime, author, challenges
+- [x] Apply temporal weighting: recent mentions (< 3mo) weighted 1.5x, mid (3-12mo) 1.0x, older (> 12mo) 0.5x
+- [x] Aggregate across all mention videos: mentionCaptions[], mentionHashtags[], mentionMusicTitles[], mentionAuthorCount, avgMentionEngagement
+- [x] Detect sentiment signals in captions: positive/mixed/negative tone classification
+- [x] Store mention data in tiktokMetadata JSON (extend existing field)
+
+### Phase 6B: Audience-Mention Decoder
+- [x] Create decodeMentionLanguage() in brandSymbolDecoder.ts: LLM pass over mention captions + hashtags
+- [x] Extract: audienceIdentityClaims, audienceStatusSignals, audienceCommunityRefs, audienceAspirationDrivers
+- [x] Extract: audienceTone (emotional register), audienceSentiment ("positive" | "mixed" | "negative")
+- [x] Extract: audienceMusicSignals (what sounds/genres appear in mention videos)
+- [x] Add mentionDecodedSymbols, mentionRawKeywords, mentionHashtagCloud, mentionSentiment, mentionMusicSignals columns to brand_profiles schema
+- [x] Apply migration via webdev_execute_sql
+
+### Phase 6C: Brand Extraction Prompt Upgrade
+- [x] Update extractBrandProfile() in aiExtraction.ts: receive brand-authored evidence AND audience-mention evidence as separate blocks
+- [x] Prompt explicitly compares brand-authored vs audience-decoded language
+- [x] Audience mentions weighted HIGHER than brand website for: audienceTribe, stuartHallDecoding, goffmanStageConsistency
+- [x] Brand website weighted HIGHER for: archetype, emotionalPromise, visualLanguage
+- [x] Detect Goffman gap: if brand claims X but audience says Y → flag as "Significant Gap"
+- [x] Add audiencePerceptionSummary field to BrandExtractionResult
+
+### Phase 6D: Scoring Engine Updates
+- [x] Negative sentiment modifier: if mentionSentiment = "negative" → Stability -2 to -5 (capped, proportional)
+- [x] Positive sentiment modifier: if mentionSentiment = "positive" → Stability +1 to +2
+- [x] Goffman gap modifier: "Significant Gap" → Stability -3
+- [x] Audience alignment modifier: if creator vocabulary overlaps with MENTION vocabulary (not just brand website) → Alignment +1 to +2
+- [x] Add new Radar Warning: "Audience Perception Gap" — triggered when brand claims ≠ audience perception
+- [x] Add new Radar Warning: "Negative Brand Sentiment" — triggered when mentionSentiment = "negative"
+
+### Phase 6E: Music Signal Comparison
+- [x] Extract music titles from creator longitudinalSample (already stored in DB)
+- [x] Extract music titles from brand mention videos (new from Phase 6A)
+- [x] Build compareMusicSignals(): find overlapping artists/genres/sounds
+- [x] Store musicOverlap[] in match_records schema
+- [x] Add musicOverlap to Cultural Exchange report (non-scoring, informational)
+
+### Phase 6F: Cultural Exchange Report (Side-by-Side UI)
+- [x] Create CulturalExchangePanel.tsx component (inline in MatchReport.tsx)
+- [x] Nine-row comparison table: Creator column | Signal label | Brand column
+  - [x] Row 1: Archetype
+  - [x] Row 2: Audience
+  - [x] Row 3: Tone
+  - [x] Row 4: Myth
+  - [x] Row 5: Musical Leanings
+  - [x] Row 6: Style
+  - [x] Row 7: Reach
+  - [x] Row 8: Engagement
+  - [x] Row 9: Audience Trust
+- [x] Add "Cultural Borrowing" summary block below the table: what the brand gains from this creator
+- [x] Wire CulturalExchangePanel into MatchReport.tsx (new section between Synergy Brief and Scores)
+- [x] Wire CulturalExchangePanel into CAIScore.tsx live result view
+
+### Phase 6G: Testing & Validation
+- [x] Write vitest for mention data capture and temporal weighting
+- [x] Write vitest for audience-mention decoder output structure
+- [x] Write vitest for new scoring modifiers (sentiment, Goffman gap)
+- [x] Write vitest for music overlap comparison
+- [x] Run full test suite: 46 tests pass
+- [x] TypeScript strict mode clean (0 errors)
+- [ ] Test with Winners and Five Guys as real-world validation cases (live API test — deferred to user testing)
+- [x] Save checkpoint

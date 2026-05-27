@@ -1,15 +1,30 @@
+/**
+ * Brand TikTok Analysis
+ *
+ * Two-track pipeline:
+ *
+ * Track A — Channel Data (when brand has a TikTok handle):
+ *   Fetches user info (followers, bio) and searches for brand-owned videos.
+ *   Used for: brand voice, post frequency, owned-content captions.
+ *
+ * Track B — Audience Mention Intelligence (always runs):
+ *   Searches TikTok for the brand NAME (not handle) to capture audience-generated
+ *   content. This is how the audience perceives and talks about the brand.
+ *   Captures: captions, hashtags, music/sounds, engagement, author diversity.
+ *   Applies temporal weighting: recent mentions count more.
+ *   Used for: Stuart Hall decoding, Goffman gap detection, audience perception.
+ *
+ * Audience mention data is weighted HIGHER than brand-authored content for:
+ *   - audienceTribe
+ *   - stuartHallDecoding
+ *   - brandGoffmanStageConsistency
+ *   - brandAudienceDecodingSplit
+ */
+
 import { invokeLLM } from "./_core/llm";
 import { callDataApi } from "./_core/dataApi";
 
-/**
- * Brand TikTok Channel Analysis
- *
- * Analyzes a brand's TikTok channel to extract:
- * - Brand voice and tone signals
- * - Content themes and categories
- * - Engagement metrics and audience interaction style
- * - Social media positioning
- */
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface BrandVideoTranscript {
   videoId: string;
@@ -24,53 +39,415 @@ export interface BrandDecodedSymbol {
   source: "caption" | "bio";
 }
 
-export interface BrandTikTokMetadata {
-  channelHandle: string;
-  followerCount?: number;
-  engagementRate?: number;
-  brandVoice?: string; // e.g., "playful, trendy, educational"
-  contentThemes?: string[]; // e.g., ["lifestyle", "humor", "product demos"]
-  audienceInteractionStyle?: string; // e.g., "highly responsive, community-driven"
-  topVideoThemes?: string[];
-  averageViews?: number;
-  postFrequency?: string; // e.g., "daily", "3x per week"
-  tiktokBioAnalysis?: string;
-  videoAnalysisSummary?: string; // LLM-generated summary of video analysis
-  videoTranscripts?: BrandVideoTranscript[]; // Captions from each video
-  decodedSymbols?: BrandDecodedSymbol[]; // Extracted cultural signals
-  rawKeywords?: string[]; // Keywords extracted from all captions
-  themeLabels?: string[]; // Named content themes
-  symbolicVocabulary?: string[]; // Core vocabulary/values
+export interface MentionVideo {
+  videoId: string;
+  caption: string;
+  hashtags: string[];
+  musicTitle: string;
+  musicArtist: string;
+  authorHandle: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  plays: number;
+  createdAt: number; // Unix timestamp
+  temporalWeight: number; // 1.5 = recent, 1.0 = mid, 0.5 = older
 }
 
-/**
- * Extract brand handle from URL or direct handle
- */
+export interface AudienceMentionData {
+  totalMentions: number;
+  uniqueAuthors: number;
+  mentionCaptions: string[];
+  mentionHashtags: string[];         // Aggregated, deduplicated
+  mentionMusicTitles: string[];      // Aggregated music signals
+  mentionMusicArtists: string[];
+  avgWeightedEngagement: number;     // Weighted by temporal recency
+  sentimentSignal: "positive" | "mixed" | "negative" | "insufficient_data";
+  sentimentConfidence: "high" | "medium" | "low";
+  recentMentionCount: number;        // < 3 months
+  midMentionCount: number;           // 3–12 months
+  olderMentionCount: number;         // > 12 months
+  topHashtags: string[];             // Top 10 by frequency
+  audienceLanguageSummary?: string;  // LLM-decoded audience perception
+  audienceIdentityClaims: string[];
+  audienceStatusSignals: string[];
+  audienceCommunityRefs: string[];
+  audienceAspirationDrivers: string[];
+  audienceTone: string;
+  goffmanGapSignal: "Consistent" | "Minor Gap" | "Significant Gap";
+  rawMentionVideos: MentionVideo[];
+}
+
+export interface BrandTikTokMetadata {
+  // Channel data (from brand's own handle, if provided)
+  channelHandle?: string;
+  followerCount?: number;
+  engagementRate?: number;
+  brandVoice?: string;
+  contentThemes?: string[];
+  audienceInteractionStyle?: string;
+  topVideoThemes?: string[];
+  averageViews?: number;
+  postFrequency?: string;
+  tiktokBioAnalysis?: string;
+  videoAnalysisSummary?: string;
+  videoTranscripts?: BrandVideoTranscript[];
+  decodedSymbols?: BrandDecodedSymbol[];
+  rawKeywords?: string[];
+  themeLabels?: string[];
+  symbolicVocabulary?: string[];
+
+  // Audience mention intelligence (Track B — always populated when brand name available)
+  audienceMentions?: AudienceMentionData;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function extractBrandHandle(input: string): string {
   if (!input) return "";
-  
-  // Remove @ if present
   let handle = input.startsWith("@") ? input.slice(1) : input;
-  
-  // Extract handle from TikTok URL
   if (handle.includes("tiktok.com")) {
     const match = handle.match(/@([a-zA-Z0-9._-]+)/);
     if (match) handle = match[1];
   }
-  
-  return handle.toLowerCase();
+  return handle.toLowerCase().trim();
 }
 
+/** Returns 1.5 for recent (<3mo), 1.0 for mid (3-12mo), 0.5 for older (>12mo) */
+function getTemporalWeight(createdAt: number): number {
+  const ageMs = Date.now() - createdAt * 1000;
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  if (ageDays < 90) return 1.5;
+  if (ageDays < 365) return 1.0;
+  return 0.5;
+}
+
+/** Extract hashtags from textExtra array */
+function extractHashtags(textExtra: any[]): string[] {
+  if (!Array.isArray(textExtra)) return [];
+  return textExtra
+    .filter((te: any) => te.type === 1 && te.hashtagName)
+    .map((te: any) => te.hashtagName as string);
+}
+
+/** Extract hashtags from challenges array (more reliable for search results) */
+function extractChallengeHashtags(challenges: any[]): string[] {
+  if (!Array.isArray(challenges)) return [];
+  return challenges
+    .filter((c: any) => c.title)
+    .map((c: any) => c.title as string);
+}
+
+// ─── Track B: Audience Mention Intelligence ───────────────────────────────────
+
 /**
- * Analyze brand TikTok channel
- * Returns metadata about the brand's TikTok presence
- * 
- * Pipeline:
- * 1. Extract brand handle from input
- * 2. Fetch TikTok user info via Data API
- * 3. Fetch 10-15 recent videos
- * 4. Analyze video captions, engagement, and themes
- * 5. Use LLM to classify brand voice and content themes
+ * Searches TikTok for brand name mentions and extracts all available signals.
+ * This is the primary data source for audience perception analysis.
+ */
+export async function fetchBrandMentionData(
+  brandName: string,
+  brandHandle?: string
+): Promise<AudienceMentionData | null> {
+  if (!brandName?.trim()) return null;
+
+  console.info(`[fetchBrandMentionData] Fetching TikTok mentions for "${brandName}"...`);
+
+  const allVideos: MentionVideo[] = [];
+  const seenIds = new Set<string>();
+
+  // Run multiple search queries to maximize coverage
+  const searchQueries = [
+    brandName,
+    `${brandName} haul`,
+    `${brandName} review`,
+    `${brandName} finds`,
+  ];
+
+  for (const keyword of searchQueries) {
+    try {
+      let cursor: number | undefined;
+      let searchId: string | undefined;
+
+      for (let page = 0; page < 3; page++) {
+        const queryParams: Record<string, string> = { keyword };
+        if (cursor !== undefined) queryParams.cursor = String(cursor);
+        if (searchId) queryParams.search_id = searchId;
+
+        const result = await callDataApi("Tiktok/search_tiktok_video_general", {
+          query: queryParams,
+        }) as any;
+
+        const items: any[] = result?.item_list || [];
+
+        for (const video of items) {
+          const videoId = String(video.id || video.aweme_id || "");
+          if (!videoId || seenIds.has(videoId)) continue;
+
+          // Skip the brand's own videos (we want audience mentions)
+          const authorHandle = (video.author?.uniqueId || "").toLowerCase();
+          if (brandHandle && authorHandle === brandHandle.toLowerCase()) continue;
+
+          seenIds.add(videoId);
+
+          const createdAt: number = video.createTime || 0;
+          const temporalWeight = getTemporalWeight(createdAt);
+
+          // Extract all available fields
+          const hashtags = [
+            ...extractHashtags(video.textExtra || []),
+            ...extractChallengeHashtags(video.challenges || []),
+          ];
+
+          const stats = video.stats || video.statistics || {};
+          const likes = stats.diggCount || 0;
+          const comments = stats.commentCount || 0;
+          const shares = stats.shareCount || 0;
+          const saves = stats.collectCount || 0;
+          const plays = stats.playCount || 0;
+
+          const music = video.music || {};
+          const musicTitle = music.title || "";
+          const musicArtist = music.authorName || "";
+
+          allVideos.push({
+            videoId,
+            caption: video.desc || "",
+            hashtags,
+            musicTitle,
+            musicArtist,
+            authorHandle,
+            likes,
+            comments,
+            shares,
+            saves,
+            plays,
+            createdAt,
+            temporalWeight,
+          });
+        }
+
+        cursor = result?.cursor;
+        const logPb = result?.log_pb;
+        searchId = logPb?.impr_id || undefined;
+        if (!result?.has_more) break;
+      }
+    } catch (err) {
+      console.warn(`[fetchBrandMentionData] Search failed for "${keyword}":`, err);
+    }
+  }
+
+  if (allVideos.length === 0) {
+    console.info(`[fetchBrandMentionData] No mention videos found for "${brandName}"`);
+    return null;
+  }
+
+  console.info(`[fetchBrandMentionData] Found ${allVideos.length} mention videos for "${brandName}"`);
+
+  // ── Aggregate signals ──────────────────────────────────────────────────────
+
+  const now = Date.now();
+  const recentVideos = allVideos.filter(v => getTemporalWeight(v.createdAt) === 1.5);
+  const midVideos = allVideos.filter(v => getTemporalWeight(v.createdAt) === 1.0);
+  const olderVideos = allVideos.filter(v => getTemporalWeight(v.createdAt) === 0.5);
+
+  const uniqueAuthors = new Set(allVideos.map(v => v.authorHandle)).size;
+
+  // Aggregate hashtags with frequency count
+  const hashtagFreq: Record<string, number> = {};
+  const allHashtags: string[] = [];
+  for (const v of allVideos) {
+    for (const tag of v.hashtags) {
+      const normalized = tag.toLowerCase();
+      hashtagFreq[normalized] = (hashtagFreq[normalized] || 0) + v.temporalWeight;
+      allHashtags.push(normalized);
+    }
+  }
+  const topHashtags = Object.entries(hashtagFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([tag]) => tag);
+
+  // Aggregate music signals
+  const musicTitles = Array.from(new Set(allVideos.map(v => v.musicTitle).filter(Boolean))).slice(0, 20);
+  const musicArtists = Array.from(new Set(allVideos.map(v => v.musicArtist).filter(Boolean))).slice(0, 20);
+
+  // Weighted engagement
+  let totalWeightedEngagement = 0;
+  let totalWeight = 0;
+  for (const v of allVideos) {
+    if (v.plays > 0) {
+      const engRate = (v.likes + v.comments + v.shares + v.saves) / v.plays;
+      totalWeightedEngagement += engRate * v.temporalWeight;
+      totalWeight += v.temporalWeight;
+    }
+  }
+  const avgWeightedEngagement = totalWeight > 0
+    ? (totalWeightedEngagement / totalWeight) * 100
+    : 0;
+
+  // Captions (weighted — recent first)
+  const sortedByRecency = [...allVideos].sort((a, b) => b.createdAt - a.createdAt);
+  const mentionCaptions = sortedByRecency
+    .map(v => v.caption)
+    .filter(Boolean)
+    .slice(0, 25);
+
+  // ── LLM: Decode audience language and detect sentiment ────────────────────
+
+  let sentimentSignal: AudienceMentionData["sentimentSignal"] = "insufficient_data";
+  let sentimentConfidence: AudienceMentionData["sentimentConfidence"] = "low";
+  let audienceLanguageSummary: string | undefined;
+  let audienceIdentityClaims: string[] = [];
+  let audienceStatusSignals: string[] = [];
+  let audienceCommunityRefs: string[] = [];
+  let audienceAspirationDrivers: string[] = [];
+  let audienceTone = "neutral";
+  let goffmanGapSignal: AudienceMentionData["goffmanGapSignal"] = "Consistent";
+
+  if (mentionCaptions.length >= 3) {
+    try {
+      const captionSample = mentionCaptions.slice(0, 20).map((c, i) => `${i + 1}. ${c}`).join("\n");
+      const hashtagSample = topHashtags.slice(0, 15).join(", ");
+      const musicSample = musicTitles.slice(0, 10).join(", ");
+
+      const prompt = `You are a cultural anthropologist analyzing how audiences talk about the brand "${brandName}" on TikTok.
+
+AUDIENCE-GENERATED CONTENT (${allVideos.length} videos from ${uniqueAuthors} unique creators):
+
+VIDEO CAPTIONS (most recent first):
+${captionSample}
+
+TOP HASHTAGS USED BY AUDIENCE:
+${hashtagSample}
+
+MUSIC/SOUNDS IN MENTION VIDEOS:
+${musicSample}
+
+ENGAGEMENT CONTEXT:
+- Weighted engagement rate: ${avgWeightedEngagement.toFixed(2)}%
+- Recent mentions (< 3 months): ${recentVideos.length}
+- Mid-range mentions (3-12 months): ${midVideos.length}
+- Older mentions (> 12 months): ${olderVideos.length}
+
+Analyze this audience-generated content and extract:
+
+1. SENTIMENT: Is the overall audience sentiment about "${brandName}" positive, mixed, or negative?
+   - Be conservative: casual/neutral language is "mixed", not negative
+   - Only classify as "negative" if there are clear complaints or criticism
+   - Confidence: high (15+ clear signals), medium (5-14), low (<5)
+
+2. AUDIENCE IDENTITY CLAIMS: How does the audience identify themselves in relation to this brand?
+   (e.g., "budget shoppers", "fashion hunters", "deal seekers")
+
+3. STATUS SIGNALS: What status/positioning does the audience associate with this brand?
+   (e.g., "affordable luxury", "everyday essential", "trendy but accessible")
+
+4. COMMUNITY REFERENCES: What communities/groups talk about this brand?
+   (e.g., "Gen Z fashion lovers", "Canadian shoppers", "thrift community")
+
+5. ASPIRATION DRIVERS: What aspirations does the brand fulfill for its audience?
+   (e.g., "looking stylish on a budget", "finding hidden gems", "smart shopping")
+
+6. AUDIENCE TONE: How does the audience emotionally engage with this brand? (2-3 words)
+
+7. AUDIENCE SUMMARY: 2-3 sentences summarizing how audiences perceive and talk about "${brandName}"
+
+Return JSON:
+{
+  "sentiment": "positive" | "mixed" | "negative",
+  "sentimentConfidence": "high" | "medium" | "low",
+  "audienceIdentityClaims": ["claim1", "claim2"],
+  "audienceStatusSignals": ["signal1", "signal2"],
+  "audienceCommunityRefs": ["ref1", "ref2"],
+  "audienceAspirationDrivers": ["driver1", "driver2"],
+  "audienceTone": "2-3 word tone description",
+  "audienceSummary": "2-3 sentence summary"
+}`;
+
+      const response = await invokeLLM({
+        messages: [
+          {
+            role: "system",
+            content: "You are a cultural anthropologist specializing in brand perception analysis. Extract structured insights from audience-generated TikTok content.",
+          },
+          { role: "user", content: prompt },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "audience_mention_analysis",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                sentiment: { type: "string", enum: ["positive", "mixed", "negative"] },
+                sentimentConfidence: { type: "string", enum: ["high", "medium", "low"] },
+                audienceIdentityClaims: { type: "array", items: { type: "string" } },
+                audienceStatusSignals: { type: "array", items: { type: "string" } },
+                audienceCommunityRefs: { type: "array", items: { type: "string" } },
+                audienceAspirationDrivers: { type: "array", items: { type: "string" } },
+                audienceTone: { type: "string" },
+                audienceSummary: { type: "string" },
+              },
+              required: [
+                "sentiment", "sentimentConfidence", "audienceIdentityClaims",
+                "audienceStatusSignals", "audienceCommunityRefs", "audienceAspirationDrivers",
+                "audienceTone", "audienceSummary",
+              ],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+
+      const content = response.choices?.[0]?.message?.content;
+      if (content) {
+        const parsed = typeof content === "string" ? JSON.parse(content) : content;
+        sentimentSignal = parsed.sentiment;
+        sentimentConfidence = parsed.sentimentConfidence;
+        audienceIdentityClaims = parsed.audienceIdentityClaims || [];
+        audienceStatusSignals = parsed.audienceStatusSignals || [];
+        audienceCommunityRefs = parsed.audienceCommunityRefs || [];
+        audienceAspirationDrivers = parsed.audienceAspirationDrivers || [];
+        audienceTone = parsed.audienceTone || "neutral";
+        audienceLanguageSummary = parsed.audienceSummary;
+      }
+    } catch (err) {
+      console.warn("[fetchBrandMentionData] LLM analysis failed:", err);
+    }
+  }
+
+  return {
+    totalMentions: allVideos.length,
+    uniqueAuthors,
+    mentionCaptions,
+    mentionHashtags: Array.from(new Set(allHashtags)),
+    mentionMusicTitles: musicTitles,
+    mentionMusicArtists: musicArtists,
+    avgWeightedEngagement,
+    sentimentSignal,
+    sentimentConfidence,
+    recentMentionCount: recentVideos.length,
+    midMentionCount: midVideos.length,
+    olderMentionCount: olderVideos.length,
+    topHashtags,
+    audienceLanguageSummary,
+    audienceIdentityClaims,
+    audienceStatusSignals,
+    audienceCommunityRefs,
+    audienceAspirationDrivers,
+    audienceTone,
+    goffmanGapSignal: "Consistent", // Will be updated by brand extraction LLM
+    rawMentionVideos: allVideos.slice(0, 50), // Store up to 50 for reference
+  };
+}
+
+// ─── Track A: Brand Channel Analysis ─────────────────────────────────────────
+
+/**
+ * Analyzes the brand's own TikTok channel (when handle is provided).
+ * Returns brand-authored content signals.
  */
 export async function analyzeBrandTikTokChannel(
   tiktokChannelUrl: string | undefined | null
@@ -86,33 +463,30 @@ export async function analyzeBrandTikTokChannel(
   }
 
   try {
-    // Step 1: Fetch TikTok user info
-    console.info(`[analyzeBrandTikTokChannel] Fetching TikTok data for @${handle}...`);
-    
-    let userInfo: any = null;
-    let videos: any[] = [];
+    console.info(`[analyzeBrandTikTokChannel] Fetching TikTok channel data for @${handle}...`);
+
     let followerCount: number | undefined;
     let bioText: string | undefined;
     let engagementRate: number | undefined;
     let averageViews: number | undefined;
+    let videos: any[] = [];
 
+    // Step 1: Fetch user info
     try {
-      userInfo = await callDataApi("Tiktok/get_user_info", {
+      const userInfo = await callDataApi("Tiktok/get_user_info", {
         query: { uniqueId: handle },
-      });
-      
+      }) as any;
+
       if (userInfo?.userInfo?.user) {
-        const user = userInfo.userInfo.user;
         followerCount = userInfo.userInfo.stats?.followerCount;
-        bioText = user.signature || user.desc;
+        bioText = userInfo.userInfo.user.signature || userInfo.userInfo.user.desc;
         console.info(`[analyzeBrandTikTokChannel] Found @${handle} with ${followerCount?.toLocaleString()} followers`);
       }
     } catch (err) {
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch user info for @${handle}:`, err);
     }
 
-    // Step 2: Fetch brand's own videos using search API with pagination
-    // The search API returns videos mentioning the brand — we filter to only the brand's own posts
+    // Step 2: Fetch brand's own videos via search (filter to brand-owned only)
     try {
       let cursor: number | undefined;
       let searchId: string | undefined;
@@ -129,167 +503,60 @@ export async function analyzeBrandTikTokChannel(
         }) as any;
 
         const pageItems: any[] = pageResult?.item_list || [];
-        // Filter to only videos posted BY the brand's own handle
         const brandVideos = pageItems.filter(
           (v: any) => (v?.author?.uniqueId || "").toLowerCase() === handle.toLowerCase()
         );
         videos.push(...brandVideos);
 
-        // Pagination
         cursor = pageResult?.cursor;
-        const logPb = pageResult?.log_pb;
-        searchId = logPb?.impr_id || undefined;
-
+        searchId = pageResult?.log_pb?.impr_id || undefined;
         if (!pageResult?.has_more) break;
       }
 
-      console.info(`[analyzeBrandTikTokChannel] Found ${videos.length} videos from @${handle}'s own channel`);
+      console.info(`[analyzeBrandTikTokChannel] Found ${videos.length} owned videos from @${handle}`);
     } catch (err) {
-      console.warn(`[analyzeBrandTikTokChannel] Could not fetch videos for @${handle}:`, err);
+      console.warn(`[analyzeBrandTikTokChannel] Could not fetch owned videos for @${handle}:`, err);
     }
 
-    // Step 3: Extract video metadata and calculate engagement
+    // Step 3: Extract video metadata
     let totalEngagement = 0;
     let totalViews = 0;
     const videoCaptions: string[] = [];
     const videoTranscripts: BrandVideoTranscript[] = [];
-    const videoThemes: string[] = [];
 
-    if (videos.length > 0) {
-      for (const video of videos) {
-        const desc = video.desc || "";
-        const videoId = video.aweme_id || video.id || video.videoId || "";
-        const createTime = video.create_time || video.createTime || video.created_time;
-        const playCount = video.statistics?.play_count || video.stats?.playCount || 0;
-        const commentCount = video.statistics?.comment_count || video.stats?.commentCount || 0;
-        const shareCount = video.statistics?.share_count || video.stats?.shareCount || 0;
-        const diggCount = video.statistics?.digg_count || video.stats?.diggCount || 0;
+    for (const video of videos) {
+      const desc = video.desc || "";
+      const videoId = video.aweme_id || video.id || "";
+      const createTime = video.create_time || video.createTime;
+      const stats = video.stats || video.statistics || {};
+      const playCount = stats.playCount || stats.play_count || 0;
+      const commentCount = stats.commentCount || stats.comment_count || 0;
+      const shareCount = stats.shareCount || stats.share_count || 0;
+      const diggCount = stats.diggCount || stats.digg_count || 0;
 
-        totalViews += playCount;
-        totalEngagement += commentCount + shareCount + diggCount;
+      totalViews += playCount;
+      totalEngagement += commentCount + shareCount + diggCount;
 
-        if (desc) {
-          videoCaptions.push(desc);
-          videoTranscripts.push({
-            videoId,
-            caption: desc,
-            postedDate: createTime ? new Date(createTime * 1000).toISOString() : undefined,
-          });
-        }
-      }
-
-      if (totalViews > 0) {
-        averageViews = Math.round(totalViews / videos.length);
-        engagementRate = (totalEngagement / totalViews) * 100;
+      if (desc) {
+        videoCaptions.push(desc);
+        videoTranscripts.push({
+          videoId,
+          caption: desc,
+          postedDate: createTime ? new Date(createTime * 1000).toISOString() : undefined,
+        });
       }
     }
 
-    // Step 4: Use LLM to analyze brand voice and themes
+    if (totalViews > 0 && videos.length > 0) {
+      averageViews = Math.round(totalViews / videos.length);
+      engagementRate = (totalEngagement / totalViews) * 100;
+    }
+
+    // Step 4: LLM analysis of brand voice (if we have captions or bio)
     let brandVoice: string | undefined;
     let contentThemes: string[] | undefined;
     let audienceInteractionStyle: string | undefined;
     let videoAnalysisSummary: string | undefined;
-
-    if (videoCaptions.length > 0 || bioText) {
-      try {
-        const analysisPrompt = `
-You are analyzing a TikTok brand channel to extract cultural and voice signals.
-
-**Channel Handle:** @${handle}
-**Bio:** ${bioText || "N/A"}
-**Recent Video Captions (${videoCaptions.length} videos):**
-${videoCaptions.slice(0, 10).map((c, i) => `${i + 1}. ${c}`).join("\n")}
-
-**Engagement Metrics:**
-- Total Views (last 15 videos): ${totalViews.toLocaleString()}
-- Average Views per Video: ${averageViews?.toLocaleString() || "N/A"}
-- Engagement Rate: ${engagementRate?.toFixed(2)}%
-- Total Engagement: ${totalEngagement.toLocaleString()}
-
-Based on this data, extract:
-1. **Brand Voice** (2-4 descriptors): How does this brand communicate? (e.g., "playful, trendy, educational, authentic")
-2. **Content Themes** (3-5 themes): What are the main content categories? (e.g., "lifestyle", "humor", "product demos", "behind-the-scenes")
-3. **Audience Interaction Style** (1-2 sentences): How does the brand engage with its audience?
-4. **Overall Analysis** (2-3 sentences): Summary of the brand's social media positioning and cultural presence
-
-Format your response as JSON:
-{
-  "brandVoice": "comma-separated descriptors",
-  "contentThemes": ["theme1", "theme2", "theme3"],
-  "audienceInteractionStyle": "description of interaction style",
-  "summary": "overall analysis"
-}
-`;
-
-        const response = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content: "You are a cultural analyst specializing in brand voice and social media positioning. Extract structured insights from TikTok channel data.",
-            },
-            {
-              role: "user",
-              content: analysisPrompt,
-            },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "brand_tiktok_analysis",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  brandVoice: { type: "string", description: "Brand voice descriptors" },
-                  contentThemes: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Content themes",
-                  },
-                  audienceInteractionStyle: {
-                    type: "string",
-                    description: "How the brand interacts with audience",
-                  },
-                  summary: { type: "string", description: "Overall analysis" },
-                },
-                required: ["brandVoice", "contentThemes", "audienceInteractionStyle", "summary"],
-                additionalProperties: false,
-              },
-            },
-          },
-        });
-
-        try {
-          const content = response.choices?.[0]?.message?.content;
-          if (content) {
-            const parsed = typeof content === "string" ? JSON.parse(content) : content;
-            brandVoice = parsed.brandVoice;
-            contentThemes = parsed.contentThemes;
-            audienceInteractionStyle = parsed.audienceInteractionStyle;
-            videoAnalysisSummary = parsed.summary;
-          }
-        } catch (parseErr) {
-          console.warn("[analyzeBrandTikTokChannel] Failed to parse LLM response:", parseErr);
-        }
-      } catch (llmErr) {
-        console.warn("[analyzeBrandTikTokChannel] LLM analysis failed:", llmErr);
-      }
-    }
-
-    // Step 5: Determine post frequency
-    let postFrequency: string | undefined;
-    if (videos.length >= 15) {
-      postFrequency = "daily or near-daily";
-    } else if (videos.length >= 8) {
-      postFrequency = "3-5x per week";
-    } else if (videos.length >= 4) {
-      postFrequency = "1-2x per week";
-    } else if (videos.length > 0) {
-      postFrequency = "sporadic";
-    }
-
-
-    // Step 5: Decode cultural symbols from captions
     let decodedSymbols: BrandDecodedSymbol[] = [];
     let rawKeywords: string[] = [];
     let themeLabels: string[] = [];
@@ -297,166 +564,153 @@ Format your response as JSON:
 
     if (videoCaptions.length > 0 || bioText) {
       try {
-        const symbolPrompt = `
-You are a cultural semiotics analyst extracting symbolic meaning from brand messaging.
+        const analysisPrompt = `Analyze this brand's TikTok channel to extract cultural and voice signals.
 
-**Brand Handle:** @${handle}
+**Channel Handle:** @${handle}
 **Bio:** ${bioText || "N/A"}
-**Video Captions (${videoCaptions.length} videos):**
+**Owned Video Captions (${videoCaptions.length} videos):**
 ${videoCaptions.slice(0, 10).map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
 Extract:
-1. **Identity Claims** - What does the brand claim about itself? (e.g., "We are sustainable", "We are luxury")
-2. **Status Signals** - What status/prestige does the brand signal? (e.g., "premium", "exclusive", "accessible")
-3. **Community References** - What communities/groups does the brand reference? (e.g., "Gen Z", "eco-conscious", "fitness enthusiasts")
-4. **Aspiration Drivers** - What aspirations does the brand appeal to? (e.g., "self-improvement", "belonging", "rebellion")
-5. **Raw Keywords** - Extract 15-20 key words/phrases from all captions
-6. **Theme Labels** - 3-5 named content themes
-7. **Symbolic Vocabulary** - 5-8 core values/concepts the brand communicates
+1. Brand Voice (2-4 descriptors)
+2. Content Themes (3-5 themes)
+3. Audience Interaction Style (1-2 sentences)
+4. Overall Analysis (2-3 sentences)
+5. Identity Claims (what the brand claims about itself)
+6. Status Signals (prestige/positioning)
+7. Community References (who they address)
+8. Aspiration Drivers (what they promise)
+9. Raw Keywords (15-20 key words)
+10. Theme Labels (3-5 named themes)
+11. Symbolic Vocabulary (5-8 core values)
 
 Return JSON:
 {
+  "brandVoice": "descriptors",
+  "contentThemes": ["theme1"],
+  "audienceInteractionStyle": "description",
+  "summary": "analysis",
   "identityClaims": [{"phrase": "...", "meaning": "..."}],
   "statusSignals": [{"phrase": "...", "meaning": "..."}],
   "communityReferences": [{"phrase": "...", "meaning": "..."}],
   "aspirationDrivers": [{"phrase": "...", "meaning": "..."}],
-  "rawKeywords": ["keyword1", "keyword2"],
-  "themeLabels": ["theme1", "theme2"],
-  "symbolicVocabulary": ["value1", "value2"]
-}
-`;
+  "rawKeywords": ["keyword1"],
+  "themeLabels": ["theme1"],
+  "symbolicVocabulary": ["value1"]
+}`;
 
-        const symbolResponse = await invokeLLM({
+        const response = await invokeLLM({
           messages: [
             {
               role: "system",
-              content: "You are a cultural semiotics analyst. Extract structured symbolic meaning from brand messaging.",
+              content: "You are a cultural analyst specializing in brand voice and social media positioning.",
             },
-            {
-              role: "user",
-              content: symbolPrompt,
-            },
+            { role: "user", content: analysisPrompt },
           ],
           response_format: {
             type: "json_schema",
             json_schema: {
-              name: "brand_symbol_analysis",
+              name: "brand_channel_analysis",
               strict: true,
               schema: {
                 type: "object",
                 properties: {
+                  brandVoice: { type: "string" },
+                  contentThemes: { type: "array", items: { type: "string" } },
+                  audienceInteractionStyle: { type: "string" },
+                  summary: { type: "string" },
                   identityClaims: {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: {
-                        phrase: { type: "string" },
-                        meaning: { type: "string" },
-                      },
+                      properties: { phrase: { type: "string" }, meaning: { type: "string" } },
                       required: ["phrase", "meaning"],
+                      additionalProperties: false,
                     },
                   },
                   statusSignals: {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: {
-                        phrase: { type: "string" },
-                        meaning: { type: "string" },
-                      },
+                      properties: { phrase: { type: "string" }, meaning: { type: "string" } },
                       required: ["phrase", "meaning"],
+                      additionalProperties: false,
                     },
                   },
                   communityReferences: {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: {
-                        phrase: { type: "string" },
-                        meaning: { type: "string" },
-                      },
+                      properties: { phrase: { type: "string" }, meaning: { type: "string" } },
                       required: ["phrase", "meaning"],
+                      additionalProperties: false,
                     },
                   },
                   aspirationDrivers: {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: {
-                        phrase: { type: "string" },
-                        meaning: { type: "string" },
-                      },
+                      properties: { phrase: { type: "string" }, meaning: { type: "string" } },
                       required: ["phrase", "meaning"],
+                      additionalProperties: false,
                     },
                   },
                   rawKeywords: { type: "array", items: { type: "string" } },
                   themeLabels: { type: "array", items: { type: "string" } },
                   symbolicVocabulary: { type: "array", items: { type: "string" } },
                 },
-                required: ["identityClaims", "statusSignals", "communityReferences", "aspirationDrivers", "rawKeywords", "themeLabels", "symbolicVocabulary"],
+                required: [
+                  "brandVoice", "contentThemes", "audienceInteractionStyle", "summary",
+                  "identityClaims", "statusSignals", "communityReferences", "aspirationDrivers",
+                  "rawKeywords", "themeLabels", "symbolicVocabulary",
+                ],
                 additionalProperties: false,
               },
             },
           },
         });
 
-        try {
-          const content = symbolResponse.choices?.[0]?.message?.content;
-          if (content) {
-            const parsed = typeof content === "string" ? JSON.parse(content) : content;
-            
-            // Convert to BrandDecodedSymbol format
-            const allSymbols: BrandDecodedSymbol[] = [];
-            
-            parsed.identityClaims?.forEach((s: any) => {
-              allSymbols.push({
-                phrase: s.phrase,
-                meaning: s.meaning,
-                category: "identity_claim",
-                source: "caption",
-              });
-            });
-            
-            parsed.statusSignals?.forEach((s: any) => {
-              allSymbols.push({
-                phrase: s.phrase,
-                meaning: s.meaning,
-                category: "status_signal",
-                source: "caption",
-              });
-            });
-            
-            parsed.communityReferences?.forEach((s: any) => {
-              allSymbols.push({
-                phrase: s.phrase,
-                meaning: s.meaning,
-                category: "community_reference",
-                source: "caption",
-              });
-            });
-            
-            parsed.aspirationDrivers?.forEach((s: any) => {
-              allSymbols.push({
-                phrase: s.phrase,
-                meaning: s.meaning,
-                category: "aspiration_driver",
-                source: "caption",
-              });
-            });
-            
-            decodedSymbols = allSymbols;
-            rawKeywords = parsed.rawKeywords || [];
-            themeLabels = parsed.themeLabels || [];
-            symbolicVocabulary = parsed.symbolicVocabulary || [];
+        const content = response.choices?.[0]?.message?.content;
+        if (content) {
+          const parsed = typeof content === "string" ? JSON.parse(content) : content;
+          brandVoice = parsed.brandVoice;
+          contentThemes = parsed.contentThemes;
+          audienceInteractionStyle = parsed.audienceInteractionStyle;
+          videoAnalysisSummary = parsed.summary;
+          rawKeywords = parsed.rawKeywords || [];
+          themeLabels = parsed.themeLabels || [];
+          symbolicVocabulary = parsed.symbolicVocabulary || [];
+
+          const allSymbols: BrandDecodedSymbol[] = [];
+          for (const s of parsed.identityClaims || []) {
+            allSymbols.push({ phrase: s.phrase, meaning: s.meaning, category: "identity_claim", source: "caption" });
           }
-        } catch (parseErr) {
-          console.warn("[analyzeBrandTikTokChannel] Failed to parse symbol response:", parseErr);
+          for (const s of parsed.statusSignals || []) {
+            allSymbols.push({ phrase: s.phrase, meaning: s.meaning, category: "status_signal", source: "caption" });
+          }
+          for (const s of parsed.communityReferences || []) {
+            allSymbols.push({ phrase: s.phrase, meaning: s.meaning, category: "community_reference", source: "caption" });
+          }
+          for (const s of parsed.aspirationDrivers || []) {
+            allSymbols.push({ phrase: s.phrase, meaning: s.meaning, category: "aspiration_driver", source: "caption" });
+          }
+          decodedSymbols = allSymbols;
         }
-      } catch (symbolErr) {
-        console.warn("[analyzeBrandTikTokChannel] Symbol decoding failed:", symbolErr);
+      } catch (err) {
+        console.warn("[analyzeBrandTikTokChannel] LLM analysis failed:", err);
       }
     }
-    const metadata: BrandTikTokMetadata = {
+
+    // Post frequency estimate
+    let postFrequency: string | undefined;
+    if (videos.length >= 15) postFrequency = "daily or near-daily";
+    else if (videos.length >= 8) postFrequency = "3-5x per week";
+    else if (videos.length >= 4) postFrequency = "1-2x per week";
+    else if (videos.length > 0) postFrequency = "sporadic";
+
+    console.info(`[analyzeBrandTikTokChannel] Successfully analyzed @${handle}`);
+
+    return {
       channelHandle: handle,
       followerCount,
       engagementRate: engagementRate ? Math.round(engagementRate * 100) / 100 : undefined,
@@ -474,64 +728,139 @@ Return JSON:
       themeLabels,
       symbolicVocabulary,
     };
-
-    console.info(`[analyzeBrandTikTokChannel] Successfully analyzed @${handle}`);
-    return metadata;
   } catch (err) {
-    console.warn("[analyzeBrandTikTokChannel] Error analyzing TikTok channel:", err);
+    console.warn("[analyzeBrandTikTokChannel] Error:", err);
     return null;
   }
 }
 
+// ─── Evidence Block Builders ──────────────────────────────────────────────────
+
 /**
- * Generate TikTok evidence block for brand extraction prompt
+ * Formats brand channel data into evidence block for LLM extraction.
  */
 export function formatBrandTikTokEvidenceBlock(
   metadata: BrandTikTokMetadata | null
 ): string {
-  if (!metadata) {
-    return "";
-  }
+  if (!metadata) return "";
 
   const parts: string[] = [];
-  parts.push(`## TikTok Channel Analysis\n`);
-  parts.push(`- Handle: @${metadata.channelHandle}`);
+  parts.push(`## BRAND-AUTHORED TIKTOK CHANNEL DATA`);
 
+  if (metadata.channelHandle) {
+    parts.push(`- Handle: @${metadata.channelHandle}`);
+  }
   if (metadata.followerCount) {
     parts.push(`- Followers: ${metadata.followerCount.toLocaleString()}`);
   }
-
   if (metadata.engagementRate !== undefined) {
     parts.push(`- Engagement Rate: ${metadata.engagementRate.toFixed(2)}%`);
   }
-
   if (metadata.averageViews) {
-    parts.push(`- Average Views per Video: ${metadata.averageViews.toLocaleString()}`);
+    parts.push(`- Average Views: ${metadata.averageViews.toLocaleString()}`);
   }
-
   if (metadata.postFrequency) {
     parts.push(`- Post Frequency: ${metadata.postFrequency}`);
   }
-
   if (metadata.brandVoice) {
     parts.push(`- Brand Voice: ${metadata.brandVoice}`);
   }
-
-  if (metadata.contentThemes && metadata.contentThemes.length > 0) {
+  if (metadata.contentThemes?.length) {
     parts.push(`- Content Themes: ${metadata.contentThemes.join(", ")}`);
   }
-
   if (metadata.audienceInteractionStyle) {
     parts.push(`- Audience Interaction: ${metadata.audienceInteractionStyle}`);
   }
-
   if (metadata.videoAnalysisSummary) {
     parts.push(`- Analysis: ${metadata.videoAnalysisSummary}`);
   }
-
   if (metadata.tiktokBioAnalysis) {
     parts.push(`- Bio: "${metadata.tiktokBioAnalysis}"`);
   }
+
+  return parts.join("\n");
+}
+
+/**
+ * Formats audience mention intelligence into evidence block for LLM extraction.
+ * This is the PRIMARY evidence source for audience perception fields.
+ */
+export function formatAudienceMentionEvidenceBlock(
+  mentions: AudienceMentionData | null | undefined
+): string {
+  if (!mentions || mentions.totalMentions === 0) return "";
+
+  const parts: string[] = [];
+
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  parts.push(`AUDIENCE MENTION INTELLIGENCE (PRIMARY EVIDENCE — weighted higher than brand website)`);
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  parts.push(`Source: ${mentions.totalMentions} TikTok videos from ${mentions.uniqueAuthors} unique creators`);
+  parts.push(`Temporal breakdown: ${mentions.recentMentionCount} recent (<3mo) · ${mentions.midMentionCount} mid (3-12mo) · ${mentions.olderMentionCount} older (>12mo)`);
+  parts.push(`Weighted engagement rate: ${mentions.avgWeightedEngagement.toFixed(2)}%`);
+  parts.push(``);
+
+  parts.push(`AUDIENCE SENTIMENT: ${mentions.sentimentSignal.toUpperCase()} (confidence: ${mentions.sentimentConfidence})`);
+  parts.push(``);
+
+  if (mentions.audienceLanguageSummary) {
+    parts.push(`AUDIENCE PERCEPTION SUMMARY:`);
+    parts.push(mentions.audienceLanguageSummary);
+    parts.push(``);
+  }
+
+  if (mentions.audienceIdentityClaims.length > 0) {
+    parts.push(`AUDIENCE IDENTITY CLAIMS (→ AudienceTribe, StuartHallDecoding):`);
+    mentions.audienceIdentityClaims.forEach(c => parts.push(`  ▸ ${c}`));
+    parts.push(``);
+  }
+
+  if (mentions.audienceStatusSignals.length > 0) {
+    parts.push(`AUDIENCE STATUS SIGNALS (→ SymbolicPosition, BrandArchetypeClassification):`);
+    mentions.audienceStatusSignals.forEach(s => parts.push(`  ▸ ${s}`));
+    parts.push(``);
+  }
+
+  if (mentions.audienceCommunityRefs.length > 0) {
+    parts.push(`AUDIENCE COMMUNITY REFERENCES (→ AudienceTribe, EmotionalPromise):`);
+    mentions.audienceCommunityRefs.forEach(r => parts.push(`  ▸ ${r}`));
+    parts.push(``);
+  }
+
+  if (mentions.audienceAspirationDrivers.length > 0) {
+    parts.push(`AUDIENCE ASPIRATION DRIVERS (→ BarthesMyth, CulturalTension):`);
+    mentions.audienceAspirationDrivers.forEach(d => parts.push(`  ▸ ${d}`));
+    parts.push(``);
+  }
+
+  if (mentions.topHashtags.length > 0) {
+    parts.push(`TOP AUDIENCE HASHTAGS (cultural positioning signals):`);
+    parts.push(`  ${mentions.topHashtags.slice(0, 12).join(" · ")}`);
+    parts.push(``);
+  }
+
+  if (mentions.mentionMusicTitles.length > 0) {
+    parts.push(`MUSIC/SOUNDS IN AUDIENCE CONTENT (cultural association signals):`);
+    parts.push(`  ${mentions.mentionMusicTitles.slice(0, 8).join(" · ")}`);
+    parts.push(``);
+  }
+
+  if (mentions.mentionCaptions.length > 0) {
+    parts.push(`SAMPLE AUDIENCE CAPTIONS (verbatim — most recent first):`);
+    mentions.mentionCaptions.slice(0, 10).forEach((c, i) => {
+      parts.push(`  ${i + 1}. "${c}"`);
+    });
+    parts.push(``);
+  }
+
+  parts.push(`⚠️  CRITICAL INSTRUCTION — AUDIENCE MENTIONS ARE PRIMARY EVIDENCE:`);
+  parts.push(`    Use audience mention data as the DOMINANT signal for these fields:`);
+  parts.push(`    - audienceTribe: use audience community references + identity claims`);
+  parts.push(`    - brandStuartHallDecoding: use sentiment + how audience frames the brand`);
+  parts.push(`    - brandGoffmanStageConsistency: compare brand self-claims vs audience language`);
+  parts.push(`    - brandAudienceDecodingSplit: true if audience segments decode differently`);
+  parts.push(`    - culturalTension: the gap between brand claims and audience perception`);
+  parts.push(`    If sentiment is NEGATIVE: note this in aiSummary and lower brandGoffmanStageConsistency`);
 
   return parts.join("\n");
 }

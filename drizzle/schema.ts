@@ -209,6 +209,19 @@ export const brandProfiles = mysqlTable("brand_profiles", {
   // Full decoded symbols object — mirrors creator decodedSymbols for direct field comparison
   brandDecodedSymbols: json("brandDecodedSymbols"),  // BrandDecodedSymbols | null
 
+  // Audience Mention Intelligence — TikTok audience-generated content analysis
+  // Populated by fetchBrandMentionData() in brandTikTokAnalysis.ts
+  mentionDecodedSymbols: json("mentionDecodedSymbols"),  // AudienceMentionData | null
+  mentionRawKeywords: json("mentionRawKeywords"),        // string[] — keywords from audience captions
+  mentionHashtagCloud: json("mentionHashtagCloud"),      // string[] — top audience hashtags
+  mentionSentiment: varchar("mentionSentiment", { length: 32 }), // positive | mixed | negative | insufficient_data
+  mentionSentimentConfidence: varchar("mentionSentimentConfidence", { length: 16 }), // high | medium | low
+  mentionMusicSignals: json("mentionMusicSignals"),      // string[] — music titles from mention videos
+  mentionMusicArtists: json("mentionMusicArtists"),      // string[] — artists from mention videos
+  mentionTotalCount: int("mentionTotalCount").default(0),
+  mentionUniqueAuthors: int("mentionUniqueAuthors").default(0),
+  mentionAudienceSummary: text("mentionAudienceSummary"), // LLM-decoded audience perception summary
+
   // Raw AI summary
   aiSummary: text("aiSummary"),
   rawAiResponse: json("rawAiResponse"),
@@ -297,6 +310,12 @@ export const matchRecords = mysqlTable("match_records", {
   culturalMomentumConfidence: varchar("culturalMomentumConfidence", { length: 16 }),
   partnershipStabilitySignal: float("partnershipStabilitySignal"),
   partnershipStabilityConfidence: varchar("partnershipStabilityConfidence", { length: 16 }),
+
+  // Music Overlap — shared musical signals between creator and brand audience
+  musicOverlap: json("musicOverlap"),  // { sharedTitles: string[], sharedArtists: string[], overlapStrength: 'strong' | 'moderate' | 'none' }
+
+  // Cultural Exchange Data — powers the side-by-side comparison report
+  culturalBorrowingSummary: text("culturalBorrowingSummary"), // LLM-generated: what the brand gains from this creator
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

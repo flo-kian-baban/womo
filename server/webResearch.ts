@@ -30,6 +30,7 @@ import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
 import { fetchBrandReviews } from "./reviewResearch";
+import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
 
@@ -117,6 +118,8 @@ export interface BrandResearchResult {
   semanticWordCount: number;
   crawledPages: string[];
   dataConfidenceLevel: "high" | "medium" | "low";
+  // Phase 6 — Audience Mention Intelligence
+  audienceMentionData?: import("./brandTikTokAnalysis").AudienceMentionData | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2046,6 +2049,17 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     "actually decode the brand, which may differ from the brand's self-presentation.",
   ].filter(Boolean).join("\n").trim();
 
+  // Phase 6: Fetch audience mention intelligence from TikTok (non-fatal)
+  let audienceMentionData: AudienceMentionData | null = null;
+  try {
+    audienceMentionData = await fetchBrandMentionData(brandName);
+    if (audienceMentionData) {
+      console.log(`[webResearch] Brand ${brandName}: fetched ${audienceMentionData.totalMentions} TikTok mentions from ${audienceMentionData.uniqueAuthors} creators, sentiment: ${audienceMentionData.sentimentSignal}`);
+    }
+  } catch (err) {
+    console.warn("[webResearch] Audience mention fetch failed (non-fatal):", err);
+  }
+
   // Run Brand Symbol Decoder on website text + review text (non-fatal)
   // websiteText corpus: always include all available text sources (description, snippets, Yelp excerpts, Google excerpts)
   // This ensures the decoder runs even when the direct HTML fetch is blocked by Cloudflare or other protection
@@ -2089,7 +2103,12 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     ? `\n\n${formatBrandDecodedSymbolsBlock(brandDecodedSymbols)}`
     : "";
 
-  const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock;
+  // Inject audience mention intelligence block (PRIMARY evidence for audience perception)
+  const mentionEvidenceBlock = audienceMentionData
+    ? `\n\n${formatAudienceMentionEvidenceBlock(audienceMentionData)}`
+    : "";
+
+  const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock + mentionEvidenceBlock;
 
   // Compute data confidence level for brand
   const brandDataConfidenceLevel: BrandResearchResult["dataConfidenceLevel"] =
@@ -2119,6 +2138,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     semanticWordCount,
     crawledPages,
     dataConfidenceLevel: brandDataConfidenceLevel,
+    audienceMentionData,
   };
 }
 

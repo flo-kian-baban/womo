@@ -23,6 +23,8 @@ function RadarWarningBadge({ warning }: { warning: string }) {
     "Identity Instability": { icon: AlertCircle, color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30", desc: "Full Pivot drift signal or Significant Gap in Goffman stage consistency" },
     "Low Pulse": { icon: AlertTriangle, color: "text-orange-400 bg-orange-400/10 border-orange-400/30", desc: "Niche pulse score below 4.0 — cultural momentum is weak or window is closing" },
     "Trajectory Divergence": { icon: AlertCircle, color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30", desc: "Creator is behind the niche's current adoption position" },
+    "Low Social Engagement": { icon: TrendingDown, color: "text-orange-400 bg-orange-400/10 border-orange-400/30", desc: "Brand TikTok engagement rate is below 0.5% — limited social proof" },
+    "Negative Audience Sentiment": { icon: ShieldAlert, color: "text-red-400 bg-red-400/10 border-red-400/30", desc: "Audience mentions of this brand skew negative — partnership may inherit reputational risk" },
   };
   const config = configs[warning] ?? { icon: AlertTriangle, color: "text-muted-foreground bg-muted/30 border-border", desc: "" };
   const Icon = config.icon;
@@ -281,6 +283,18 @@ export default function MatchReport() {
     : match.caiStatus === "Proceed with Caution"
     ? "text-yellow-400"
     : "text-red-400";
+
+  // Phase 6: Music Overlap + Cultural Exchange
+  const musicOverlap = (match as Record<string, unknown>).musicOverlap as {
+    sharedTitles: string[];
+    sharedArtists: string[];
+    overlapStrength: "strong" | "moderate" | "none";
+  } | null;
+  const culturalBorrowingSummary = (match as Record<string, unknown>).culturalBorrowingSummary as string | null;
+  const mentionSentiment = brand?.mentionSentiment as string | null;
+  const mentionHashtagCloud = (brand?.mentionHashtagCloud as string[] | null) ?? [];
+  const mentionMusicSignals = (brand?.mentionMusicSignals as string[] | null) ?? [];
+  const mentionTotalCount = brand?.mentionTotalCount ?? 0;
 
   const signalLabels: Record<string, string> = {
     tribeOverlap: "Tribe Overlap",
@@ -710,6 +724,229 @@ export default function MatchReport() {
           </div>
         </div>
       )}
+
+
+      {/* ─── Cultural Exchange Report ─────────────────────────────────────────── */}
+      <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Sparkles className="w-4 h-4 text-primary/70" />
+          <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">Cultural Exchange Report</div>
+        </div>
+        <p className="text-xs text-muted-foreground mb-5 leading-relaxed">
+          What the brand is culturally borrowing from this creator — and what the creator brings to the collaboration.
+        </p>
+
+        {/* Side-by-side trait comparison table */}
+        <div className="overflow-x-auto mb-6">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr>
+                <th className="text-left text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground py-2 pr-4 w-1/4">Trait</th>
+                <th className="text-left py-2 px-3 w-[37.5%]">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-400" />
+                    <span className="text-xs font-semibold text-blue-400">@{creator?.handle}</span>
+                    <span className="text-[10px] text-muted-foreground">(Creator)</span>
+                  </div>
+                </th>
+                <th className="text-left py-2 px-3 w-[37.5%]">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span className="text-xs font-semibold text-emerald-400">{brand?.brandName}</span>
+                    <span className="text-[10px] text-muted-foreground">(Brand)</span>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {(([
+                {
+                  trait: "Archetype",
+                  tooltip: "Jungian archetype — the personality type each entity projects",
+                  creatorVal: creator?.archetype ?? "—",
+                  brandVal: brand?.archetype ?? "—",
+                  type: "badge" as const,
+                },
+                {
+                  trait: "Audience",
+                  tooltip: "Who they speak to and how they relate to them",
+                  creatorVal: creator?.audienceRelationshipType
+                    ? `${creator.audienceRelationshipType} relationship${creator.followerCount ? ` · ${creator.followerCount >= 1000000 ? (creator.followerCount / 1000000).toFixed(1) + "M" : (creator.followerCount / 1000).toFixed(0) + "K"} followers` : ""}`
+                    : creator?.followerCount ? `${(creator.followerCount / 1000).toFixed(0)}K followers` : "—",
+                  brandVal: brand?.audienceTribe ?? "—",
+                  type: "text" as const,
+                },
+                {
+                  trait: "Tone",
+                  tooltip: "The register and voice each entity uses to communicate",
+                  creatorVal: creator?.toneRegister ?? "—",
+                  brandVal: brand?.brandTone ?? "—",
+                  type: "text" as const,
+                },
+                {
+                  trait: "Myth",
+                  tooltip: "The Barthes myth — the belief each entity normalizes for its audience",
+                  creatorVal: creator?.barthesMyth ?? "—",
+                  brandVal: brand?.barthesMyth ?? "—",
+                  type: "quote" as const,
+                },
+                {
+                  trait: "Musical Leanings",
+                  tooltip: "Music and sound signals from content — a proxy for cultural taste and community",
+                  creatorVal: (() => {
+                    const transcripts = (creator as unknown as Record<string, unknown>)?.transcripts as Array<Record<string, unknown>> | null;
+                    const sounds = (transcripts ?? []).map((t: Record<string, unknown>) => (t.musicMetadata as Record<string, unknown> | undefined)?.soundName as string | undefined).filter(Boolean) as string[];
+                    return sounds.length > 0 ? sounds.slice(0, 3).join(", ") : "—";
+                  })(),
+                  brandVal: mentionMusicSignals.length > 0 ? mentionMusicSignals.slice(0, 3).join(", ") : "—",
+                  type: "text" as const,
+                },
+                {
+                  trait: "Style",
+                  tooltip: "Visual language and aesthetic signals",
+                  creatorVal: (() => { const t = (creator?.recurringThemes as string[] | null) ?? []; return t.length > 0 ? t.slice(0, 3).join(", ") : "—"; })(),
+                  brandVal: (() => { const vl = (brand?.visualLanguage as string[] | null) ?? []; return vl.length > 0 ? vl.join(", ") : "—"; })(),
+                  type: "text" as const,
+                },
+                {
+                  trait: "Reach",
+                  tooltip: "Platform presence and social footprint",
+                  creatorVal: creator?.followerCount
+                    ? `${creator.followerCount >= 1000000 ? (creator.followerCount / 1000000).toFixed(1) + "M" : (creator.followerCount / 1000).toFixed(0) + "K"} followers`
+                    : "—",
+                  brandVal: brand?.tiktokAudienceSize
+                    ? `${brand.tiktokAudienceSize >= 1000000 ? (brand.tiktokAudienceSize / 1000000).toFixed(1) + "M" : (brand.tiktokAudienceSize / 1000).toFixed(0) + "K"} TikTok followers`
+                    : mentionTotalCount > 0 ? `${mentionTotalCount} audience mentions found` : "—",
+                  type: "text" as const,
+                },
+                {
+                  trait: "Engagement",
+                  tooltip: "How actively audiences interact with their content",
+                  creatorVal: creator?.engagementRate != null
+                    ? `${Number(creator.engagementRate).toFixed(1)}% engagement rate`
+                    : creator?.engagementQualityScore != null
+                    ? `${Math.round(Number(creator.engagementQualityScore) * 100)}% engagement quality`
+                    : "—",
+                  brandVal: brand?.tiktokEngagementRate != null
+                    ? `${Number(brand.tiktokEngagementRate).toFixed(1)}% TikTok engagement`
+                    : brand?.overallRating != null
+                    ? `${Number(brand.overallRating).toFixed(1)}★ avg rating (${brand.totalReviews ?? 0} reviews)`
+                    : "—",
+                  type: "text" as const,
+                },
+                {
+                  trait: "Audience Trust",
+                  tooltip: "How much the audience trusts and believes this entity",
+                  creatorVal: creator?.parasocialBondStrength != null
+                    ? `${Number(creator.parasocialBondStrength).toFixed(1)}/5 parasocial bond`
+                    : "—",
+                  brandVal: (() => {
+                    const s = mentionSentiment;
+                    const r = brand?.overallRating;
+                    if (s && s !== "insufficient_data") {
+                      const sl = s === "positive" ? "Positive" : s === "mixed" ? "Mixed" : "Negative";
+                      return r != null ? `${sl} audience sentiment · ${Number(r).toFixed(1)}★` : `${sl} audience sentiment`;
+                    }
+                    return r != null ? `${Number(r).toFixed(1)}★ avg rating` : "—";
+                  })(),
+                  type: "text" as const,
+                },
+              ] as Array<{ trait: string; tooltip: string; creatorVal: string; brandVal: string; type: "badge" | "text" | "quote" }>)).map(({ trait, tooltip, creatorVal, brandVal, type }) => (
+                <tr key={trait} className="group hover:bg-muted/10 transition-colors">
+                  <td className="py-3 pr-4 align-top">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-help">
+                          <span className="text-[10px] font-semibold tracking-[0.08em] uppercase text-muted-foreground">{trait}</span>
+                          <Info className="w-3 h-3 text-muted-foreground/40" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs">{tooltip}</TooltipContent>
+                    </Tooltip>
+                  </td>
+                  <td className="py-3 px-3 align-top">
+                    {type === "badge" ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-400/10 text-blue-400 border border-blue-400/20">{creatorVal || "—"}</span>
+                    ) : type === "quote" ? (
+                      <p className="text-xs text-foreground/70 leading-relaxed italic">{creatorVal || "—"}</p>
+                    ) : (
+                      <p className="text-xs text-foreground/80 leading-relaxed">{creatorVal || "—"}</p>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 align-top">
+                    {type === "badge" ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">{brandVal || "—"}</span>
+                    ) : type === "quote" ? (
+                      <p className="text-xs text-foreground/70 leading-relaxed italic">{brandVal || "—"}</p>
+                    ) : (
+                      <p className="text-xs text-foreground/80 leading-relaxed">{brandVal || "—"}</p>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Music Overlap Signal */}
+        {musicOverlap && musicOverlap.overlapStrength !== "none" && (
+          <div className="mb-5 p-4 rounded-xl border border-primary/20 bg-primary/5">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-primary/70">Shared Sound Signal</div>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                musicOverlap.overlapStrength === "strong"
+                  ? "text-green-400 bg-green-400/10 border-green-400/20"
+                  : "text-yellow-400 bg-yellow-400/10 border-yellow-400/20"
+              }`}>{musicOverlap.overlapStrength === "strong" ? "Strong Overlap" : "Moderate Overlap"}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">The creator and brand audience share musical taste — a non-scoring signal that suggests cultural resonance.</p>
+            {musicOverlap.sharedArtists.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1">
+                {musicOverlap.sharedArtists.map((a: string) => (
+                  <span key={a} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary/80 border border-primary/20">{a}</span>
+                ))}
+              </div>
+            )}
+            {musicOverlap.sharedTitles.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {musicOverlap.sharedTitles.map((t: string) => (
+                  <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border/50">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Audience Mention Hashtag Cloud */}
+        {mentionHashtagCloud.length > 0 && (
+          <div className="mb-5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Hash className="w-3.5 h-3.5 text-muted-foreground/60" />
+              <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">How Audiences Talk About {brand?.brandName}</div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {mentionHashtagCloud.slice(0, 20).map((tag: string) => (
+                <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-muted/20 text-muted-foreground border border-border/40">#{tag.replace(/^#/, "")}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Cultural Borrowing Summary */}
+        {culturalBorrowingSummary ? (
+          <div className="p-4 rounded-xl border border-primary/20 bg-primary/5">
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-primary/70 mb-2">What the Brand is Borrowing</div>
+            <p className="text-sm text-foreground/80 leading-relaxed italic">"{culturalBorrowingSummary}"</p>
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl border border-border/30 bg-muted/5">
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-2">What the Brand is Borrowing</div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              By partnering with @{creator?.handle}, {brand?.brandName} borrows the creator's {creator?.archetype?.toLowerCase() ?? "distinct"} archetype and their audience's trust — two things the brand cannot self-generate. The creator's {creator?.audienceRelationshipType?.toLowerCase() ?? "authentic"} relationship with their community becomes the brand's cultural bridge.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* ─── Profile Cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up animate-stagger-5">

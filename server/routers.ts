@@ -418,6 +418,18 @@ export const appRouter = router({
           brandSymbolicVocabulary?: string[];
           brandDecodedSymbols?: Record<string, unknown>;
         } = {};
+        let mentionFields: {
+          mentionDecodedSymbols?: Record<string, unknown>;
+          mentionRawKeywords?: string[];
+          mentionHashtagCloud?: string[];
+          mentionSentiment?: string;
+          mentionSentimentConfidence?: string;
+          mentionMusicSignals?: string[];
+          mentionMusicArtists?: string[];
+          mentionTotalCount?: number;
+          mentionUniqueAuthors?: number;
+          mentionAudienceSummary?: string;
+        } = {};
         try {
           const brandResearch = await researchBrand(input.brandNameOrUrl);
           brandEvidenceSummary = brandResearch.evidenceSummary;
@@ -439,6 +451,22 @@ export const appRouter = router({
               brandThemeLabels: brandResearch.brandThemeLabels,
               brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
               brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
+            };
+          }
+          // Phase 6: Audience Mention Intelligence fields
+          if (brandResearch.audienceMentionData) {
+            const m = brandResearch.audienceMentionData;
+            mentionFields = {
+              mentionDecodedSymbols: m as unknown as Record<string, unknown>,
+              mentionRawKeywords: m.audienceIdentityClaims,
+              mentionHashtagCloud: m.topHashtags,
+              mentionSentiment: m.sentimentSignal,
+              mentionSentimentConfidence: m.sentimentConfidence,
+              mentionMusicSignals: m.mentionMusicTitles,
+              mentionMusicArtists: m.mentionMusicArtists,
+              mentionTotalCount: m.totalMentions,
+              mentionUniqueAuthors: m.uniqueAuthors,
+              mentionAudienceSummary: m.audienceLanguageSummary,
             };
           }
         } catch (err) {
@@ -506,6 +534,8 @@ export const appRouter = router({
             brandThemeLabels: tiktokMetadata.themeLabels,
             brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
           } : {}),
+          // Phase 6: Audience Mention Intelligence
+          ...mentionFields,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
         });
@@ -544,6 +574,7 @@ export const appRouter = router({
         let brandEvidenceSummary = "";
         let reviewFields: any = {};
         let symbolFields: any = {};
+        let mentionFieldsReanalyze: any = {};
         let tiktokMetadata: BrandTikTokMetadata | null = null;
 
         try {
@@ -566,6 +597,22 @@ export const appRouter = router({
               brandThemeLabels: brandResearch.brandThemeLabels,
               brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
               brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
+            };
+          }
+          // Phase 6: Audience Mention Intelligence
+          if (brandResearch.audienceMentionData) {
+            const m = brandResearch.audienceMentionData;
+            mentionFieldsReanalyze = {
+              mentionDecodedSymbols: m as unknown as Record<string, unknown>,
+              mentionRawKeywords: m.audienceIdentityClaims,
+              mentionHashtagCloud: m.topHashtags,
+              mentionSentiment: m.sentimentSignal,
+              mentionSentimentConfidence: m.sentimentConfidence,
+              mentionMusicSignals: m.mentionMusicTitles,
+              mentionMusicArtists: m.mentionMusicArtists,
+              mentionTotalCount: m.totalMentions,
+              mentionUniqueAuthors: m.uniqueAuthors,
+              mentionAudienceSummary: m.audienceLanguageSummary,
             };
           }
         } catch (err) {
@@ -630,6 +677,8 @@ export const appRouter = router({
             brandThemeLabels: tiktokMetadata.themeLabels,
             brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
           } : {}),
+          // Phase 6: Audience Mention Intelligence
+          ...mentionFieldsReanalyze,
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
           updatedAt: new Date(),
@@ -735,6 +784,15 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
         const brandKeywords = (brand.brandRawKeywords as string[] | null) ?? [];
         const brandThemes = (brand.brandThemeLabels as string[] | null) ?? [];
 
+        // Phase 6: Extract music signals from creator transcripts and brand mention data
+        const creatorTranscripts = ((creator as unknown as Record<string, unknown>).transcripts as Array<Record<string, unknown>> | null) ?? [];
+        const creatorMusicTitles: string[] = creatorTranscripts
+          .map(t => (t.musicMetadata as Record<string, unknown> | undefined)?.soundName as string | undefined)
+          .filter((s): s is string => Boolean(s));
+        const creatorMusicArtists: string[] = []; // TikTok API doesn't return artist separately for creators
+        const brandMentionMusicTitles = (brand.mentionMusicSignals as string[] | null) ?? [];
+        const brandMentionMusicArtists = (brand.mentionMusicArtists as string[] | null) ?? [];
+
         // Also pull from decodedSymbols if rawKeywords are sparse
         if (creatorDecodedSymbols) {
           const dsKeywords = creatorDecodedSymbols.rawKeywords as string[] | undefined;
@@ -777,6 +835,18 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           brandLifecyclePhase: (brand as any).brandLifecyclePhase ?? undefined,
           brandCulturalCapital: (brand as any).brandCulturalCapital ?? undefined,
           brandAudienceDecodingSplit: (brand as any).brandAudienceDecodingSplit ?? undefined,
+          // Phase 6: Audience Mention Intelligence
+          brandMentionSentiment: (brand as any).mentionSentiment ?? undefined,
+          brandMentionSentimentConfidence: (brand as any).mentionSentimentConfidence ?? undefined,
+          brandMentionHashtags: (brand.mentionHashtagCloud as string[] | null) ?? undefined,
+          brandMentionKeywords: (brand.mentionRawKeywords as string[] | null) ?? undefined,
+          brandMentionMusicTitles,
+          brandMentionMusicArtists,
+          brandMentionTotalCount: (brand as any).mentionTotalCount ?? undefined,
+          brandMentionUniqueAuthors: (brand as any).mentionUniqueAuthors ?? undefined,
+          // Creator music signals
+          creatorMusicTitles,
+          creatorMusicArtists,
         });
 
         // Generate Synergy Narrative + Content Directions
@@ -892,6 +962,50 @@ Write the following in JSON format:
           creatorPronouns: creator.pronouns ?? "not specified",
         });
 
+        // Generate Cultural Borrowing Summary — what the brand gains from this creator
+        let culturalBorrowingSummary: string | null = null;
+        try {
+          const borrowingResponse = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: `You are a plain-talking cultural strategist writing a single paragraph for a brand considering partnering with a creator.
+
+Your job: explain in 2-3 direct sentences what the brand is BORROWING from this creator. Not what the brand gains in reach — what they gain CULTURALLY. What trust, identity, community, or perception does the creator carry that the brand cannot generate on its own?
+
+Write in plain language. No jargon. Be specific. Use the creator's actual archetype, audience relationship, and tone.
+
+CREATOR:
+- Handle: @${creator.handle}
+- Archetype: ${creator.archetype ?? "Unknown"}
+- Tone: ${creator.toneRegister ?? "Unknown"}
+- Audience relationship: ${creator.audienceRelationshipType ?? "Unknown"}
+- Parasocial bond: ${creator.parasocialBondStrength ?? "Unknown"}/5
+- What they stand for: ${creator.barthesMyth ?? "Not available"}
+- Cultural capital type: ${creator.culturalCapital ?? "Unknown"}
+- Followers: ${creator.followerCount?.toLocaleString() ?? "Unknown"}
+
+BRAND:
+- Name: ${brand.brandName}
+- Archetype: ${brand.archetype ?? "Unknown"}
+- Audience tribe: ${brand.audienceTribe ?? "Unknown"}
+- What they stand for: ${brand.barthesMyth ?? "Not available"}
+- Audience sentiment: ${brand.mentionSentiment ?? "Unknown"}
+
+SHARED SIGNALS:
+- Shared keywords: ${result.sharedKeywords.join(", ") || "None"}
+- Music overlap: ${result.musicOverlap.overlapStrength}
+
+Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
+              },
+              { role: "user", content: "Write the cultural borrowing summary." },
+            ],
+          });
+          culturalBorrowingSummary = borrowingResponse.choices[0]?.message?.content as string ?? null;
+        } catch (err) {
+          console.warn("[routers] Cultural borrowing summary generation failed (non-fatal):", err);
+        }
+
         // Save match record
         await createMatchRecord({
           creatorProfileId: input.creatorProfileId,
@@ -931,6 +1045,9 @@ Write the following in JSON format:
           // Synergy Narrative + Content Directions
           synergyNarrative: synergyNarrative || null,
           contentDirections: contentDirections.length > 0 ? contentDirections as unknown as Record<string, unknown>[] : null,
+          // Phase 6: Music Overlap + Cultural Borrowing
+          musicOverlap: result.musicOverlap as unknown as Record<string, unknown>,
+          culturalBorrowingSummary: culturalBorrowingSummary || null,
         });
 
         const matches = await listMatchRecords();

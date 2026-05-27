@@ -511,7 +511,8 @@ export type RadarWarning =
   | "Identity Instability"
   | "Low Pulse"
   | "Trajectory Divergence"
-  | "Low Social Engagement";  // TikTok engagement below threshold
+  | "Low Social Engagement"    // TikTok engagement below threshold
+  | "Negative Audience Sentiment";  // Brand mention sentiment is predominantly negative
 
 export interface RadarWarningInputs {
   alignmentRaw: number;
@@ -525,6 +526,9 @@ export interface RadarWarningInputs {
   // TikTok metrics for brands
   brandTiktokEngagementRate?: number;
   brandTiktokFollowerCount?: number;
+  // Phase 6: Audience mention sentiment
+  brandMentionSentiment?: string;
+  brandMentionSentimentConfidence?: string;
 }
 
 export function evaluateRadarWarnings(inputs: RadarWarningInputs): RadarWarning[] {
@@ -561,6 +565,15 @@ export function evaluateRadarWarnings(inputs: RadarWarningInputs): RadarWarning[
   // Low Social Engagement: TikTok engagement rate below 0.5% (very low)
   if (inputs.brandTiktokEngagementRate !== undefined && inputs.brandTiktokEngagementRate < 0.5) {
     warnings.push("Low Social Engagement");
+  }
+
+  // Negative Audience Sentiment: brand mention sentiment is negative with medium/high confidence
+  // We only flag this when confidence is not "low" to avoid false positives from sparse data
+  if (
+    inputs.brandMentionSentiment === "negative" &&
+    inputs.brandMentionSentimentConfidence !== "low"
+  ) {
+    warnings.push("Negative Audience Sentiment");
   }
 
   return warnings;
@@ -742,6 +755,18 @@ export interface FullFITCalculationInput {
   brandLifecyclePhase?: string;           // Emergence / Growth / Maturity / Decline
   brandCulturalCapital?: string;          // Produce / Relay
   brandAudienceDecodingSplit?: boolean;   // true if audience decoding is split
+  // Phase 6: Audience Mention Intelligence
+  brandMentionSentiment?: string;         // positive | mixed | negative | insufficient_data
+  brandMentionSentimentConfidence?: string; // high | medium | low
+  brandMentionHashtags?: string[];        // audience hashtag cloud
+  brandMentionKeywords?: string[];        // audience identity claims
+  brandMentionMusicTitles?: string[];     // music from brand mention videos
+  brandMentionMusicArtists?: string[];    // artists from brand mention videos
+  brandMentionTotalCount?: number;        // total mention videos found
+  brandMentionUniqueAuthors?: number;     // unique creators mentioning brand
+  // Creator music signals (for overlap comparison)
+  creatorMusicTitles?: string[];          // music from creator videos
+  creatorMusicArtists?: string[];         // artists from creator videos
 }
 
 export interface FullFITResult {
@@ -779,6 +804,10 @@ export interface FullFITResult {
   alignmentNarrative: string;  // AI-generated 2-sentence match summary
   culturalVelocity: "Focusing" | "Drifting" | "Insufficient Data"; // creator trajectory
   dataConfidenceLevel: "high" | "medium" | "low"; // overall data quality
+  // Phase 6: Music Overlap + Mention Modifiers
+  musicOverlap: { sharedTitles: string[]; sharedArtists: string[]; overlapStrength: "strong" | "moderate" | "none" };
+  mentionSentimentPenalty: number;  // 0 to -5 applied to stability
+  mentionVocabBoost: number;        // 0 to +1.5 applied to alignment
 }
 
 export function runFullFITCalculation(input: FullFITCalculationInput): FullFITResult {
@@ -862,8 +891,71 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     weights,
   });
 
+  // ── PHASE 6: AUDIENCE MENTION MODIFIERS ──────────────────────────────────────
+  // Sentiment penalty: negative audience sentiment reduces stability (capped at -5 points)
+  // We apply a proportional penalty based on confidence level to avoid over-penalizing
+  let mentionSentimentPenalty = 0;
+  if (input.brandMentionSentiment && input.brandMentionSentiment !== "insufficient_data") {
+    const confidenceMultiplier =
+      input.brandMentionSentimentConfidence === "high" ? 1.0 :
+      input.brandMentionSentimentConfidence === "medium" ? 0.6 : 0.3;
+    if (input.brandMentionSentiment === "negative") {
+      mentionSentimentPenalty = -3 * confidenceMultiplier; // max -3 pts
+    } else if (input.brandMentionSentiment === "mixed") {
+      mentionSentimentPenalty = -1 * confidenceMultiplier; // max -1 pt
+    } else if (input.brandMentionSentiment === "positive") {
+      // Positive sentiment boosts stability slightly
+      mentionSentimentPenalty = 0.5 * confidenceMultiplier; // max +0.5 pts
+    }
+  }
+  // Apply sentiment modifier to stability (clamp 0–10)
+  const adjustedStabilityRaw = Math.min(10, Math.max(0, stabilityRaw + mentionSentimentPenalty));
+
+  // Mention vocabulary boost: if audience hashtags/keywords overlap with creator's vocabulary,
+  // it signals the creator already lives in the brand's cultural world → alignment boost
+  let mentionVocabBoost = 0;
+  if ((input.brandMentionHashtags?.length ?? 0) > 0 || (input.brandMentionKeywords?.length ?? 0) > 0) {
+    const normalize = (s: string) => s.toLowerCase().trim().replace(/^#/, "");
+    const mentionTerms = new Set([
+      ...(input.brandMentionHashtags ?? []).map(normalize),
+      ...(input.brandMentionKeywords ?? []).map(normalize),
+    ]);
+    const creatorTerms = new Set([
+      ...(input.creatorKeywords ?? []).map(normalize),
+      ...(input.creatorThemes ?? []).map(normalize),
+    ]);
+    const overlap = Array.from(creatorTerms).filter(t => mentionTerms.has(t)).length;
+    const overlapRatio = mentionTerms.size > 0 ? overlap / mentionTerms.size : 0;
+    mentionVocabBoost = Math.min(1.5, overlapRatio * 5); // max +1.5 pts on alignment
+  }
+  const adjustedAlignmentRaw = Math.min(10, alignmentRaw + mentionVocabBoost);
+
+  // Recalculate final score with adjusted values
+  const { caiScore: adjustedCaiScore, caiStatus: adjustedCaiStatus } = calculateFITScore({
+    alignmentRaw: adjustedAlignmentRaw,
+    pulseRaw,
+    stabilityRaw: adjustedStabilityRaw,
+    weights,
+  });
+
+  // ── MUSIC OVERLAP ─────────────────────────────────────────────────────────────
+  // Compare creator music signals with brand mention music signals
+  // Non-scoring signal — shown in report as cultural resonance indicator
+  const normalize = (s: string) => s.toLowerCase().trim();
+  const creatorMusicTitleSet = new Set((input.creatorMusicTitles ?? []).map(normalize));
+  const creatorMusicArtistSet = new Set((input.creatorMusicArtists ?? []).map(normalize));
+  const brandMusicTitleSet = new Set((input.brandMentionMusicTitles ?? []).map(normalize));
+  const brandMusicArtistSet = new Set((input.brandMentionMusicArtists ?? []).map(normalize));
+
+  const sharedMusicTitles = Array.from(creatorMusicTitleSet).filter(t => brandMusicTitleSet.has(t));
+  const sharedMusicArtists = Array.from(creatorMusicArtistSet).filter(a => brandMusicArtistSet.has(a));
+  const totalOverlap = sharedMusicTitles.length + sharedMusicArtists.length;
+  const musicOverlapStrength: "strong" | "moderate" | "none" =
+    totalOverlap >= 3 ? "strong" : totalOverlap >= 1 ? "moderate" : "none";
+  const musicOverlap = { sharedTitles: sharedMusicTitles, sharedArtists: sharedMusicArtists, overlapStrength: musicOverlapStrength };
+
   const radarWarnings = evaluateRadarWarnings({
-    alignmentRaw,
+    alignmentRaw: adjustedAlignmentRaw,
     pulseRaw,
     brandArchetype: input.brandArchetype,
     creatorArchetype: input.creatorArchetype,
@@ -874,6 +966,9 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     // TikTok metrics for warnings
     brandTiktokEngagementRate: input.brandTiktokEngagementRate,
     brandTiktokFollowerCount: input.brandTiktokFollowerCount,
+    // Phase 6: Mention sentiment for Negative Audience Sentiment warning
+    brandMentionSentiment: input.brandMentionSentiment,
+    brandMentionSentimentConfidence: input.brandMentionSentimentConfidence,
   });
 
   // Symbolic vocabulary overlap (uses decoded symbol data if available)
@@ -922,19 +1017,19 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     mythAlignmentScore: input.mythAlignmentScore,
     tribMatchScore: input.tribMatchScore,
     decodingModifier,
-    alignmentScoreRaw: alignmentRaw,
+    alignmentScoreRaw: adjustedAlignmentRaw,
     rogersBaseScore: rogersBase,
     liminalAdjustment,
     pulseScoreRaw: pulseRaw,
     goffmanScore,
     driftScore,
-    stabilityScoreRaw: stabilityRaw,
+    stabilityScoreRaw: adjustedStabilityRaw,
     weightAlpha: weights.alpha,
     weightBeta: weights.beta,
     weightGamma: weights.gamma,
     weightPriority: weights.priority,
-    caiScore,
-    caiStatus,
+    caiScore: adjustedCaiScore,
+    caiStatus: adjustedCaiStatus,
     radarWarnings,
     parrScore,
     parrLabel,
@@ -946,6 +1041,10 @@ export function runFullFITCalculation(input: FullFITCalculationInput): FullFITRe
     alignmentNarrative,
     culturalVelocity,
     dataConfidenceLevel,
+    // Phase 6: Music Overlap + Mention Modifiers
+    musicOverlap,
+    mentionSentimentPenalty,
+    mentionVocabBoost,
   };
 }
 
