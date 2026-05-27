@@ -64,13 +64,11 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     overallRating: 4.5,
     totalReviews: 200,
     brandRawKeywords: ["affordable", "accessible", "practical"],
-    tiktokMetadata: {
-      totalMentions: 10,
-      mentionSentiment: "positive",
-      mentionHashtags: ["affordable", "practical", "community"],
-      mentionMusicSignals: ["indie-pop"],
-      avgMentionEngagement: 0.03,
-    },
+    mentionSentiment: "positive",
+    mentionHashtagCloud: ["affordable", "practical", "community"],
+    mentionMusicSignals: ["indie-pop"],
+    mentionTotalCount: 10,
+    tiktokMetadata: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -85,13 +83,12 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should reduce score when brand has negative mention sentiment", () => {
       const brandWithNegativeSentiment = {
         ...mockBrand,
-        tiktokMetadata: {
-          totalMentions: 8,
-          mentionSentiment: "negative",
-          mentionHashtags: ["overpriced", "bad-quality"],
-          mentionMusicSignals: [],
-          avgMentionEngagement: 0.01,
-        },
+
+    mentionTotalCount: 8,
+    mentionSentiment: "negative",
+    mentionHashtagCloud: ["overpriced", "bad-quality"],
+    mentionMusicSignals: [],
+    tiktokMetadata: null,
       };
       const result = calculateCreativeIntegritySignal(mockCreator, brandWithNegativeSentiment);
       expect(result.score).toBeLessThan(70);
@@ -100,13 +97,12 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should handle insufficient mention data gracefully", () => {
       const brandWithInsufficientMentions = {
         ...mockBrand,
-        tiktokMetadata: {
-          totalMentions: 2,
-          mentionSentiment: "positive",
-          mentionHashtags: [],
-          mentionMusicSignals: [],
-          avgMentionEngagement: 0,
-        },
+
+    mentionTotalCount: 2,
+    mentionSentiment: "positive",
+    mentionHashtagCloud: [],
+    mentionMusicSignals: [],
+    tiktokMetadata: null,
       };
       const result = calculateCreativeIntegritySignal(mockCreator, brandWithInsufficientMentions);
       expect(result.score).toBeGreaterThan(0);
@@ -137,13 +133,12 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should handle missing hashtag data", () => {
       const brandWithoutHashtags = {
         ...mockBrand,
-        tiktokMetadata: {
-          totalMentions: 5,
-          mentionSentiment: "positive",
-          mentionHashtags: [],
-          mentionMusicSignals: [],
-          avgMentionEngagement: 0.02,
-        },
+
+    mentionTotalCount: 5,
+    mentionSentiment: "positive",
+    mentionHashtagCloud: [],
+    mentionMusicSignals: [],
+    tiktokMetadata: null,
       };
       const result = calculateCommunityQualitySignal(mockCreator, brandWithoutHashtags);
       expect(result.score).toBeGreaterThan(0);
@@ -161,13 +156,12 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should reduce score when brand has negative mentions", () => {
       const brandWithNegativeMentions = {
         ...mockBrand,
-        tiktokMetadata: {
-          totalMentions: 7,
-          mentionSentiment: "negative",
-          mentionHashtags: ["avoid", "scam"],
-          mentionMusicSignals: [],
-          avgMentionEngagement: 0.01,
-        },
+
+    mentionTotalCount: 7,
+    mentionSentiment: "negative",
+    mentionHashtagCloud: ["avoid", "scam"],
+    mentionMusicSignals: [],
+    tiktokMetadata: null,
       };
       const result = calculateBrandTrustSignal(mockCreator, brandWithNegativeMentions);
       expect(result.score).toBeLessThan(95);
@@ -192,13 +186,12 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should handle mixed mention sentiment", () => {
       const brandWithMixedSentiment = {
         ...mockBrand,
-        tiktokMetadata: {
-          totalMentions: 6,
-          mentionSentiment: "mixed",
-          mentionHashtags: ["good-and-bad"],
-          mentionMusicSignals: [],
-          avgMentionEngagement: 0.02,
-        },
+
+    mentionTotalCount: 6,
+    mentionSentiment: "mixed",
+    mentionHashtagCloud: ["good-and-bad"],
+    mentionMusicSignals: [],
+    tiktokMetadata: null,
       };
       const result = calculateBrandTrustSignal(mockCreator, brandWithMixedSentiment);
       expect(result.score).toBeGreaterThan(40);
@@ -215,7 +208,8 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     it("should mark signals as Estimated when mention data is insufficient", () => {
       const brandWithoutMentions = {
         ...mockBrand,
-        tiktokMetadata: null,
+        mentionSentiment: undefined,
+        mentionTotalCount: undefined,
       };
       const result = calculateBrandTrustSignal(mockCreator, brandWithoutMentions);
       expect(result.confidence).toBe("Estimated");

@@ -178,8 +178,7 @@ export function calculateCommunityQualitySignal(
   }
   
   // TikTok mention keyword overlap: if brand mentions show audience keywords that match creator's audience
-  const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
-  const mentionHashtags = (tiktokMeta?.mentionHashtags as string[]) ?? [];
+  const mentionHashtags = (brand.mentionHashtagCloud as string[]) ?? [];
   const creatorKeywords = (creator.rawKeywords as string[]) ?? [];
   if (mentionHashtags.length > 0 && creatorKeywords.length > 0) {
     const hashtagSet = new Set(mentionHashtags.map(h => h.toLowerCase()));
@@ -301,15 +300,14 @@ export function calculateBrandTrustSignal(
   }
   
   // Brand mention sentiment: positive mentions boost trust, negative reduce it
-  const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
-  const mentionSentiment = tiktokMeta?.mentionSentiment as string | undefined;
-  const mentionCount = (tiktokMeta?.totalMentions as number) ?? 0;
-  if (mentionSentiment === "positive" && mentionCount >= 5) {
+  const mentionSentiment = brand.mentionSentiment as string | undefined;
+  const mentionCount = (brand as any).mentionTotalCount as number | undefined;
+  if (mentionSentiment === "positive" && (mentionCount ?? 0) >= 5) {
     score += 15; // audience confirms brand trustworthiness
     confidence = "Verified";
-  } else if (mentionSentiment === "negative" && mentionCount >= 5) {
+  } else if (mentionSentiment === "negative" && (mentionCount ?? 0) >= 5) {
     score -= 15; // audience signals distrust
-  } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
+  } else if (mentionSentiment === "mixed" && (mentionCount ?? 0) >= 5) {
     score += 5; // mixed signals
   }
   
