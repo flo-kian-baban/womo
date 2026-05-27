@@ -491,11 +491,21 @@ export const appRouter = router({
           brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
           brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
           ...reviewFields,
+          // Symbol fields: website-derived first, then TikTok overrides if available
           ...symbolFields,
+          // TikTok fields (override symbol fields when TikTok data is present)
           tiktokChannelUrl: input.tiktokChannelUrl || undefined,
           tiktokMetadata: tiktokMetadata as unknown as Record<string, unknown> || undefined,
           tiktokEngagementRate: tiktokMetadata?.engagementRate || undefined,
           tiktokAudienceSize: tiktokMetadata?.followerCount || undefined,
+          // TikTok video transcripts — only set when TikTok data was fetched
+          ...(tiktokMetadata?.videoTranscripts && tiktokMetadata.videoTranscripts.length > 0 ? {
+            brandVideoTranscripts: tiktokMetadata.videoTranscripts as unknown as Record<string, unknown>[],
+            brandDecodedSymbols: tiktokMetadata.decodedSymbols as unknown as Record<string, unknown>[],
+            brandRawKeywords: tiktokMetadata.rawKeywords,
+            brandThemeLabels: tiktokMetadata.themeLabels,
+            brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
+          } : {}),
           aiSummary: extracted.aiSummary,
           rawAiResponse: extracted as unknown as Record<string, unknown>,
         });
