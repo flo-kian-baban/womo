@@ -12,6 +12,7 @@ import CreatorProfileCard from "@/components/CreatorProfileCard";
 import BrandProfileCard from "@/components/BrandProfileCard";
 import { MetricTooltip } from "@/components/MetricTooltip";
 import { ObjectiveSignalsPanel, type ObjectiveSignal } from "@/components/ObjectiveSignalsPanel";
+import { SignalPanel } from "@/components/SignalPanel";
 import { LocalResonanceSection } from "@/components/LocalResonanceSection";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -473,6 +474,78 @@ export default function MatchReport() {
               Scores are directionally valid but may be refined with a re-analysis once more content is available.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* ─── Five Fit Signals ──────────────────────────────────────────────── */}
+      {(match.creativeIntegritySignal != null ||
+        match.performanceConsistencySignal != null ||
+        match.communityQualitySignal != null ||
+        match.audienceReceptivitySignal != null ||
+        match.brandTrustSignal != null) && (
+        <div className="mb-6 animate-fade-in-up animate-stagger-2">
+          <SignalPanel
+            signals={[
+              {
+                name: "Identity Fit",
+                score: match.creativeIntegritySignal != null ? Number(match.creativeIntegritySignal) : 50,
+                confidence: (match.creativeIntegrityConfidence as "Verified" | "Estimated" | "Insufficient Data") ?? "Estimated",
+                reasoning: "Does the creator's cultural identity genuinely align with this brand's world?",
+                category: "Performance",
+              },
+              {
+                name: "Performance Fit",
+                score: match.performanceConsistencySignal != null ? Number(match.performanceConsistencySignal) : 50,
+                confidence: (match.performanceConsistencyConfidence as "Verified" | "Estimated" | "Insufficient Data") ?? "Estimated",
+                reasoning: "Does this creator have the engagement track record to deliver for this brand?",
+                category: "Performance",
+              },
+              {
+                name: "Audience Fit",
+                score: match.communityQualitySignal != null ? Number(match.communityQualitySignal) : 50,
+                confidence: (match.communityQualityConfidence as "Verified" | "Estimated" | "Insufficient Data") ?? "Estimated",
+                reasoning: "Are the creator's followers the people this brand actually needs to reach?",
+                category: "Performance",
+              },
+              {
+                name: "Receptivity Fit",
+                score: match.audienceReceptivitySignal != null ? Number(match.audienceReceptivitySignal) : 50,
+                confidence: (match.audienceReceptivityConfidence as "Verified" | "Estimated" | "Insufficient Data") ?? "Estimated",
+                reasoning: "Will this creator's audience accept a brand message from them?",
+                category: "Performance",
+              },
+              {
+                name: "Brand Safety Fit",
+                score: match.brandTrustSignal != null ? Number(match.brandTrustSignal) : 50,
+                confidence: (match.brandTrustConfidence as "Verified" | "Estimated" | "Insufficient Data") ?? "Estimated",
+                reasoning: "Is this creator a stable, low-risk reputational partner for this brand?",
+                category: "Performance",
+              },
+              {
+                name: "Cultural Identity",
+                score: match.alignmentScoreRaw != null ? Number(match.alignmentScoreRaw) * 10 : 50,
+                confidence: "Verified",
+                reasoning: "Archetype + myth alignment + tribe match (Alignment component).",
+                category: "Cultural",
+              },
+              {
+                name: "Cultural Momentum",
+                score: match.pulseScoreRaw != null ? Number(match.pulseScoreRaw) * 10 : 50,
+                confidence: "Verified",
+                reasoning: "Rogers adoption stage + liminal adjustment (Pulse component).",
+                category: "Cultural",
+              },
+              {
+                name: "Partnership Stability",
+                score: match.stabilityScoreRaw != null ? Number(match.stabilityScoreRaw) * 10 : 50,
+                confidence: "Verified",
+                reasoning: "Goffman stage consistency + drift signal (Stability component).",
+                category: "Cultural",
+              },
+            ]}
+            caiScore={Number(match.caiScore)}
+            caiStatus={match.caiStatus as "Green Light" | "Proceed with Caution" | "Do Not Proceed"}
+          />
         </div>
       )}
 

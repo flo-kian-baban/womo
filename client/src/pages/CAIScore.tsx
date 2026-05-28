@@ -405,38 +405,38 @@ export default function FITScore() {
             <SignalPanel
               signals={[
                 {
-                  name: "Creative Integrity",
+                  name: "Identity Fit",
                   score: matchResult.performanceSignals?.creativeIntegrity.score ?? 50,
                   confidence: matchResult.performanceSignals?.creativeIntegrity.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.creativeIntegrity.reasoning ?? "Measures creator tone consistency and brand positioning alignment.",
+                  reasoning: matchResult.performanceSignals?.creativeIntegrity.reasoning ?? "Does the creator's cultural identity genuinely align with this brand's world?",
                   category: "Performance",
                 },
                 {
-                  name: "Performance Consistency",
+                  name: "Performance Fit",
                   score: matchResult.performanceSignals?.performanceConsistency.score ?? 50,
                   confidence: matchResult.performanceSignals?.performanceConsistency.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.performanceConsistency.reasoning ?? "Evaluates creator engagement reliability and lifecycle stability.",
+                  reasoning: matchResult.performanceSignals?.performanceConsistency.reasoning ?? "Does this creator have the engagement track record to deliver for this brand?",
                   category: "Performance",
                 },
                 {
-                  name: "Community Quality",
+                  name: "Audience Fit",
                   score: matchResult.performanceSignals?.communityQuality.score ?? 50,
                   confidence: matchResult.performanceSignals?.communityQuality.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.communityQuality.reasoning ?? "Assesses audience tribe alignment and geographic relevance.",
+                  reasoning: matchResult.performanceSignals?.communityQuality.reasoning ?? "Are the creator's followers the people this brand actually needs to reach?",
                   category: "Performance",
                 },
                 {
-                  name: "Audience Receptivity",
+                  name: "Receptivity Fit",
                   score: matchResult.performanceSignals?.audienceReceptivity.score ?? (matchResult.result.parrScore || 50),
                   confidence: matchResult.performanceSignals?.audienceReceptivity.confidence ?? "Verified",
-                  reasoning: matchResult.performanceSignals?.audienceReceptivity.reasoning ?? "Predicts audience acceptance of brand message (PARR-based).",
+                  reasoning: matchResult.performanceSignals?.audienceReceptivity.reasoning ?? "Will this creator's audience accept a brand message from them?",
                   category: "Performance",
                 },
                 {
-                  name: "Brand Trust",
+                  name: "Brand Safety Fit",
                   score: matchResult.performanceSignals?.brandTrust.score ?? 50,
                   confidence: matchResult.performanceSignals?.brandTrust.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.brandTrust.reasoning ?? "Evaluates creator reliability and brand reputation alignment.",
+                  reasoning: matchResult.performanceSignals?.brandTrust.reasoning ?? "Is this creator a stable, low-risk reputational partner for this brand?",
                   category: "Performance",
                 },
                 {
