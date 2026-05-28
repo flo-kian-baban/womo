@@ -1,7 +1,7 @@
-# Connex F.I.T. Engine — Data Points Reference
+# Connex Cultural Match Platform Engine — Data Points Reference
 
 ## Overview
-The Connex F.I.T. Engine captures cultural identity data from creators and brands, then calculates a **Fit (F), Influence (I), Trajectory (T) Score** (0–10) grounded in Jungian archetypes, Bourdieusian symbolic capital, and Stuart Hall media decoding theory.
+The Connex Cultural Match Platform Engine captures cultural identity data from creators and brands, then calculates a **Fit (F), Influence (I), Trajectory (T) Score** (0–10) grounded in Jungian archetypes, Bourdieusian symbolic capital, and Stuart Hall media decoding theory.
 
 ---
 
@@ -162,9 +162,9 @@ The Connex F.I.T. Engine captures cultural identity data from creators and brand
 - **Drift Score** — Penalty if creator is rapidly changing identity
 - **Cultural Velocity** — Trend direction (Focusing = stable, Drifting = risky)
 
-### Final F.I.T. Score
+### Final Cultural Match Score
 ```
-F.I.T. Score = (Alignment × α) + (Pulse × β) + (Stability × γ)
+Cultural Match Score = (Alignment × α) + (Pulse × β) + (Stability × γ)
 ```
 
 **Example weights for Financial Services (Trust category):**
@@ -187,12 +187,12 @@ F.I.T. Score = (Alignment × α) + (Pulse × β) + (Stability × γ)
 - **Alignment Score (Raw)** — 0–10
 - **Pulse Score (Raw)** — 0–10
 - **Stability Score (Raw)** — 0–10
-- **F.I.T. Score** — 0–10 (final composite)
+- **Cultural Match Score** — 0–10 (final composite)
 - **F.I.T. Status** — Green Light / Proceed with Caution / Do Not Proceed
 
 ### Audience Metrics
 - **PARR (Predicted Audience Receptivity Rate)** — 0–100% (what % of creator's audience will engage with brand)
-- **QoV (Quality of View)** — Percentage (F.I.T. Score / 10) × (PARR / 100) — cultural resonance multiplier per impression
+- **QoV (Quality of View)** — Percentage (Cultural Match Score / 10) × (PARR / 100) — cultural resonance multiplier per impression
 - **Symbolic Overlap Score** — 0–10 (how much symbolic vocabulary creator and brand share)
 - **Shared Keywords** — List of overlapping keywords/themes
 - **Shared Themes** — List of overlapping cultural themes
@@ -266,7 +266,7 @@ The Hero, Sage, Everyman, Lover, Creator, Jester, Magician, Innocent, Explorer, 
 
 **What We Calculate:**
 - Three sub-scores (Alignment, Pulse, Stability) based on sociological frameworks
-- A composite F.I.T. Score (0–10) with status classification
+- A composite Cultural Match Score (0–10) with status classification
 - Predicted audience receptivity (PARR) and cultural resonance (QoV)
 - Structural risk flags (Radar Warnings)
 - Narrative recommendations for partnership strategy

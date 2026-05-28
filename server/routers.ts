@@ -697,7 +697,7 @@ export const appRouter = router({
     }),
   }),
 
-    // ─── F.I.T. Score Routes ─────────────────────────────────────────────────────────────────────────────
+    // ─── Cultural Match Score Routes ─────────────────────────────────────────────────────────────────────────────
   fit: router({
     calculate: publicProcedure
       .input(z.object({
@@ -941,7 +941,7 @@ SHARED SIGNALS:
 - How much they overlap: ${result.symbolicOverlapScore}/10
 
 SCORES:
-- F.I.T. Score: ${result.caiScore}/10 (${result.caiStatus})
+- Cultural Match Score: ${result.caiScore}/10 (${result.caiStatus})
 - Audience Acceptance Score: ${result.parrScore}/100 (${result.parrLabel})
 - Alignment: ${result.alignmentScoreRaw.toFixed(1)}/10 | Momentum: ${result.pulseScoreRaw.toFixed(1)}/10 | Consistency: ${result.stabilityScoreRaw.toFixed(1)}/10
 

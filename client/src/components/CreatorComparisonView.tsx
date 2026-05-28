@@ -72,7 +72,7 @@ export const CreatorComparisonView: React.FC<CreatorComparisonViewProps> = ({
   matches,
   title = "Creator-Brand Match Comparison",
 }) => {
-  // Sort matches by CAI score descending
+  // Sort matches by Cultural Match Score score descending
   const sortedMatches = [...matches].sort((a, b) => b.caiScore - a.caiScore);
 
   return (

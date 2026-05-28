@@ -53,7 +53,7 @@ export function ObjectiveSignalsPanel({
           📊 Objective Signals
         </CardTitle>
         <CardDescription>
-          Metadata evidence that corroborated the Cultural Alignment Index (CAI) for {creatorHandle} × {brandName}
+          Metadata evidence that corroborated the Cultural Match Score for {creatorHandle} × {brandName}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

@@ -218,11 +218,11 @@ export default function AnalyzeInfluencer() {
                 Next Step
               </div>
               <p className="text-xs text-muted-foreground mb-3">
-                Profile saved to library. Ready to run a Cultural Alignment Index (CAI)?
+                Profile saved to library. Ready to run a Cultural Match Score?
               </p>
               <Link href="/fit-score">
                 <Button size="sm" variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
-                  Run Cultural Alignment Index (CAI) <ArrowRight className="w-3 h-3 ml-2" />
+                  Run Cultural Match Score <ArrowRight className="w-3 h-3 ml-2" />
                 </Button>
               </Link>
             </div>

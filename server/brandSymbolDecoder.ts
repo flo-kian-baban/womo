@@ -1,5 +1,5 @@
 /**
- * Connex F.I.T. — Brand Symbol Decoder
+ * Connex Cultural Match Platform — Brand Symbol Decoder
  *
  * Mirrors the creator-side symbolDecoder.ts pipeline.
  * Runs a dedicated LLM pass over ALL brand-authored text (website copy, taglines,

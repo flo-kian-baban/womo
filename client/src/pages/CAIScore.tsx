@@ -207,7 +207,7 @@ export default function FITScore() {
   const calculateMutation = trpc.fit.calculate.useMutation({
     onSuccess: (data) => {
       setMatchResult(data as unknown as MatchResult);
-      toast.success("Cultural Alignment Index (CAI) calculated");
+      toast.success("Cultural Match Score calculated");
     },
     onError: (err) => {
       toast.error(`Calculation failed: ${err.message}`);
@@ -234,7 +234,7 @@ export default function FITScore() {
             <BarChart3 className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-serif">Cultural Alignment Index (CAI)</h1>
+            <h1 className="text-2xl font-serif">Cultural Match Score</h1>
             <p className="text-sm text-muted-foreground">Calculate cultural alignment between a creator and brand</p>
           </div>
         </div>
@@ -315,7 +315,7 @@ export default function FITScore() {
       {calculateMutation.isPending && (
         <div className="fit-card rounded-xl p-10 flex flex-col items-center justify-center text-center animate-fade-in-up">
           <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
-          <p className="text-foreground font-medium mb-1">Running Cultural Alignment Index (CAI) Engine</p>
+          <p className="text-foreground font-medium mb-1">Running Cultural Match Score Engine</p>
           <p className="text-sm text-muted-foreground">
             Calculating Alignment, Pulse, and Stability scores...
           </p>
@@ -349,12 +349,12 @@ export default function FITScore() {
               <div className="flex flex-col items-center gap-3">
                 <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(2)}</div>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground">Cultural Alignment Index (CAI) / 10</span>
+                  <span className="text-xs text-muted-foreground">Cultural Match Score / 10</span>
                   <MetricTooltip
-                    title="Cultural Alignment Index (CAI)"
-                    explanation="The CAI measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
+                    title="Cultural Match Score"
+                    explanation="The Cultural Match Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
                     formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
-                    whyItMatters="The CAI is the primary go/no-go signal. A score below 6.0 indicates the partnership will feel forced to audiences regardless of how good the content is."
+                    whyItMatters="The Cultural Match Score is the primary go/no-go signal. A score below 6.0 indicates the partnership will feel forced to audiences regardless of how good the content is."
                     dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
                     side="top"
                   />
@@ -566,10 +566,10 @@ export default function FITScore() {
                     </div>
                     <MetricTooltip
                       title="QoV — Quality of View"
-                      explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (CAI) with the audience-level receptivity (PARR) to produce a single impression quality score."
-                      formula="(CAI ÷ 10) × PARR"
+                      explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (Cultural Match Score) with the audience-level receptivity (PARR) to produce a single impression quality score."
+                      formula="(Cultural Match Score ÷ 10) × PARR"
                       whyItMatters="Raw impression counts are meaningless without quality context. A QoV of 60% means 60% of every view is converting into genuine brand equity — not just passive exposure."
-                      dataPoints={["Cultural Alignment Index (CAI)", "PARR (Predicted Audience Receptivity Rate)"]}
+                      dataPoints={["Cultural Match Score", "PARR (Predicted Audience Receptivity Rate)"]}
                       side="top"
                     />
                   </div>

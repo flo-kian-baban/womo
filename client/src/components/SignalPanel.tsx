@@ -124,12 +124,12 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* CAI Score Header */}
+      {/* Cultural Match Score Header */}
       <Card className={`p-6 border-2 ${getStatusColor(caiStatus)}`}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              Cultural Alignment Index (CAI)
+              Cultural Match Score
             </h2>
             <p className="text-sm text-gray-600 mt-1">{caiStatus}</p>
           </div>

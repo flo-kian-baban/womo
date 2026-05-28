@@ -1,5 +1,5 @@
 /**
- * Connex F.I.T. Score Engine
+ * Connex Cultural Match Platform Score Engine
  * Implements the exact scoring logic from the Excel workbook.
  * All formulas, weights, and archetype compatibility data are sourced directly
  * from the "Brand Weighting" and "Scoring And FIT Verdict" sheets.

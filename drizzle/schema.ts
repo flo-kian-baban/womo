@@ -262,7 +262,7 @@ export const matchRecords = mysqlTable("match_records", {
   weightBeta: float("weightBeta"),
   weightGamma: float("weightGamma"),
 
-  // Final CAI Score (Cultural Alignment Index)
+  // Final Cultural Match Score (Cultural Match Score)
   caiScore: float("caiScore"),
   caiStatus: mysqlEnum("caiStatus", ["Green Light", "Proceed with Caution", "Do Not Proceed"]),
 

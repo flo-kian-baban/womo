@@ -87,7 +87,7 @@ export default function Library() {
           </TabsTrigger>
           <TabsTrigger value="matches" className="gap-2">
             <BarChart3 className="w-3.5 h-3.5" />
-            CAI Reports
+            Cultural Match Score Reports
             {matches && <span className="ml-1 text-xs text-muted-foreground">({matches.length})</span>}
           </TabsTrigger>
         </TabsList>
@@ -312,10 +312,10 @@ export default function Library() {
         {/* ─── Matches Tab ──────────────────────────────────────────────────── */}
         <TabsContent value="matches">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-sm text-muted-foreground">All calculated Cultural Alignment Index (CAI) reports</p>
+            <p className="text-sm text-muted-foreground">All calculated Cultural Match Score reports</p>
             <Link href="/fit-score">
               <Button size="sm" className="gold-gradient text-background font-semibold">
-                + New Cultural Alignment Index (CAI)
+                + New Cultural Match Score
               </Button>
             </Link>
           </div>
@@ -328,7 +328,7 @@ export default function Library() {
               <p className="text-muted-foreground">No F.I.T. reports yet</p>
               <Link href="/fit-score">
                 <Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">
-                  Calculate your first Cultural Alignment Index (CAI)
+                  Calculate your first Cultural Match Score
                 </Button>
               </Link>
             </div>

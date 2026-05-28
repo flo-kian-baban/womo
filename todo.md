@@ -1,9 +1,9 @@
-# Connex F.I.T. Engine — Project TODO
+# Connex Cultural Match Platform Engine — Project TODO
 
 ## Database & Schema
 - [x] Creator profiles table (all field note fields + AI-extracted labels)
 - [x] Brand profiles table (all field note fields + AI-extracted labels)
-- [x] Match records table (F.I.T. Score, sub-scores, radar warnings, narrative)
+- [x] Match records table (Cultural Match Score, sub-scores, radar warnings, narrative)
 
 ## Backend — AI Extraction Layer
 - [x] Influencer AI extraction prompt (archetype, themes, tone, parasocial bond, audience relationship, Barthes myth, cultural capital, Goffman, drift, Stuart Hall decoding)
@@ -18,7 +18,7 @@
 - [x] Alignment Score (α) calculation: archetype match + myth alignment + tribe match + decoding modifier
 - [x] Pulse Score (β) calculation: Rogers base + liminal adjustment
 - [x] Stability Score (γ) calculation: Goffman + drift average
-- [x] Final F.I.T. Score assembly with weighted sum
+- [x] Final Cultural Match Score assembly with weighted sum
 - [x] Radar Warnings engine: low alignment, archetype tension, identity instability, low pulse, trajectory divergence
 - [x] AI narrative generation for the report card
 - [x] tRPC route: calculateFIT (accepts creator + brand profile IDs)
@@ -31,7 +31,7 @@
 ## Frontend — Design System & Layout
 - [x] Global design tokens (dark elegant palette, typography)
 - [x] Custom sidebar navigation (ConnexLayout)
-- [x] Navigation: Analyze Influencer, Analyze Brand, F.I.T. Score, Library
+- [x] Navigation: Analyze Influencer, Analyze Brand, Cultural Match Score, Library
 
 ## Frontend — Influencer Analyzer Page
 - [x] Handle/URL input form with platform selector
@@ -45,10 +45,10 @@
 - [x] Brand profile display card (all extracted fields + weight configuration)
 - [x] Auto-save to library on analysis
 
-## Frontend — F.I.T. Score Report Card
+## Frontend — Cultural Match Score Report Card
 - [x] Influencer + Brand selector (from saved profiles)
 - [x] Score calculation trigger
-- [x] Composite F.I.T. Score display with status badge
+- [x] Composite Cultural Match Score display with status badge
 - [x] Three sub-score SVG rings (Alignment α, Pulse β, Stability γ)
 - [x] Archetype compatibility indicator
 - [x] Radar warnings panel with exact label names and descriptions
@@ -67,7 +67,7 @@
 - [x] Back navigation to library
 
 ## Export
-- [x] JSON export: all field note data, sub-scores, F.I.T. Score, status, radar warnings
+- [x] JSON export: all field note data, sub-scores, Cultural Match Score, status, radar warnings
 - [x] JSON export for individual creator profiles
 - [x] JSON export for individual brand profiles
 - [x] PDF export: formatted report (deferred to Phase 2 — future enhancement)
@@ -305,7 +305,7 @@
 - [x] Update routers.ts fit.calculate: call calculateVerifiedFITScore() and generateSynergyNarrative() and save all new fields
 - [x] Build getComparablePartnerships() in db.ts: query match_records for saved pairs sharing same brandType or creatorNiche or archetype combination, ordered by fitScore desc, limit 5
 - [x] Add comparable partnerships tRPC route to routers.ts
-- [x] Redesign MatchReport.tsx: new report structure with Synergy Brief at top, Verified F.I.T. Impressions Score as hero metric alongside F.I.T. Score, Symbolic Resonance Evidence section, Content Directions section, Comparable Partnerships section at bottom
+- [x] Redesign MatchReport.tsx: new report structure with Synergy Brief at top, Verified F.I.T. Impressions Score as hero metric alongside Cultural Match Score, Symbolic Resonance Evidence section, Content Directions section, Comparable Partnerships section at bottom
 - [x] Update FITScore.tsx: show Verified F.I.T. Impressions Score in the live calculation result card with shared themes and content directions
 - [x] Run TypeScript check (0 errors) and all tests (27/27 pass)
 - [x] Save checkpoint
@@ -323,11 +323,11 @@
 
 ## Phase 1 Commercial Strategy Updates
 - [x] Global terminology refactor: replaced all "Influencer" → "Creator" across all UI labels, page titles, nav items, button text, route paths (/analyze/influencer → /analyze/creator), and code comments
-- [x] Add F.I.T. Score tooltip/info block with exact copy: "The F.I.T. Score measures the structural alignment between a Brand and a Creator..."
+- [x] Add Cultural Match Score tooltip/info block with exact copy: "The Cultural Match Score measures the structural alignment between a Brand and a Creator..."
 - [x] Rename "Verified FIT Score" → "Predicted Audience Receptivity Rate (PARR)" everywhere in UI and code (DB column rename via SQL, all TypeScript references updated)
 - [x] Convert PARR display from 0–100 number to percentage format (e.g. 82%)
 - [x] Add PARR layman's explanation tooltip with exact copy
-- [x] Implement QoV (Quality of View) metric: formula = (F.I.T. Score / 10) × (PARR / 100), display as percentage
+- [x] Implement QoV (Quality of View) metric: formula = (Cultural Match Score / 10) × (PARR / 100), display as percentage
 - [x] Add qovScore column to match_records DB schema via webdev_execute_sql
 - [x] Add QoV calculation to fitEngine.ts runFullFITCalculation() return and save in routers.ts
 - [x] Add QoV display to FITScore.tsx with plain-English explanation tooltip
@@ -435,7 +435,7 @@
 - [x] Tooltip system ready for deployment
 
 ## Scoring Accuracy Fix
-- [x] Remove 6.0 floor from F.I.T. Score calculation (let scores go to 0)
+- [x] Remove 6.0 floor from Cultural Match Score calculation (let scores go to 0)
 - [x] Add brand tone/positioning extraction to brand analysis LLM prompt
 - [x] Add tone mismatch penalty to Alignment (α) calculation (via enriched myth alignment prompt)
 - [x] Add brandTone field to brand_profiles schema
@@ -477,13 +477,13 @@
 - [x] Tests pass (27/27), TypeScript clean
 
 
-## Version 2: Cultural Alignment Index (CAI) Upgrade
+## Version 2: Cultural Match Score Upgrade
 
-### Phase 1: Rename F.I.T. to CAI
+### Phase 1: Rename F.I.T. to Cultural Match Score
 - [x] Rename fitScore → caiScore in database schema
 - [x] Rename fitStatus → caiStatus in database schema
-- [x] Update all UI labels: "F.I.T. Score" → "Cultural Alignment Index (CAI)"
-- [x] Update all UI labels: "F.I.T. Report" → "CAI Report"
+- [x] Update all UI labels: "Cultural Match Score" → "Cultural Match Score"
+- [x] Update all UI labels: "F.I.T. Report" → "Cultural Match Score Report"
 - [x] Rename FITScore.tsx → CAIScore.tsx
 - [x] Update App.tsx to reference CAIScore
 - [x] Update all TypeScript references (56 total) from fitScore/fitStatus to caiScore/caiStatus
@@ -511,7 +511,7 @@
 ### Phase 4: Build Eight-Signal Display (Default View)
 - [x] Create SignalPanel.tsx component with two-layer layout (Performance + Cultural)
 - [x] Add confidence tier badge next to each signal score
-- [x] Display CAI score prominently at top with status label and color coding
+- [x] Display Cultural Match Score score prominently at top with status label and color coding
 - [x] Integrate SignalPanel into CAIScore.tsx as default view
 - [x] Retain all existing outputs below signal panel: PARR, QoV, Symbolic Overlap, Shared Keywords, Shared Themes, Radar Warnings, Narratives, Content Directions
 - [x] TypeScript clean, all 27 tests pass
@@ -525,10 +525,10 @@
 
 ### Phase 6: Update Side-by-Side Creator Comparison View
 - [ ] Build/update comparison view for multiple creators vs. same brand
-- [ ] Layer 1: Signal Panel — all eight signals side by side for each creator with CAI score and status
+- [ ] Layer 1: Signal Panel — all eight signals side by side for each creator with Cultural Match Score score and status
 - [ ] Layer 2: Meaning Narrative — 3-4 sentences explaining why each pairing scores as it does (from Alignment Narrative + Synergy Narrative)
 - [ ] Layer 3: Brief Recommendations — Lead with / Include / Avoid / Recommended format (from Content Directions + Radar Warnings)
-- [ ] Make comparison view accessible from Profile Library or CAI Score page
+- [ ] Make comparison view accessible from Profile Library or Cultural Match Score page
 
 ### Phase 7: Testing & Delivery
 - [ ] Run full test suite (target: 30+ tests pass)
@@ -539,7 +539,7 @@
 
 
 ## Version 2 Completion Summary
-- [x] Phase 1: F.I.T. → CAI rename complete
+- [x] Phase 1: F.I.T. → Cultural Match Score rename complete
 - [x] Phase 2: Five Performance Signals implemented
 - [x] Phase 3: Engagement Quality Score module created
 - [x] Phase 4: Eight-signal display integrated into CAIScore.tsx
@@ -580,7 +580,7 @@
 - [x] Update LLM prompt to extract: brandVoice (from TikTok), contentThemes, socialEngagementStyle
 - [x] Ensure JSON schema includes new fields
 
-### CAI Scoring Integration
+### Cultural Match Score Scoring Integration
 - [x] Update fitEngine.ts to incorporate TikTok engagement metrics into Pulse score
 - [x] Update fitEngine.ts to incorporate TikTok audience size into Stability score
 - [x] Add warning if TikTok engagement is low (potential red flag) — "Low Social Engagement" warning
@@ -596,7 +596,7 @@
 - [x] Write vitest for TikTok analysis module — placeholder tests pass
 - [x] Write vitest for updated brand extraction prompts — all 27 tests pass
 - [ ] Test with real brand data (Nike, Scotiabank, etc.) — manual testing recommended
-- [x] Verify CAI scores reflect new data sources — integrated and tested
+- [x] Verify Cultural Match Score scores reflect new data sources — integrated and tested
 
 
 ## Phase 3: Bulk Analysis Features (Batch Processing)
@@ -629,7 +629,7 @@
 ### Results Dashboard
 - [ ] Create BulkAnalysisResults.tsx component
 - [ ] Display all profiles from bulk analysis in table format
-- [ ] Show CAI scores, status, and radar warnings
+- [ ] Show Cultural Match Score scores, status, and radar warnings
 - [ ] Add export to CSV functionality
 - [ ] Add ability to compare multiple profiles side-by-side
 - [ ] Link to individual profile details
@@ -805,7 +805,7 @@
 
 ### Info Tooltip System
 - [x] Build reusable InfoTooltip component: hover over ⓘ icon shows a popover with "What it is", "How it's calculated", "Why it matters"
-- [x] Add InfoTooltip to F.I.T. Score (composite)
+- [x] Add InfoTooltip to Cultural Match Score (composite)
 - [x] Add InfoTooltip to Alignment Score (α)
 - [x] Add InfoTooltip to Pulse Score (β)
 - [x] Add InfoTooltip to Stability Score (γ)

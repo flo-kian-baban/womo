@@ -1,5 +1,5 @@
 /**
- * Connex F.I.T. — Symbol Decoder
+ * Connex Cultural Match Platform — Symbol Decoder
  *
  * Runs a dedicated LLM pass over ALL creator-authored text before the main
  * extraction call. Decodes language into structured cultural signals that map

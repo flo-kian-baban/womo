@@ -23,7 +23,7 @@ const NAV_ITEMS = [
     icon: Building2,
   },
   {
-    label: "Cultural Alignment Index (CAI)",
+    label: "Cultural Match Score",
     href: "/fit-score",
     icon: BarChart3,
   },
@@ -106,7 +106,7 @@ export default function ConnexLayout({ children }: ConnexLayoutProps) {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-border">
           <div className="text-[10px] text-muted-foreground/60 leading-relaxed">
-            <div className="font-semibold text-muted-foreground/80 mb-1">Connex F.I.T. Engine v2.0</div>
+            <div className="font-semibold text-muted-foreground/80 mb-1">Connex Cultural Match Platform Engine v2.0</div>
             Powered by Jungian Archetypes,<br />
             Bourdieusian Symbolic Capital &<br />
             Stuart Hall Decoding Theory
@@ -130,7 +130,7 @@ export default function ConnexLayout({ children }: ConnexLayoutProps) {
             <div className="w-7 h-7 rounded-md gold-gradient flex items-center justify-center">
               <Zap className="w-3.5 h-3.5 text-background" strokeWidth={2.5} />
             </div>
-            <span className="font-serif text-base gold-text">Connex F.I.T.</span>
+            <span className="font-serif text-base gold-text">Connex Cultural Match Platform</span>
           </div>
           <button
             className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"

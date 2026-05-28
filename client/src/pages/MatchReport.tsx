@@ -206,7 +206,7 @@ export default function MatchReport() {
     const exportData = {
       generatedAt: new Date().toISOString(),
       reportVersion: "3.0",
-      framework: "Connex Cultural Alignment Index (CAI)",
+      framework: "Connex Cultural Match Score",
       creator: data.creator,
       brand: data.brand,
       match: {
@@ -332,17 +332,17 @@ export default function MatchReport() {
         </div>
       </div>
 
-      {/* ─── Hero: Cultural Alignment Index (CAI) + Verified F.I.T. Impressions Score ─────────── */}
+      {/* ─── Hero: Cultural Match Score + Verified F.I.T. Impressions Score ─────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 animate-fade-in-up animate-stagger-1">
-        {/* Cultural Alignment Index (CAI) */}
+        {/* Cultural Match Score */}
         <div className="fit-card rounded-xl p-8 connex-glow">
           <div className="flex items-center gap-1.5 mb-4">
             <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground">
-              Cultural Alignment Index (CAI)
+              Cultural Match Score
             </div>
             <MetricTooltip
-              title="Cultural Alignment Index (CAI)"
-              explanation="The Cultural Alignment Index (CAI) measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
+              title="Cultural Match Score"
+              explanation="The Cultural Match Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
               formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
               dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
             />
@@ -423,10 +423,10 @@ export default function MatchReport() {
                       </div>
                       <MetricTooltip
                         title="QoV — Quality of View"
-                        explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (CAI) with the audience-level receptivity (PARR) to produce a single impression quality score."
-                        formula="(CAI ÷ 10) × PARR"
+                        explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (Cultural Match Score) with the audience-level receptivity (PARR) to produce a single impression quality score."
+                        formula="(Cultural Match Score ÷ 10) × PARR"
                         whyItMatters="Raw impression counts are meaningless without quality context. A QoV of 60% means 60% of every view is converting into genuine brand equity — not just passive exposure."
-                        dataPoints={["Cultural Alignment Index (CAI)", "PARR (Predicted Audience Receptivity Rate)"]}
+                        dataPoints={["Cultural Match Score", "PARR (Predicted Audience Receptivity Rate)"]}
                         side="top"
                       />
                     </div>

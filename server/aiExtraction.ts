@@ -1,5 +1,5 @@
 /**
- * Connex F.I.T. — AI Extraction Layer
+ * Connex Cultural Match Platform — AI Extraction Layer
  * Uses the built-in LLM to extract structured cultural profiles
  * from creator handles and brand names/URLs.
  */
@@ -43,7 +43,7 @@ export async function extractCreatorProfile(
   evidenceSummary?: string  // Real scraped evidence from webResearch.ts
 ): Promise<CreatorExtractionResult> {
   const systemPrompt = `You are a cultural anthropologist and media analyst specializing in creator marketing.
-Your task is to analyze a social media creator and produce a structured cultural profile using the Connex F.I.T. framework.
+Your task is to analyze a social media creator and produce a structured cultural profile using the Connex Cultural Match Platform framework.
 
 CRITICAL INSTRUCTION — TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL:
 You will receive evidence that may include SPOKEN TRANSCRIPTS from the creator's actual videos.
@@ -93,7 +93,7 @@ These are more anthropologically revealing than topic nouns alone.`;
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
     : `\n\nNote: No scraped evidence available. Use your knowledge of this creator if they are publicly known, but be conservative and note uncertainty.`;
 
-  const userPrompt = `Analyze the following social media creator and produce a complete Connex F.I.T. cultural profile.${evidenceBlock}
+  const userPrompt = `Analyze the following social media creator and produce a complete Connex Cultural Match Platform cultural profile.${evidenceBlock}
 
 Creator Handle: ${handleOrUrl}
 Platform: ${platform}
@@ -381,7 +381,7 @@ export async function extractBrandProfile(
   ];
 
   const systemPrompt = `You are a brand strategist and cultural analyst specializing in creator marketing.
-Your task is to analyze a brand or business and produce a structured cultural profile using the Connex F.I.T. framework.
+Your task is to analyze a brand or business and produce a structured cultural profile using the Connex Cultural Match Platform framework.
 You will be provided with REAL, SCRAPED evidence from the brand's public website and web presence.
 You MUST base your analysis on this evidence. Do NOT contradict the evidence.
 If the evidence shows a local restaurant, analyze it as a local restaurant. If the evidence shows a luxury brand, analyze it as luxury.
@@ -418,7 +418,7 @@ When the evidence includes a TIKTOK CHANNEL ANALYSIS section:
     ? `\n\nREAL SCRAPED EVIDENCE (use this as ground truth):\n${evidenceSummary}\n`
     : `\n\nNote: No scraped evidence available. Use your knowledge of this brand if it is publicly known, but be conservative.`;
 
-  const userPrompt = `Analyze the following brand and produce a complete Connex F.I.T. cultural brand profile.${evidenceBlock}
+  const userPrompt = `Analyze the following brand and produce a complete Connex Cultural Match Platform cultural brand profile.${evidenceBlock}
 
 Brand: ${brandNameOrUrl}
 
@@ -610,7 +610,7 @@ IMPORTANT WRITING RULES:
   const userPrompt = `Write a match report for this creator-brand pairing:
 Creator: ${input.creatorHandle} (Personality type: ${input.creatorArchetype}, Pronouns: ${input.creatorPronouns ?? "not specified"})
 Brand: ${input.brandName} (Personality type: ${input.brandArchetype})
-F.I.T. Score: ${input.caiScore}/10 — ${input.caiStatus}
+Cultural Match Score: ${input.caiScore}/10 — ${input.caiStatus}
 Alignment: ${input.alignmentRaw.toFixed(1)}/10 | Momentum: ${input.pulseRaw.toFixed(1)}/10 | Consistency: ${input.stabilityRaw.toFixed(1)}/10
 Flags: ${input.radarWarnings.length > 0 ? input.radarWarnings.join(", ") : "None"}
 Creator story: ${input.creatorBarthesMyth}
