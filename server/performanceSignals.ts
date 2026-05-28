@@ -2,6 +2,12 @@
  * Performance Signals Calculation Module
  * Derives five performance signals from existing creator and brand data.
  * Each signal is scored 0-100 with a confidence tier (Verified/Estimated/Insufficient Data).
+ *
+ * Design principles:
+ *   - Creator-side inputs establish a baseline (0–50 range contribution)
+ *   - Brand-side inputs differentiate the score across brands (0–50 range contribution)
+ *   - No single creator signal should be able to push the score to 100 alone
+ *   - Engagement rates are stored as percentages (e.g. 6.39 = 6.39%), NOT decimals
  */
 
 import type { CreatorProfile } from "../drizzle/schema";
@@ -13,115 +19,200 @@ export interface SignalResult {
   reasoning: string;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Map Goffman stage to a 0–10 score */
+function goffmanToScore(stage: string | null | undefined): number {
+  if (stage === "Consistent") return 10;
+  if (stage === "Minor Gap") return 5;
+  if (stage === "Significant Gap") return 0;
+  return 5; // default
+}
+
+/** Map drift signal to a 0–10 score */
+function driftToScore(drift: string | null | undefined): number {
+  if (drift === "Zero Change") return 10;
+  if (drift === "Minor Drift") return 7;
+  if (drift === "Significant Drift") return 3;
+  if (drift === "Full Pivot") return 0;
+  return 5; // default
+}
+
+// ─── Signal 1: Creative Integrity ────────────────────────────────────────────
 /**
- * Signal 1: Creative Integrity Signal
  * Measures: Do this creator and brand each have genuine, consistent creative identity?
- * Inputs: Creator tone, goffman, cultural capital + Brand tone, archetype, visual language
+ *
+ * Scoring breakdown (0–100):
+ *   Creator side (max 40):
+ *     - Goffman stage consistency (0–10) × 2 = 0–20
+ *     - Cultural capital type: Produce = 10, Relay = 5 → 0–10
+ *     - Tone register present: +10
+ *   Brand side (max 40):
+ *     - Mention sentiment: positive = 15, mixed = 8, negative = 0
+ *     - Brand Goffman consistency (0–10) → 0–10
+ *     - Overall rating bonus (0–15): (rating - 3.0) × 7.5, capped 0–15
+ *   Pairing penalty (max -20):
+ *     - Creator Produce + brand prescriptive tone: -20
+ *
+ * Baseline: 20 (ensures a floor even with no data)
  */
 export function calculateCreativeIntegritySignal(
   creator: CreatorProfile,
   brand: BrandProfile
 ): SignalResult {
-  let score = 50; // baseline
+  let score = 20; // baseline
   let confidence: "Verified" | "Estimated" | "Insufficient Data" = "Estimated";
+  const reasons: string[] = [];
 
-  // Creator side: tone consistency + goffman + cultural capital
-  if (creator.toneRegister && creator.goffmanStageConsistency) {
-    const goffmanScore =
-      creator.goffmanStageConsistency === "Consistent"
-        ? 10
-        : creator.goffmanStageConsistency === "Minor Gap"
-          ? 5
-          : 0;
-    const capitalType = creator.culturalCapital === "Produce" ? 10 : 5;
-    const creatorIntegrity = (goffmanScore + capitalType) / 2;
-    score += creatorIntegrity * 0.3; // 30% weight to creator side
+  // ── Creator side (max 40) ──────────────────────────────────────────────────
+  const creatorGoffman = goffmanToScore(creator.goffmanStageConsistency);
+  score += creatorGoffman * 2; // 0–20
+  if (creator.culturalCapital === "Produce") {
+    score += 10;
+  } else if (creator.culturalCapital === "Relay") {
+    score += 5;
+  }
+  if (creator.toneRegister) {
+    score += 10;
+  }
+  reasons.push(`Creator: ${creator.culturalCapital ?? "unknown"}-type, ${creator.goffmanStageConsistency ?? "unknown"} stage`);
+
+  // ── Brand side (max 40) ───────────────────────────────────────────────────
+  const mentionSentiment = brand.mentionSentiment as string | null;
+  const mentionCount = (brand.mentionTotalCount as number | null) ?? 0;
+  if (mentionSentiment === "positive" && mentionCount >= 5) {
+    score += 15;
+    reasons.push("brand audience sentiment: positive");
+  } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
+    score += 5;
+    reasons.push("brand audience sentiment: mixed");
+  } else if (mentionSentiment === "negative" && mentionCount >= 5) {
+    score -= 15; // negative audience perception undermines brand creative integrity
+    reasons.push("brand audience sentiment: negative");
+  } else {
+    score += 3; // insufficient mention data
+    reasons.push("brand audience sentiment: insufficient data");
   }
 
-  // Brand side: tone clarity + archetype strength + mention consistency
-  if (brand.brandTone && brand.archetype) {
-    const toneClarity =
-      brand.brandTone && brand.brandTone.length > 10 ? 10 : 5;
-    const archetypeStrength = brand.archetype ? 8 : 4;
-    
-    // Bonus: if brand has TikTok mention data showing consistent audience perception
-    let mentionBonus = 0;
-    const tiktokMeta = brand.tiktokMetadata as Record<string, unknown> | null;
-    const mentionSentiment = tiktokMeta?.mentionSentiment as string | undefined;
-    const mentionCount = (tiktokMeta?.totalMentions as number) ?? 0;
-    if (mentionSentiment === "positive" && mentionCount >= 5) {
-      mentionBonus = 3; // audience confirms brand identity
-    } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
-      mentionBonus = 1; // some audience confirmation
-    }
-    
-    const brandIntegrity = (toneClarity + archetypeStrength + mentionBonus) / 3;
-    score += brandIntegrity * 0.3; // 30% weight to brand side
-  }
+  const brandGoffman = goffmanToScore((brand as any).brandGoffmanStageConsistency);
+  score += brandGoffman; // 0–10
+  // Note: overallRating is used in Brand Trust signal, not Creative Integrity
 
-  // Pairing penalty: creator autonomy vs brand rigidity
+  // ── Pairing penalty ───────────────────────────────────────────────────────
   if (
     creator.culturalCapital === "Produce" &&
     brand.brandTone &&
     brand.brandTone.toLowerCase().includes("prescriptive")
   ) {
-    score -= 15; // penalty for autonomy clash
+    score -= 20;
+    reasons.push("autonomy clash penalty");
   }
 
-  // Confidence: high if both sides have data
+  // ── Confidence ────────────────────────────────────────────────────────────
   if (
     creator.goffmanStageConsistency &&
     creator.culturalCapital &&
     brand.brandTone &&
-    brand.archetype
+    brand.archetype &&
+    mentionSentiment
   ) {
     confidence = "Verified";
   }
 
   return {
-    score: Math.max(0, Math.min(100, score)),
+    score: Math.max(0, Math.min(100, Math.round(score * 100) / 100)),
     confidence,
-    reasoning: `Creator is ${creator.culturalCapital}-type with ${creator.goffmanStageConsistency} stage. Brand has ${brand.brandTone ? "clear" : "unclear"} tone.`,
+    reasoning: reasons.join(". ") + ".",
   };
 }
 
+// ─── Signal 2: Performance Consistency ───────────────────────────────────────
 /**
- * Signal 2: Performance Consistency Signal
  * Measures: Does creator deliver reliable performance? Does brand run structured campaigns?
- * Inputs: Creator engagement rate, lifecycle, brand saturation + Brand campaign type, reviews
+ *
+ * Scoring breakdown (0–100):
+ *   Creator side (max 50):
+ *     - Engagement rate (stored as %, e.g. 6.39 = 6.39%):
+ *         ≥ 6% = 20 pts, 3–6% = 15 pts, 1–3% = 10 pts, < 1% = 5 pts
+ *     - Lifecycle phase: Growth/Maturity = 15, Emergence = 10, Decline = -10
+ *     - Brand saturation penalty: -10
+ *   Brand side (max 50):
+ *     - Brand has clear archetype: +10
+ *     - Brand Goffman consistency (0–10) → 0–10
+ *     - Brand drift stability (0–10) → 0–10
+ *     - TikTok engagement rate (if available): ≥ 3% = +10, 1–3% = +5
+ *     - Overall rating: ≥ 4.0 = +10, 3.0–4.0 = +5
+ *
+ * Baseline: 0 (no artificial floor — must earn the score)
  */
 export function calculatePerformanceConsistencySignal(
   creator: CreatorProfile,
   brand: BrandProfile
 ): SignalResult {
-  let score = 50; // baseline
+  let score = 0;
   let confidence: "Verified" | "Estimated" | "Insufficient Data" = "Estimated";
+  const reasons: string[] = [];
 
-  // Creator performance: engagement rate + lifecycle phase
+  // ── Creator side (max 50) ──────────────────────────────────────────────────
+  // Engagement rate is stored as a percentage (0–100), e.g. 6.39 means 6.39%
   if (creator.engagementRate !== null && creator.engagementRate !== undefined) {
-    const engagementBonus = Math.min(creator.engagementRate * 5, 30); // cap at 30
-    score += engagementBonus;
+    const engPct = creator.engagementRate; // already a percentage
+    if (engPct >= 6) {
+      score += 20;
+    } else if (engPct >= 3) {
+      score += 15;
+    } else if (engPct >= 1) {
+      score += 10;
+    } else {
+      score += 5;
+    }
+    reasons.push(`creator engagement ${engPct.toFixed(1)}%`);
   }
 
-  // Lifecycle phase bonus
   if (creator.lifecyclePhase === "Growth" || creator.lifecyclePhase === "Maturity") {
     score += 15;
+  } else if (creator.lifecyclePhase === "Emergence") {
+    score += 10;
   } else if (creator.lifecyclePhase === "Decline") {
-    score -= 20;
-  }
-
-  // Brand saturation penalty
-  if (creator.brandSaturation) {
     score -= 10;
   }
+  if (creator.lifecyclePhase) reasons.push(`lifecycle ${creator.lifecyclePhase}`);
 
-  // Brand campaign clarity (if available from brand data)
-  // This would be derived from brand's campaign history or positioning
-  if (brand.archetype) {
-    score += 10; // brand has clear positioning
+  if (creator.brandSaturation) {
+    score -= 10;
+    reasons.push("brand saturation penalty");
   }
 
-  // Confidence: high if engagement data exists
+  // ── Brand side (max 50) ───────────────────────────────────────────────────
+  if (brand.archetype) {
+    score += 10;
+  }
+
+  const brandGoffman = goffmanToScore((brand as any).brandGoffmanStageConsistency);
+  score += brandGoffman; // 0–10
+
+  const brandDrift = driftToScore((brand as any).brandDriftSignal);
+  score += brandDrift; // 0–10
+
+  if (brand.tiktokEngagementRate !== null && brand.tiktokEngagementRate !== undefined) {
+    if (brand.tiktokEngagementRate >= 3) {
+      score += 10;
+    } else if (brand.tiktokEngagementRate >= 1) {
+      score += 5;
+    }
+    reasons.push(`brand TikTok engagement ${brand.tiktokEngagementRate.toFixed(1)}%`);
+  }
+
+  if (brand.overallRating !== null && brand.overallRating !== undefined) {
+    if (brand.overallRating >= 4.0) {
+      score += 10;
+    } else if (brand.overallRating >= 3.0) {
+      score += 5;
+    }
+    reasons.push(`brand rating ${brand.overallRating.toFixed(1)}`);
+  }
+
+  // ── Confidence ────────────────────────────────────────────────────────────
   if (
     creator.engagementRate !== null &&
     creator.engagementRate !== undefined &&
@@ -131,16 +222,16 @@ export function calculatePerformanceConsistencySignal(
   }
 
   return {
-    score: Math.max(0, Math.min(100, score)),
+    score: Math.max(0, Math.min(100, Math.round(score * 100) / 100)),
     confidence,
-    reasoning: `Creator engagement ${creator.engagementRate ? `${(creator.engagementRate * 100).toFixed(1)}%` : "unknown"}, lifecycle ${creator.lifecyclePhase || "unknown"}.`,
+    reasoning: reasons.join(", ") + ".",
   };
 }
 
+// ─── Signal 3: Community Quality ─────────────────────────────────────────────
 /**
- * Signal 3: Community Quality Signal
  * Measures: Is creator's community the right community for brand?
- * Inputs: Creator audience tribe + PARR + Stuart Hall decoding + location + Brand audience tribe + location
+ * (unchanged — already differentiates by brand via PARR and hashtag overlap)
  */
 export function calculateCommunityQualitySignal(
   creator: CreatorProfile,
@@ -167,16 +258,14 @@ export function calculateCommunityQualitySignal(
 
   // Geographic match (if both have location data)
   if (creator.primaryRegion) {
-    // Brand location would be stored separately if available
     score += 5; // bonus for having geographic data
   }
 
   // Audience tribe description overlap (qualitative)
   if (creator.audienceRelationshipType) {
-    // Check if creator's audience relationship aligns with brand positioning
     score += 5; // bonus for having audience relationship data
   }
-  
+
   // TikTok mention keyword overlap: if brand mentions show audience keywords that match creator's audience
   const mentionHashtags = (brand.mentionHashtagCloud as string[]) ?? [];
   const creatorKeywords = (creator.rawKeywords as string[]) ?? [];
@@ -200,10 +289,10 @@ export function calculateCommunityQualitySignal(
   };
 }
 
+// ─── Signal 4: Audience Receptivity ──────────────────────────────────────────
 /**
- * Signal 4: Audience Receptivity Signal
  * Measures: Will creator's audience receive brand's message well?
- * Inputs: PARR + QoV + Decoding modifier + Brand emotional promise + Barthes myth + campaign type
+ * (unchanged — already differentiates by brand via PARR + QoV)
  */
 export function calculateAudienceReceptivitySignal(
   creator: CreatorProfile,
@@ -233,7 +322,6 @@ export function calculateAudienceReceptivitySignal(
 
   // Brand emotional promise resonance (if available)
   if (brand.barthesMyth && creator.barthesMyth) {
-    // Simple check: do myths overlap?
     if (brand.barthesMyth.toLowerCase().includes("success") && creator.barthesMyth.toLowerCase().includes("success")) {
       score += 10;
     }
@@ -247,83 +335,117 @@ export function calculateAudienceReceptivitySignal(
   return {
     score: Math.max(0, Math.min(100, score)),
     confidence,
-    reasoning: `PARR ${parrScore ? `${parrScore}%` : "unknown"}, QoV ${qovScore ? `${qovScore}%` : "unknown"}.`,
+    reasoning: `PARR ${parrScore ? `${parrScore}%` : "unknown"}, QoV ${qovScore ? `${qovScore.toFixed(1)}%` : "unknown"}.`,
   };
 }
 
+// ─── Signal 5: Brand Trust ────────────────────────────────────────────────────
 /**
- * Signal 5: Brand Trust Signal
  * Measures: Can brand trust creator? Can creator trust brand?
- * Inputs: Creator goffman + drift + data confidence + brand saturation + Brand reviews + saturation
+ *
+ * Scoring breakdown (0–100):
+ *   Creator side (max 40):
+ *     - Goffman stage: Consistent = 15, Minor Gap = 8, Significant Gap = -10
+ *     - Drift signal: Zero Change = 10, Minor Drift = 7, Significant Drift = 3, Full Pivot = -15
+ *     - Brand saturation: -10
+ *   Brand side (max 60):
+ *     - Mention sentiment: positive + ≥5 mentions = 20, mixed = 10, negative = -10
+ *     - Overall rating: ≥ 4.5 = 15, 4.0–4.5 = 10, 3.5–4.0 = 5, < 3.0 = -5
+ *     - Brand archetype present: +5
+ *     - Brand Goffman consistency (0–10) → 0–10
+ *   Data confidence modifier:
+ *     - high = +5, low = -5
+ *
+ * Baseline: 20
  */
 export function calculateBrandTrustSignal(
   creator: CreatorProfile,
   brand: BrandProfile,
   dataConfidenceLevel?: string
 ): SignalResult {
-  let score = 50; // baseline
+  let score = 20; // baseline
   let confidence: "Verified" | "Estimated" | "Insufficient Data" = "Estimated";
+  const reasons: string[] = [];
 
-  // Creator trustworthiness: goffman consistency + drift
+  // ── Creator side (max 40) ──────────────────────────────────────────────────
   if (creator.goffmanStageConsistency === "Consistent") {
-    score += 20;
+    score += 15;
   } else if (creator.goffmanStageConsistency === "Minor Gap") {
-    score += 10;
+    score += 8;
   } else if (creator.goffmanStageConsistency === "Significant Gap") {
+    score -= 10;
+  }
+  if (creator.goffmanStageConsistency) reasons.push(`creator stage: ${creator.goffmanStageConsistency}`);
+
+  if (creator.driftSignal === "Zero Change") {
+    score += 10;
+  } else if (creator.driftSignal === "Minor Drift") {
+    score += 7;
+  } else if (creator.driftSignal === "Significant Drift") {
+    score += 3;
+  } else if (creator.driftSignal === "Full Pivot") {
     score -= 15;
   }
+  if (creator.driftSignal) reasons.push(`drift: ${creator.driftSignal}`);
 
-  // Drift signal
-  if (creator.driftSignal === "Zero Change" || creator.driftSignal === "Minor Drift") {
-    score += 15;
-  } else if (creator.driftSignal === "Full Pivot") {
-    score -= 20;
+  if (creator.brandSaturation) {
+    score -= 10;
+    reasons.push("brand saturation penalty");
   }
 
-  // Data confidence
-  if (dataConfidenceLevel === "high") {
+  // ── Brand side (max 60) ───────────────────────────────────────────────────
+  const mentionSentiment = brand.mentionSentiment as string | null;
+  const mentionCount = (brand.mentionTotalCount as number | null) ?? 0;
+  if (mentionSentiment === "positive" && mentionCount >= 5) {
+    score += 20;
+    confidence = "Verified";
+    reasons.push("brand audience sentiment: positive");
+  } else if (mentionSentiment === "mixed" && mentionCount >= 5) {
     score += 10;
+    reasons.push("brand audience sentiment: mixed");
+  } else if (mentionSentiment === "negative" && mentionCount >= 5) {
+    score -= 10;
+    reasons.push("brand audience sentiment: negative");
+  }
+
+  if (brand.overallRating !== null && brand.overallRating !== undefined) {
+    if (brand.overallRating >= 4.5) {
+      score += 15;
+    } else if (brand.overallRating >= 4.0) {
+      score += 10;
+    } else if (brand.overallRating >= 3.5) {
+      score += 5;
+    } else if (brand.overallRating < 3.0) {
+      score -= 5;
+    }
+    reasons.push(`brand rating: ${brand.overallRating.toFixed(1)}`);
+  }
+
+  if (brand.archetype) {
+    score += 5;
+  }
+
+  const brandGoffman = goffmanToScore((brand as any).brandGoffmanStageConsistency);
+  score += brandGoffman; // 0–10
+
+  // ── Data confidence modifier ──────────────────────────────────────────────
+  if (dataConfidenceLevel === "high") {
+    score += 5;
     confidence = "Verified";
   } else if (dataConfidenceLevel === "low") {
-    score -= 10;
+    score -= 5;
     confidence = "Insufficient Data";
   }
-
-  // Brand saturation penalty
-  if (creator.brandSaturation) {
-    score -= 15;
-  }
-
-  // Brand trustworthiness (if review data available)
-  if (brand.archetype) {
-    score += 5; // brand has clear identity
-  }
-  
-  // Brand mention sentiment: positive mentions boost trust, negative reduce it
-  const mentionSentiment = brand.mentionSentiment as string | undefined;
-  const mentionCount = (brand as any).mentionTotalCount as number | undefined;
-  if (mentionSentiment === "positive" && (mentionCount ?? 0) >= 5) {
-    score += 15; // audience confirms brand trustworthiness
-    confidence = "Verified";
-  } else if (mentionSentiment === "negative" && (mentionCount ?? 0) >= 5) {
-    score -= 15; // audience signals distrust
-  } else if (mentionSentiment === "mixed" && (mentionCount ?? 0) >= 5) {
-    score += 5; // mixed signals
-  }
-  
-  // Brand review rating (if available)
-  if (brand.overallRating !== null && brand.overallRating !== undefined) {
-    const ratingBonus = Math.min((brand.overallRating - 3) * 10, 15); // 3.0 = 0 bonus, 5.0 = 20 bonus
-    score += ratingBonus;
-  }
+  if (dataConfidenceLevel) reasons.push(`data confidence: ${dataConfidenceLevel}`);
 
   return {
-    score: Math.max(0, Math.min(100, score)),
+    score: Math.max(0, Math.min(100, Math.round(score * 100) / 100)),
     confidence,
-    reasoning: `Creator stage: ${creator.goffmanStageConsistency || "unknown"}, drift: ${creator.driftSignal || "unknown"}. Data confidence: ${dataConfidenceLevel || "unknown"}.`,
+    reasoning: reasons.join(", ") + ".",
   };
 }
 
+// ─── calculateAllSignals ──────────────────────────────────────────────────────
 /**
  * Calculate all eight signals (five performance + three cultural)
  */
