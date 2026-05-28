@@ -795,3 +795,28 @@
 - [ ] Write Phase 9 vitest tests for semantic alignment with enriched data
 - [ ] Run all tests and verify no regressions
 - [ ] Save checkpoint
+
+## Fix: Label Unreliable TikTok Metrics + Add Info Tooltips Everywhere
+
+### Unreliable Metric Labeling
+- [x] Label follower count, video count, and total likes as "Unverified — TikTok restricts direct profile stat access" in creator profile card
+- [x] Show a small warning badge/icon next to these three fields in the UI
+- [x] Add a note in the creator profile card explaining which metrics are computed from real video data vs. blocked by TikTok
+
+### Info Tooltip System
+- [x] Build reusable InfoTooltip component: hover over ⓘ icon shows a popover with "What it is", "How it's calculated", "Why it matters"
+- [x] Add InfoTooltip to F.I.T. Score (composite)
+- [x] Add InfoTooltip to Alignment Score (α)
+- [x] Add InfoTooltip to Pulse Score (β)
+- [x] Add InfoTooltip to Stability Score (γ)
+- [x] Add InfoTooltip to PARR (Predicted Audience Receptivity Rate)
+- [x] Add InfoTooltip to QoV (Quality of View)
+- [x] Add InfoTooltip to Verified F.I.T. Impressions Score
+- [x] Add InfoTooltip to Identity Fit signal
+- [x] Add InfoTooltip to Performance Fit signal
+- [x] Add InfoTooltip to Audience Fit signal
+- [x] Add InfoTooltip to Receptivity Fit signal
+- [x] Add InfoTooltip to Brand Safety Fit signal
+- [x] Add InfoTooltip to Cultural Identity sub-score
+- [x] Add InfoTooltip to Cultural Momentum sub-score
+- [x] Add InfoTooltip to Partnership Stability sub-score

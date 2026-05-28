@@ -8,6 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import type { CreatorProfile, BrandProfile, MatchRecord } from "../../../drizzle/schema";
 import { SignalPanel } from "@/components/SignalPanel";
+import { MetricTooltip } from "@/components/MetricTooltip";
 
 // ─── Score Ring SVG ───────────────────────────────────────────────────────────
 function ScoreRing({
@@ -349,14 +350,14 @@ export default function FITScore() {
                 <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(2)}</div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-muted-foreground">Cultural Alignment Index (CAI) / 10</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                      The Cultural Alignment Index (CAI) measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins.
-                    </TooltipContent>
-                  </Tooltip>
+                  <MetricTooltip
+                    title="Cultural Alignment Index (CAI)"
+                    explanation="The CAI measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
+                    formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
+                    whyItMatters="The CAI is the primary go/no-go signal. A score below 6.0 indicates the partnership will feel forced to audiences regardless of how good the content is."
+                    dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
+                    side="top"
+                  />
                 </div>
                 <FITStatusBadge status={matchResult.result.caiStatus} />
               </div>
@@ -372,6 +373,14 @@ export default function FITScore() {
                   color="oklch(0.65 0.15 240)"
                   size={110}
                 />
+                <MetricTooltip
+                  title="Alignment (α)"
+                  explanation="Measures archetype compatibility, myth alignment, and audience decoding acceptance between creator and brand."
+                  formula="(Archetype Match × 0.4) + (Myth Alignment × 0.35) + (Decoding × 0.25)"
+                  whyItMatters="Alignment is the foundation of cultural fit. Without it, no amount of audience size or engagement rate will make the partnership feel authentic."
+                  dataPoints={["Archetype compatibility matrix", "Barthes myth alignment", "Stuart Hall decoding mode"]}
+                  side="bottom"
+                />
               </div>
               <div className="flex flex-col items-center gap-3">
                 <ScoreRing
@@ -381,6 +390,14 @@ export default function FITScore() {
                   color="oklch(0.65 0.15 145)"
                   size={110}
                 />
+                <MetricTooltip
+                  title="Pulse (β)"
+                  explanation="Measures cultural momentum: whether the creator's niche is trending, stable, or declining based on Rogers adoption stage and liminal phase."
+                  formula="(Rogers Base × 0.6) + (Liminal Adjustment × 0.4)"
+                  whyItMatters="A creator at the peak of cultural relevance amplifies a brand's message. A declining creator can drag a brand's perception down even if the archetype fit is strong."
+                  dataPoints={["Rogers adopter stage", "Turner liminal phase", "Cultural velocity signal"]}
+                  side="bottom"
+                />
               </div>
               <div className="flex flex-col items-center gap-3">
                 <ScoreRing
@@ -389,6 +406,14 @@ export default function FITScore() {
                   sublabel={`weight: ${matchResult.result.weightGamma}`}
                   color="oklch(0.78 0.12 75)"
                   size={110}
+                />
+                <MetricTooltip
+                  title="Stability (γ)"
+                  explanation="Measures identity consistency: whether the creator's themes remain stable over time and whether their identity is drifting or holding."
+                  formula="(Goffman Consistency × 0.5) + (Drift Signal × 0.5)"
+                  whyItMatters="Brands need partners who will still represent the same values in 6 months. High stability means the creator is a reliable long-term ambassador, not a trend-chaser."
+                  dataPoints={["Goffman stage consistency", "Keyword drift signal", "Follower growth trajectory"]}
+                  side="bottom"
                 />
               </div>
             </div>
@@ -484,15 +509,14 @@ export default function FITScore() {
                     <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
                       PARR
                     </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                        <p className="font-semibold mb-1">Predicted Audience Receptivity Rate</p>
-                        PARR predicts the probability of audience acceptance. It calculates what percentage of the Creator's audience is structurally guaranteed to receive your brand message as authentic and culturally legitimate, rather than forced or inauthentic.
-                      </TooltipContent>
-                    </Tooltip>
+                    <MetricTooltip
+                      title="PARR — Predicted Audience Receptivity Rate"
+                      explanation="PARR calculates what percentage of the creator's audience is structurally guaranteed to receive the brand message as authentic and culturally legitimate, rather than forced or inauthentic."
+                      formula="(Archetype Alignment × 0.35) + (Symbolic Overlap × 0.30) + (Decoding Mode × 0.20) + (Tribe Match × 0.15)"
+                      whyItMatters="A high PARR means the audience will accept the brand message without cognitive dissonance. A low PARR means the audience will perceive the partnership as a paid placement, reducing trust and conversion."
+                      dataPoints={["Archetype compatibility", "Shared symbolic vocabulary", "Stuart Hall decoding mode", "Audience tribe alignment"]}
+                      side="top"
+                    />
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="text-2xl font-serif" style={{
@@ -540,16 +564,14 @@ export default function FITScore() {
                     <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
                       QoV
                     </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                        <p className="font-semibold mb-1">Quality of View</p>
-                        Quality of View quantifies the cultural resonance of each impression. A higher QoV means the view is more likely to convert into brand equity because both the entity-level fit and the audience-level receptivity are optimized.
-                        <p className="mt-1 text-muted-foreground">Formula: (Cultural Alignment Index (CAI) ÷ 10) × PARR</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <MetricTooltip
+                      title="QoV — Quality of View"
+                      explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (CAI) with the audience-level receptivity (PARR) to produce a single impression quality score."
+                      formula="(CAI ÷ 10) × PARR"
+                      whyItMatters="Raw impression counts are meaningless without quality context. A QoV of 60% means 60% of every view is converting into genuine brand equity — not just passive exposure."
+                      dataPoints={["Cultural Alignment Index (CAI)", "PARR (Predicted Audience Receptivity Rate)"]}
+                      side="top"
+                    />
                   </div>
                   <span className="text-2xl font-serif text-foreground/90">{matchResult.result.qovScore}%</span>
                 </div>

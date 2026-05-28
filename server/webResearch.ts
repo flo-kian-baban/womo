@@ -1587,12 +1587,38 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   const htmlTitles: string[] = [];
   try {
     const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
+    
+    // Try to extract follower count from HTML using multiple regex patterns
+    if (followerCount === 0) {
+      // Pattern 1: Look for followerCount in JSON-like structures
+      const followerPatterns = [
+        /"followerCount":(\d+)/,
+        /followerCount["']?\s*:\s*([\d,]+)/,
+        /followers["']?\s*:\s*([\d,]+)/i,
+        /"followers":(\d+)/i,
+      ];
+      
+      for (const pattern of followerPatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          const count = parseInt(match[1].replace(/,/g, ''), 10);
+          if (count > 0) {
+            followerCount = count;
+            console.log(`[webResearch] Extracted followerCount=${followerCount} for @${handle} using regex`);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Extract video titles and other data from JSON
     const jsonMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
     if (jsonMatch) {
       try {
         const pageData = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
         const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
         const userDetail = (defaultScope?.["webapp.user-detail"] as Record<string, unknown>) ?? {};
+        
         const itemList = (userDetail?.itemList as unknown[]) ?? [];
         for (const item of itemList) {
           const v = item as Record<string, unknown>;
@@ -1640,6 +1666,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Check if we have meaningful content data (bio alone is not enough)
   const hasContentData = transcripts.length > 0 || allTitles.length > 0;
   const hasAnyData = hasContentData || followerCount > 0 || bio.length > 0;
+  
+  // Log extracted stats for debugging
+  if (followerCount > 0) {
+    console.log(`[webResearch] @${handle}: followerCount=${followerCount}, videoCount=${videoCount}, totalLikes=${totalLikes}`);
+  } else {
+    console.warn(`[webResearch] @${handle}: WARNING - followerCount is still 0 after all extraction attempts`);
+  }
 
   // If quota was exhausted AND we have no content (transcripts or titles), hard-block.
   // Bio alone is insufficient — it produces hallucinated profiles.

@@ -1,5 +1,6 @@
 import { Separator } from "@/components/ui/separator";
-import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic, Plus, ExternalLink, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic, Plus, ExternalLink, AlertTriangle, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import { MetricTooltip } from "@/components/MetricTooltip";
 import type { CreatorProfile } from "../../../drizzle/schema";
 import TranscriptPanel from "./TranscriptPanel";
 import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
@@ -346,21 +347,37 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
       {hasStats && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {(profile.followerCount ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center relative">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Users className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Followers</span>
+                <MetricTooltip
+                  title="Followers — Unverified"
+                  explanation="TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data (typically a very small number) rather than the real follower count."
+                  whyItMatters="This value should not be used for reach calculations. Use Total Views and Avg Views instead, which are computed from real per-video data and are accurate."
+                  dataPoints={["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"]}
+                  side="top"
+                />
               </div>
-              <div className="text-base font-semibold text-foreground">{formatNum(profile.followerCount!)}</div>
+              <div className="text-base font-semibold text-amber-400">{formatNum(profile.followerCount!)}</div>
+              <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.totalLikes ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Heart className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Total Likes</span>
+                <MetricTooltip
+                  title="Total Likes — Unverified"
+                  explanation="TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data rather than the real total likes count."
+                  whyItMatters="This value should not be used for engagement calculations. Use the per-video Engagement Rate instead, which is computed from real video-level data."
+                  dataPoints={["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"]}
+                  side="top"
+                />
               </div>
-              <div className="text-base font-semibold text-foreground">{formatNum(profile.totalLikes!)}</div>
+              <div className="text-base font-semibold text-amber-400">{formatNum(profile.totalLikes!)}</div>
+              <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.totalViews ?? 0) > 0 && (
@@ -382,12 +399,20 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             </div>
           )}
           {(profile.videoCount ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Video className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Videos</span>
+                <MetricTooltip
+                  title="Video Count — Unverified"
+                  explanation="TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data rather than the real video count."
+                  whyItMatters="The actual number of videos analyzed is shown in the transcript badge below. Use that count for data confidence assessment."
+                  dataPoints={["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"]}
+                  side="top"
+                />
               </div>
-              <div className="text-base font-semibold text-foreground">{formatNum(profile.videoCount!)}</div>
+              <div className="text-base font-semibold text-amber-400">{formatNum(profile.videoCount!)}</div>
+              <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.engagementRate ?? 0) > 0 && (

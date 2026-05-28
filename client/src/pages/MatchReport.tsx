@@ -66,15 +66,14 @@ function PARRMeter({ score, label }: { score: number; label: string }) {
           <div className="text-[10px] font-semibold tracking-[0.15em] uppercase text-muted-foreground">
             PARR
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs text-xs leading-relaxed">
-              <p className="font-semibold mb-1">Predicted Audience Receptivity Rate</p>
-              PARR predicts the probability of audience acceptance. It calculates what percentage of the Creator's audience is structurally guaranteed to receive your brand message as authentic and culturally legitimate, rather than forced or inauthentic.
-            </TooltipContent>
-          </Tooltip>
+          <MetricTooltip
+            title="PARR — Predicted Audience Receptivity Rate"
+            explanation="PARR calculates what percentage of the creator's audience is structurally guaranteed to receive the brand message as authentic and culturally legitimate, rather than forced or inauthentic."
+            formula="(Archetype Alignment × 0.35) + (Symbolic Overlap × 0.30) + (Decoding Mode × 0.20) + (Tribe Match × 0.15)"
+            whyItMatters="A high PARR means the audience will accept the brand message without cognitive dissonance. A low PARR means the audience will perceive the partnership as a paid placement, reducing trust and conversion."
+            dataPoints={["Archetype compatibility", "Shared symbolic vocabulary", "Stuart Hall decoding mode", "Audience tribe alignment"]}
+            side="top"
+          />
         </div>
         <div className="text-4xl font-serif" style={{ color }}>{score}%</div>
       </div>
@@ -422,16 +421,14 @@ export default function MatchReport() {
                       <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
                         QoV
                       </div>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                          <p className="font-semibold mb-1">Quality of View</p>
-                          QoV predicts how good a view is likely to be, based on creator-brand fit and audience receptivity.
-                          <p className="mt-1 text-muted-foreground">Formula: (Cultural Alignment Index (CAI) ÷ 10) × PARR</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      <MetricTooltip
+                        title="QoV — Quality of View"
+                        explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (CAI) with the audience-level receptivity (PARR) to produce a single impression quality score."
+                        formula="(CAI ÷ 10) × PARR"
+                        whyItMatters="Raw impression counts are meaningless without quality context. A QoV of 60% means 60% of every view is converting into genuine brand equity — not just passive exposure."
+                        dataPoints={["Cultural Alignment Index (CAI)", "PARR (Predicted Audience Receptivity Rate)"]}
+                        side="top"
+                      />
                     </div>
                     <span className="text-3xl font-serif" style={{ color: qovColor }}>{qov}%</span>
                   </div>
