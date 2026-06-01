@@ -352,10 +352,10 @@ export default function FITScore() {
                   <span className="text-xs text-muted-foreground">Cultural Match Score / 10</span>
                   <MetricTooltip
                     title="Cultural Match Score"
-                    explanation="The Cultural Match Score measures the structural alignment between a Brand and a Creator. It analyzes archetypes, values, and cultural trajectory to ensure that the two identities are fundamentally compatible before a partnership begins."
-                    formula="(Alignment × α) + (Pulse × β) + (Stability × γ) / 10"
-                    whyItMatters="The Cultural Match Score is the primary go/no-go signal. A score below 6.0 indicates the partnership will feel forced to audiences regardless of how good the content is."
-                    dataPoints={["Creator archetype & values", "Brand archetype & values", "Audience compatibility", "Cultural momentum", "Identity consistency"]}
+                    explanation="Composite score measuring structural cultural alignment between creator and brand across three dimensions: archetype compatibility, cultural momentum, and identity stability."
+                    formula="CMS = ((Alignment × α) + (Pulse × β) + (Stability × γ)) / 10 | Range: 0–10 | Thresholds: ≥8.0 Exceptional, 6.0–7.9 Strong, 4.0–5.9 Moderate, <4.0 Poor"
+                    whyItMatters="Primary go/no-go signal. Scores <6.0 indicate partnership will feel inauthentic to audiences regardless of engagement metrics. Weights (α, β, γ) are brand-archetype-specific and sum to 1.0."
+                    dataPoints={["Alignment score (archetype + myth + decoding)", "Pulse score (Rogers stage + liminal phase)", "Stability score (Goffman consistency + drift signal)", "Brand-specific weight coefficients"]}
                     side="top"
                   />
                 </div>
@@ -375,10 +375,10 @@ export default function FITScore() {
                 />
                 <MetricTooltip
                   title="Alignment (α)"
-                  explanation="Measures archetype compatibility, myth alignment, and audience decoding acceptance between creator and brand."
-                  formula="(Archetype Match × 0.4) + (Myth Alignment × 0.35) + (Decoding × 0.25)"
-                  whyItMatters="Alignment is the foundation of cultural fit. Without it, no amount of audience size or engagement rate will make the partnership feel authentic."
-                  dataPoints={["Archetype compatibility matrix", "Barthes myth alignment", "Stuart Hall decoding mode"]}
+                  explanation="Measures three-tier cultural resonance: archetype compatibility (12×12 matrix), shared mythology, and audience decoding acceptance."
+                  formula="Alignment = (Archetype × 0.4) + (Myth × 0.35) + (Decoding × 0.25) | Archetype: Resonant=100, Complementary=70, Clashing=25 | Decoding: Dominant=100, Negotiated=65, Oppositional=20"
+                  whyItMatters="Foundation of cultural fit. Archetype clashes (25 pts) create inauthentic partnerships regardless of engagement. Decoding mismatch means audience rejects brand message."
+                  dataPoints={["12 Jungian archetypes with pairings/clashes", "Myth alignment from creator transcripts", "Stuart Hall decoding from audience sentiment"]}
                   side="bottom"
                 />
               </div>
@@ -392,10 +392,10 @@ export default function FITScore() {
                 />
                 <MetricTooltip
                   title="Pulse (β)"
-                  explanation="Measures cultural momentum: whether the creator's niche is trending, stable, or declining based on Rogers adoption stage and liminal phase."
-                  formula="(Rogers Base × 0.6) + (Liminal Adjustment × 0.4)"
-                  whyItMatters="A creator at the peak of cultural relevance amplifies a brand's message. A declining creator can drag a brand's perception down even if the archetype fit is strong."
-                  dataPoints={["Rogers adopter stage", "Turner liminal phase", "Cultural velocity signal"]}
+                  explanation="Measures cultural lifecycle positioning using Rogers adoption curve and liminal phase transitions."
+                  formula="Pulse = (Rogers × 0.6) + (Liminal × 0.4) | Rogers: Innovator=80, Early Adopter=95, Early Majority=100, Late Majority=70, Laggard=40 | Liminal: Ascending=+20, Peak=+10, Stable=0, Descending=-20, Declining=-40"
+                  whyItMatters="Creators at Early Majority (100 pts) amplify brand message. Late Majority (70 pts) or Laggard (40 pts) creators reduce perceived relevance. Liminal adjustments capture momentum shifts."
+                  dataPoints={["Rogers adoption stage from niche positioning", "Liminal phase from keyword drift + engagement trend", "Follower growth trajectory"]}
                   side="bottom"
                 />
               </div>
@@ -409,10 +409,10 @@ export default function FITScore() {
                 />
                 <MetricTooltip
                   title="Stability (γ)"
-                  explanation="Measures identity consistency: whether the creator's themes remain stable over time and whether their identity is drifting or holding."
-                  formula="(Goffman Consistency × 0.5) + (Drift Signal × 0.5)"
-                  whyItMatters="Brands need partners who will still represent the same values in 6 months. High stability means the creator is a reliable long-term ambassador, not a trend-chaser."
-                  dataPoints={["Goffman stage consistency", "Keyword drift signal", "Follower growth trajectory"]}
+                  explanation="Measures identity coherence via Goffman stage consistency and keyword vocabulary drift over rolling 90-day windows."
+                  formula="Stability = (Goffman × 0.5) + (Drift × 0.5) | Goffman: Consistent=100, Minor Gap=80, Significant Gap=50, Full Pivot=20 | Drift: Zero Change=100, Minor=80, Moderate=50, Significant=20, Major=5"
+                  whyItMatters="Stable creators (>80 pts) are reliable ambassadors. Drifting creators (<50 pts) pose reputational risk. Drift >50% keyword shift triggers identity instability warning."
+                  dataPoints={["Goffman stage tracking across 6+ months", "Cosine similarity of keyword vocabulary (threshold: 0.85)", "Engagement trend direction"]}
                   side="bottom"
                 />
               </div>
@@ -511,10 +511,10 @@ export default function FITScore() {
                     </div>
                     <MetricTooltip
                       title="PARR — Predicted Audience Receptivity Rate"
-                      explanation="PARR calculates what percentage of the creator's audience is structurally guaranteed to receive the brand message as authentic and culturally legitimate, rather than forced or inauthentic."
-                      formula="(Archetype Alignment × 0.35) + (Symbolic Overlap × 0.30) + (Decoding Mode × 0.20) + (Tribe Match × 0.15)"
-                      whyItMatters="A high PARR means the audience will accept the brand message without cognitive dissonance. A low PARR means the audience will perceive the partnership as a paid placement, reducing trust and conversion."
-                      dataPoints={["Archetype compatibility", "Shared symbolic vocabulary", "Stuart Hall decoding mode", "Audience tribe alignment"]}
+                      explanation="Percentage of creator's audience structurally likely to accept brand message as authentic."
+                      formula="PARR = (Engagement Rate × 0.4) + (Audience Sentiment × 0.3) + (Decoding Match × 0.3) | Sentiment: Positive=100, Mixed=60, Negative=20 | Decoding: Dominant=100, Negotiated=65, Oppositional=20"
+                      whyItMatters="High PARR (>70%) = audience accepts message without cognitive dissonance. Low PARR (<40%) = audience perceives partnership as inauthentic paid placement, reducing conversion."
+                      dataPoints={["Per-video engagement rate: (likes+comments+shares)/views", "Comment sentiment analysis via LLM classification", "Stuart Hall decoding mode from audience response patterns"]}
                       side="top"
                     />
                   </div>
@@ -566,10 +566,10 @@ export default function FITScore() {
                     </div>
                     <MetricTooltip
                       title="QoV — Quality of View"
-                      explanation="Quality of View quantifies the cultural resonance of each impression this partnership generates. It combines the entity-level cultural fit (Cultural Match Score) with the audience-level receptivity (PARR) to produce a single impression quality score."
-                      formula="(Cultural Match Score ÷ 10) × PARR"
-                      whyItMatters="Raw impression counts are meaningless without quality context. A QoV of 60% means 60% of every view is converting into genuine brand equity — not just passive exposure."
-                      dataPoints={["Cultural Match Score", "PARR (Predicted Audience Receptivity Rate)"]}
+                      explanation="Composite metric measuring genuine brand equity per impression via audience tribe alignment, category affinity, and hashtag overlap."
+                      formula="QoV = (Audience Tribe Alignment × 0.4) + (Brand Category Affinity × 0.3) + (Hashtag Overlap × 0.3) | Tribe: Strong=100, Partial=70, Weak=30 | Category: High=100, Medium=60, Low=20 | Hashtag: (Shared/Total Unique) × 100"
+                      whyItMatters="Raw impression counts are meaningless without quality context. QoV >60% = high-quality impressions converting to brand equity. QoV <30% = audience-brand mismatch despite engagement."
+                      dataPoints={["Audience demographic overlap with brand target", "Creator hashtag frequency in brand category", "Hashtag overlap: creator's top 50 vs. brand campaign hashtags"]}
                       side="top"
                     />
                   </div>
