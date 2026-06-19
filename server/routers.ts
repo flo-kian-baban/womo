@@ -485,7 +485,7 @@ export const appRouter = router({
         // ── FIX 1.1: Global analysis timeout ──
         // Wrap research + extraction in Promise.race with a 3-minute timeout
         // to prevent hung Playwright pages from blocking the server thread.
-        const ANALYSIS_TIMEOUT_MS = 3 * 60 * 1000;
+        const ANALYSIS_TIMEOUT_MS = 5 * 60 * 1000;
 
         const analysisPromise = (async () => {
           // Step 1: Research
@@ -519,7 +519,7 @@ export const appRouter = router({
           setTimeout(() => reject(
             new TRPCError({
               code: "TIMEOUT",
-              message: "Analysis timed out after 3 minutes. The creator's page may be slow or unavailable. Please try again.",
+              message: "Analysis timed out after 5 minutes. The creator's page may be slow or unavailable. Please try again.",
             })
           ), ANALYSIS_TIMEOUT_MS)
         );
