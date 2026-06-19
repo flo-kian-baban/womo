@@ -3,12 +3,6 @@
   "outputDirectory": "dist/public",
   "framework": "vite",
   "installCommand": "pnpm install",
-  "functions": {
-    "api/trpc.ts": {
-      "includeFiles": "server/**",
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
     { "source": "/api/trpc/:path*", "destination": "/api/trpc" }
   ]
