@@ -1,9 +1,13 @@
 /**
- * Google Maps API Integration for Manus WebDev Templates
- * 
+ * Google Maps API Integration — Phase 1 (Direct)
+ *
  * Main function: makeRequest<T>(endpoint, params) - Makes authenticated requests to Google Maps APIs
  * All credentials are automatically injected. Array parameters use | as separator.
- * 
+ *
+ * Phase 1 change: now calls Google Maps APIs directly with GOOGLE_MAPS_API_KEY
+ * instead of routing through the Forge proxy. The function signature and all
+ * downstream callers are unchanged.
+ *
  * See API examples below the type definitions for usage patterns.
  */
 
@@ -14,24 +18,19 @@ import { ENV } from "./env";
 // ============================================================================
 
 type MapsConfig = {
-  baseUrl: string;
   apiKey: string;
 };
 
 function getMapsConfig(): MapsConfig {
-  const baseUrl = ENV.forgeApiUrl;
-  const apiKey = ENV.forgeApiKey;
+  const apiKey = ENV.googleMapsApiKey;
 
-  if (!baseUrl || !apiKey) {
+  if (!apiKey) {
     throw new Error(
-      "Google Maps proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+      "Google Maps API key missing: set GOOGLE_MAPS_API_KEY"
     );
   }
 
-  return {
-    baseUrl: baseUrl.replace(/\/+$/, ""),
-    apiKey,
-  };
+  return { apiKey };
 }
 
 // ============================================================================
@@ -45,7 +44,7 @@ interface RequestOptions {
 
 /**
  * Make authenticated requests to Google Maps APIs
- * 
+ *
  * @param endpoint - The API endpoint (e.g., "/maps/api/geocode/json")
  * @param params - Query parameters for the request
  * @param options - Additional request options
@@ -56,10 +55,10 @@ export async function makeRequest<T = unknown>(
   params: Record<string, unknown> = {},
   options: RequestOptions = {}
 ): Promise<T> {
-  const { baseUrl, apiKey } = getMapsConfig();
+  const { apiKey } = getMapsConfig();
 
-  // Construct full URL: baseUrl + /v1/maps/proxy + endpoint
-  const url = new URL(`${baseUrl}/v1/maps/proxy${endpoint}`);
+  // Direct call to Google Maps API
+  const url = new URL(`https://maps.googleapis.com${endpoint}`);
 
   // Add API key as query parameter (standard Google Maps API authentication)
   url.searchParams.append("key", apiKey);

@@ -1,5 +1,12 @@
 /**
- * Voice transcription helper using internal Speech-to-Text service
+ * Voice transcription helper using OpenAI Whisper API (direct)
+ *
+ * Phase 1 change: calls OpenAI Whisper directly via OPENAI_API_KEY
+ * instead of routing through the Forge proxy. Same payload format,
+ * same response structure.
+ *
+ * Known limitation: TikTok playAddr downloads will still fail
+ * intermittently (pre-existing issue — not a Phase 1 blocker).
  *
  * Frontend implementation guide:
  * 1. Capture audio using MediaRecorder API
@@ -31,6 +38,8 @@ export type TranscribeOptions = {
   audioUrl: string; // URL to the audio file (e.g., S3 URL)
   language?: string; // Optional: specify language code (e.g., "en", "es", "zh")
   prompt?: string; // Optional: custom prompt for the transcription
+  audioBuffer?: Buffer; // Optional: pre-downloaded audio data (skips URL fetch)
+  mimeType?: string; // Optional: MIME type when audioBuffer is provided
 };
 
 // Native Whisper API segment format
@@ -75,19 +84,17 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResponse | TranscriptionError> {
   try {
     // Step 1: Validate environment configuration
-    if (!ENV.forgeApiUrl) {
+    if (!ENV.openaiApiKey && !ENV.geminiApiKey) {
       return {
         error: "Voice transcription service is not configured",
         code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_URL is not set"
+        details: "Neither OPENAI_API_KEY nor GEMINI_API_KEY is set"
       };
     }
-    if (!ENV.forgeApiKey) {
-      return {
-        error: "Voice transcription service authentication is missing",
-        code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_KEY is not set"
-      };
+
+    // If OpenAI is not available but Gemini is, use Gemini transcription
+    if (!ENV.openaiApiKey && ENV.geminiApiKey) {
+      return transcribeWithGemini(options);
     }
 
     // Step 2: Download audio from URL
@@ -142,20 +149,13 @@ export async function transcribeAudio(
     );
     formData.append("prompt", prompt);
 
-    // Step 4: Call the transcription service
-    const baseUrl = ENV.forgeApiUrl.endsWith("/")
-      ? ENV.forgeApiUrl
-      : `${ENV.forgeApiUrl}/`;
-    
-    const fullUrl = new URL(
-      "v1/audio/transcriptions",
-      baseUrl
-    ).toString();
+    // Step 4: Call the OpenAI Whisper API directly
+    const fullUrl = "https://api.openai.com/v1/audio/transcriptions";
 
     const response = await fetch(fullUrl, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${ENV.forgeApiKey}`,
+        authorization: `Bearer ${ENV.openaiApiKey}`,
         "Accept-Encoding": "identity",
       },
       body: formData,
@@ -282,3 +282,128 @@ function getLanguageName(langCode: string): string {
  * });
  * ```
  */
+
+// ─── Gemini Audio Transcription (fallback when OpenAI is unavailable) ──────────
+
+async function transcribeWithGemini(
+  options: TranscribeOptions
+): Promise<TranscriptionResponse | TranscriptionError> {
+  try {
+    // Step 1: Get audio data (use pre-downloaded buffer or fetch from URL)
+    let audioBuffer: Buffer;
+    let mimeType: string;
+
+    if (options.audioBuffer) {
+      // Pre-downloaded buffer provided — skip network fetch
+      audioBuffer = options.audioBuffer;
+      mimeType = options.mimeType || "video/mp4";
+      const sizeMB = audioBuffer.length / (1024 * 1024);
+      console.log(`[voiceTranscription] Gemini: using pre-downloaded buffer (${sizeMB.toFixed(1)}MB, ${mimeType})`);
+      if (sizeMB > 50) {
+        return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 50MB limit` };
+      }
+      if (sizeMB < 0.001) {
+        return { error: "Audio file empty", code: "INVALID_FORMAT", details: "Downloaded file is empty" };
+      }
+    } else {
+      try {
+        console.log(`[voiceTranscription] Gemini: downloading audio from ${options.audioUrl.slice(0, 100)}...`);
+        const response = await fetch(options.audioUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15",
+            "Accept": "*/*",
+            "Referer": "https://www.instagram.com/",
+          },
+        });
+        if (!response.ok) {
+          console.log(`[voiceTranscription] Gemini: download failed — HTTP ${response.status}`);
+          return { error: "Failed to download audio file", code: "INVALID_FORMAT", details: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        audioBuffer = Buffer.from(await response.arrayBuffer());
+        mimeType = response.headers.get("content-type") || "audio/mpeg";
+        if (mimeType.includes("video/mp4")) mimeType = "video/mp4";
+        if (mimeType.includes("octet-stream")) mimeType = "video/mp4";
+        const sizeMB = audioBuffer.length / (1024 * 1024);
+        console.log(`[voiceTranscription] Gemini: downloaded ${sizeMB.toFixed(1)}MB, mimeType=${mimeType}`);
+        if (sizeMB > 50) {
+          return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 50MB limit` };
+        }
+        if (sizeMB < 0.001) {
+          return { error: "Audio file empty", code: "INVALID_FORMAT", details: "Downloaded file is empty" };
+        }
+      } catch (error) {
+        console.log(`[voiceTranscription] Gemini: download error — ${(error as Error).message}`);
+        return { error: "Failed to fetch audio", code: "SERVICE_ERROR", details: (error as Error).message };
+      }
+    }
+
+    // Step 2: Convert to base64
+    const base64Audio = audioBuffer.toString("base64");
+
+    // Step 3: Call Gemini API with inline audio
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${ENV.geminiApiKey}`;
+
+    const payload = {
+      contents: [{
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Audio,
+            }
+          },
+          {
+            text: "Transcribe ALL spoken words in this audio precisely. Output ONLY the raw transcript text with no labels, timestamps, or formatting. If there are no spoken words, respond with exactly: [NO_SPEECH]"
+          }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+      }
+    };
+
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.log(`[voiceTranscription] Gemini API error: ${response.status} — ${errText.slice(0, 300)}`);
+      return { error: "Gemini transcription failed", code: "TRANSCRIPTION_FAILED", details: `${response.status}: ${errText.slice(0, 200)}` };
+    }
+
+    const geminiResult = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const text = geminiResult.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+
+    if (!text || text === "[NO_SPEECH]" || text.length < 5) {
+      return { error: "No speech detected", code: "TRANSCRIPTION_FAILED", details: "Gemini detected no spoken words" };
+    }
+
+    // Remove any markdown/formatting Gemini might add
+    const cleanText = text
+      .replace(/^```[a-z]*\n?/gm, "")
+      .replace(/```$/gm, "")
+      .replace(/^\*\*.*?\*\*\s*/gm, "")
+      .trim();
+
+    console.log(`[voiceTranscription] Gemini transcribed ${cleanText.split(/\s+/).length} words`);
+
+    // Return in same shape as Whisper response
+    return {
+      task: "transcribe",
+      language: options.language || "en",
+      duration: 0, // Gemini doesn't return duration
+      text: cleanText,
+      segments: [], // Gemini doesn't return segments
+    };
+
+  } catch (error) {
+    return { error: "Gemini transcription failed", code: "SERVICE_ERROR", details: (error as Error).message };
+  }
+}

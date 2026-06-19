@@ -17,7 +17,7 @@ export interface BulkCreatorJob {
   jobId: string;
   type: "creator";
   handles: string[];
-  platform: "TikTok" | "YouTube" | "Multi";
+  platform: "TikTok" | "Instagram";
   progress: BulkJobProgress;
   results: Array<{ handle: string; creatorId?: string; error?: string }>;
 }
@@ -37,7 +37,7 @@ const jobs = new Map<string, BulkJob>();
 
 export function createBulkCreatorJob(
   handles: string[],
-  platform: "TikTok" | "YouTube" | "Multi"
+  platform: "TikTok" | "Instagram"
 ): BulkCreatorJob {
   const jobId = uuidv4();
   const job: BulkCreatorJob = {

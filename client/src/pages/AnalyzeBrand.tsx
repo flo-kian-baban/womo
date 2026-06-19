@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, AlertCircle } from "lucide-react";
+import { Building2, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, AlertCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ import { trpc } from "@/lib/trpc";
 import BrandProfileCard from "@/components/BrandProfileCard";
 import { ApiStatusPanel } from "@/components/ApiStatusPanel";
 import { Link } from "wouter";
-import type { BrandProfile } from "../../../drizzle/schema";
+
 
 const validateTikTokHandle = (value: string | undefined): true | string => {
   if (!value || value.trim() === "") return true; // Optional field
@@ -51,10 +51,53 @@ const validateTikTokHandle = (value: string | undefined): true | string => {
   return true;
 };
 
+const validateInstagramHandle = (value: string | undefined): true | string => {
+  if (!value || value.trim() === "") return true; // Optional field
+  
+  const trimmed = value.trim();
+  
+  // Check for hashtag
+  if (trimmed.startsWith("#")) {
+    return "Instagram handle cannot start with #. Enter just the username (e.g., 'glossier' not '#glossier')";
+  }
+  
+  // Check for full Instagram URLs — nudge to enter handle only
+  if (trimmed.includes("instagram.com")) {
+    const match = trimmed.match(/instagram\.com\/([a-zA-Z0-9._]+)/);
+    if (match) {
+      return `Enter just the handle '@${match[1]}' instead of the full URL`;
+    }
+    return "Enter just the Instagram handle (e.g., '@glossier'), not the full URL";
+  }
+  
+  // Strip @ for validation only
+  const bare = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+  
+  // Instagram handles: 1-30 chars, alphanumeric + dots + underscores
+  if (bare.length > 30) {
+    return "Instagram handle must be 30 characters or fewer";
+  }
+  if (!/^[a-zA-Z0-9._]+$/.test(bare)) {
+    return "Instagram handle can only contain letters, numbers, periods, and underscores";
+  }
+  
+  return true;
+};
+
 const schema = z.object({
   brandNameOrUrl: z.string().min(1, "Enter a brand name or URL"),
+  googleMapsUrl: z.string().optional().or(z.literal("")),
   tiktokChannelUrl: z.string().optional().or(z.literal("")).superRefine((val, ctx) => {
     const result = validateTikTokHandle(val);
+    if (result !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result,
+      });
+    }
+  }),
+  instagramHandle: z.string().optional().or(z.literal("")).superRefine((val, ctx) => {
+    const result = validateInstagramHandle(val);
     if (result !== true) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -81,14 +124,17 @@ const ANALYSIS_STEPS = [
   "Assembling brand semantic core...",
   "Fetching TikTok channel data (if provided)...",
   "Analyzing TikTok content and engagement patterns...",
+  "Fetching Instagram channel data (if provided)...",
+  "Analyzing Instagram content and engagement patterns...",
   "Extracting brand voice and social themes...",
   "Integrating social signals into cultural profile...",
 ];
 
 export default function AnalyzeBrand() {
-  const [result, setResult] = useState<{ profile: BrandProfile } | null>(null);
+  const [result, setResult] = useState<{ profile: Record<string, any> & { id: string } } | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: apiStatus } = trpc.system.apiStatus.useQuery(undefined, {
     staleTime: 60_000,
@@ -99,24 +145,52 @@ export default function AnalyzeBrand() {
     resolver: zodResolver(schema),
   });
 
+  // Clear interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, []);
+
   const analyzeMutation = trpc.brand.analyze.useMutation({
     onSuccess: (data) => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       if (data.profile) {
         setResult({ profile: data.profile });
         toast.success("Brand profile extracted successfully");
       }
     },
-    onError: (err) => {
-      toast.error(`Analysis failed: ${err.message}`);
+    onError: () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      // Error is shown inline — no toast needed
     },
   });
 
   const runAnalysis = (values: FormValues) => {
     setResult(null);
     setStepIndex(0);
-    const interval = setInterval(() => {
+    // Clear any previous interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    intervalRef.current = setInterval(() => {
       setStepIndex((prev) => {
-        if (prev >= ANALYSIS_STEPS.length - 1) { clearInterval(interval); return prev; }
+        if (prev >= ANALYSIS_STEPS.length - 1) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          return prev;
+        }
         return prev + 1;
       });
     }, 1800);
@@ -174,6 +248,20 @@ export default function AnalyzeBrand() {
 
             <div className="space-y-2">
               <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+                Google Maps URL
+              </Label>
+              <Input
+                {...register("googleMapsUrl")}
+                placeholder="https://maps.google.com/maps/place/..."
+                className="bg-secondary border-border placeholder:text-muted-foreground/40"
+              />
+              <p className="text-xs text-muted-foreground/70">
+                Optional — paste your Google Maps listing link for accurate review data
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
                 TikTok Handle (Optional)
               </Label>
               <Input
@@ -189,6 +277,27 @@ export default function AnalyzeBrand() {
               ) : (
                 <p className="text-xs text-muted-foreground/70">
                   Leave blank if the brand does not have a TikTok presence. Enter the brand's handle (e.g., 'nike'), not a hashtag or discover page.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+                Instagram Handle (Optional)
+              </Label>
+              <Input
+                {...register("instagramHandle")}
+                placeholder="e.g. @glossier or glossier"
+                className="bg-secondary border-border placeholder:text-muted-foreground/40"
+              />
+              {errors.instagramHandle ? (
+                <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/30">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-amber-600 dark:text-amber-400">{errors.instagramHandle.message}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground/70">
+                  Provide the brand's Instagram handle for richer cultural profile analysis.
                 </p>
               )}
             </div>
@@ -255,6 +364,37 @@ export default function AnalyzeBrand() {
               </div>
             </div>
           )}
+
+          {/* Inline error card */}
+          {analyzeMutation.isError && !analyzeMutation.isPending && (() => {
+            const msg = analyzeMutation.error?.message ?? "";
+            const isRateLimit = msg.toLowerCase().includes("rate-limited") || msg.toLowerCase().includes("usage exhausted") || msg.toLowerCase().includes("too many requests");
+            return (
+              <div className={`mt-4 rounded-xl p-5 border animate-fade-in-up ${
+                isRateLimit
+                  ? "bg-amber-500/10 border-amber-500/30"
+                  : "bg-destructive/10 border-destructive/30"
+              }`}>
+                <div className="flex items-start gap-3">
+                  {isRateLimit
+                    ? <Clock className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    : <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`text-sm font-semibold mb-1 ${
+                      isRateLimit ? "text-amber-400" : "text-destructive"
+                    }`}>
+                      {isRateLimit ? "API Rate Limit \u2014 Please Retry" : "Analysis Failed"}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {isRateLimit
+                        ? "The data API is temporarily rate-limited from recent activity. Wait 1\u20132 minutes, then click \"Extract Brand Profile\" again."
+                        : msg}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {result && (
             <div className="mt-4 fit-card rounded-xl p-5 animate-fade-in-up">

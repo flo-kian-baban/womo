@@ -1,1 +1,0 @@
-ALTER TABLE `creator_profiles` ADD `decodedSymbols` json;

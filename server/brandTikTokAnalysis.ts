@@ -22,7 +22,9 @@
  */
 
 import { invokeLLM } from "./_core/llm";
-import { callDataApi } from "./_core/dataApi";
+import { scrapeTikTokUserInfo } from "./scraping/tiktok/profileScraper";
+import { searchTikTokVideos } from "./scraping/tiktok/searchScraper";
+import { fetchSingleTikTokTranscript } from "./webResearch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +32,9 @@ export interface BrandVideoTranscript {
   videoId: string;
   caption: string;
   postedDate?: string;
+  transcriptText?: string;
+  transcriptWordCount?: number;
+  transcriptSource?: string;
 }
 
 export interface BrandDecodedSymbol {
@@ -100,6 +105,14 @@ export interface BrandTikTokMetadata {
 
   // Audience mention intelligence (Track B — always populated when brand name available)
   audienceMentions?: AudienceMentionData;
+
+  // Temporal analysis
+  temporalBuckets?: {
+    recent: number; // < 3 months
+    mid: number;    // 3-12 months
+    older: number;  // > 12 months
+  };
+  culturalVelocity?: "Focusing" | "Drifting" | "Insufficient Data";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -166,71 +179,56 @@ export async function fetchBrandMentionData(
 
   for (const keyword of searchQueries) {
     try {
-      let cursor: number | undefined;
-      let searchId: string | undefined;
+      // Each call now scrolls internally to accumulate 30-45 results
+      // (replaces the broken 3-page loop that always fetched the same first page)
+      const result = await searchTikTokVideos(keyword) as any;
+      const items: any[] = result?.item_list || [];
 
-      for (let page = 0; page < 3; page++) {
-        const queryParams: Record<string, string> = { keyword };
-        if (cursor !== undefined) queryParams.cursor = String(cursor);
-        if (searchId) queryParams.search_id = searchId;
+      for (const video of items) {
+        const videoId = String(video.id || video.aweme_id || "");
+        if (!videoId || seenIds.has(videoId)) continue;
 
-        const result = await callDataApi("Tiktok/search_tiktok_video_general", {
-          query: queryParams,
-        }) as any;
+        // Skip the brand's own videos (we want audience mentions)
+        const authorHandle = (video.author?.uniqueId || "").toLowerCase();
+        if (brandHandle && authorHandle === brandHandle.toLowerCase()) continue;
 
-        const items: any[] = result?.item_list || [];
+        seenIds.add(videoId);
 
-        for (const video of items) {
-          const videoId = String(video.id || video.aweme_id || "");
-          if (!videoId || seenIds.has(videoId)) continue;
+        const createdAt: number = video.createTime || 0;
+        const temporalWeight = getTemporalWeight(createdAt);
 
-          // Skip the brand's own videos (we want audience mentions)
-          const authorHandle = (video.author?.uniqueId || "").toLowerCase();
-          if (brandHandle && authorHandle === brandHandle.toLowerCase()) continue;
+        // Extract all available fields
+        const hashtags = [
+          ...extractHashtags(video.textExtra || []),
+          ...extractChallengeHashtags(video.challenges || []),
+        ];
 
-          seenIds.add(videoId);
+        const stats = video.stats || video.statistics || {};
+        const likes = stats.diggCount || 0;
+        const comments = stats.commentCount || 0;
+        const shares = stats.shareCount || 0;
+        const saves = stats.collectCount || 0;
+        const plays = stats.playCount || 0;
 
-          const createdAt: number = video.createTime || 0;
-          const temporalWeight = getTemporalWeight(createdAt);
+        const music = video.music || {};
+        const musicTitle = music.title || "";
+        const musicArtist = music.authorName || "";
 
-          // Extract all available fields
-          const hashtags = [
-            ...extractHashtags(video.textExtra || []),
-            ...extractChallengeHashtags(video.challenges || []),
-          ];
-
-          const stats = video.stats || video.statistics || {};
-          const likes = stats.diggCount || 0;
-          const comments = stats.commentCount || 0;
-          const shares = stats.shareCount || 0;
-          const saves = stats.collectCount || 0;
-          const plays = stats.playCount || 0;
-
-          const music = video.music || {};
-          const musicTitle = music.title || "";
-          const musicArtist = music.authorName || "";
-
-          allVideos.push({
-            videoId,
-            caption: video.desc || "",
-            hashtags,
-            musicTitle,
-            musicArtist,
-            authorHandle,
-            likes,
-            comments,
-            shares,
-            saves,
-            plays,
-            createdAt,
-            temporalWeight,
-          });
-        }
-
-        cursor = result?.cursor;
-        const logPb = result?.log_pb;
-        searchId = logPb?.impr_id || undefined;
-        if (!result?.has_more) break;
+        allVideos.push({
+          videoId,
+          caption: video.desc || "",
+          hashtags,
+          musicTitle,
+          musicArtist,
+          authorHandle,
+          likes,
+          comments,
+          shares,
+          saves,
+          plays,
+          createdAt,
+          temporalWeight,
+        });
       }
     } catch (err) {
       console.warn(`[fetchBrandMentionData] Search failed for "${keyword}":`, err);
@@ -366,6 +364,7 @@ Return JSON:
 }`;
 
       const response = await invokeLLM({
+        purpose: "brand_mention_analysis",
         messages: [
           {
             role: "system",
@@ -473,9 +472,7 @@ export async function analyzeBrandTikTokChannel(
 
     // Step 1: Fetch user info
     try {
-      const userInfo = await callDataApi("Tiktok/get_user_info", {
-        query: { uniqueId: handle },
-      }) as any;
+      const userInfo = await scrapeTikTokUserInfo(handle) as any;
 
       if (userInfo?.userInfo?.user) {
         followerCount = userInfo.userInfo.stats?.followerCount;
@@ -488,30 +485,13 @@ export async function analyzeBrandTikTokChannel(
 
     // Step 2: Fetch brand's own videos via search (filter to brand-owned only)
     try {
-      let cursor: number | undefined;
-      let searchId: string | undefined;
-      const MAX_PAGES = 5;
-      const TARGET_VIDEOS = 10;
-
-      for (let page = 0; page < MAX_PAGES && videos.length < TARGET_VIDEOS; page++) {
-        const queryParams: Record<string, string> = { keyword: `@${handle}` };
-        if (cursor !== undefined) queryParams.cursor = String(cursor);
-        if (searchId) queryParams.search_id = searchId;
-
-        const pageResult = await callDataApi("Tiktok/search_tiktok_video_general", {
-          query: queryParams,
-        }) as any;
-
-        const pageItems: any[] = pageResult?.item_list || [];
-        const brandVideos = pageItems.filter(
-          (v: any) => (v?.author?.uniqueId || "").toLowerCase() === handle.toLowerCase()
-        );
-        videos.push(...brandVideos);
-
-        cursor = pageResult?.cursor;
-        searchId = pageResult?.log_pb?.impr_id || undefined;
-        if (!pageResult?.has_more) break;
-      }
+      // Scrolling inside searchTikTokVideos accumulates 30-45 results per call
+      const searchResult = await searchTikTokVideos(`@${handle}`) as any;
+      const searchItems: any[] = searchResult?.item_list || [];
+      const brandVideos = searchItems.filter(
+        (v: any) => (v?.author?.uniqueId || "").toLowerCase() === handle.toLowerCase()
+      );
+      videos.push(...brandVideos);
 
       console.info(`[analyzeBrandTikTokChannel] Found ${videos.length} owned videos from @${handle}`);
     } catch (err) {
@@ -550,6 +530,44 @@ export async function analyzeBrandTikTokChannel(
     if (totalViews > 0 && videos.length > 0) {
       averageViews = Math.round(totalViews / videos.length);
       engagementRate = (totalEngagement / totalViews) * 100;
+    }
+
+    // Step 3b: Fetch transcripts for up to 6 brand videos (non-fatal)
+    const TRANSCRIPT_LIMIT = 6;
+    const videosToTranscribe = videos.slice(0, TRANSCRIPT_LIMIT).filter(
+      (v: any) => (v.aweme_id || v.id) && handle
+    );
+    if (videosToTranscribe.length > 0) {
+      console.info(`[analyzeBrandTikTokChannel] Fetching transcripts for ${videosToTranscribe.length} brand videos...`);
+      const transcriptResults = await Promise.allSettled(
+        videosToTranscribe.map(async (video: any) => {
+          const videoId = video.aweme_id || video.id || "";
+          const desc = video.desc || "";
+          const videoUrl = `https://www.tiktok.com/@${handle}/video/${videoId}`;
+          return fetchSingleTikTokTranscript(videoUrl, videoId, desc);
+        })
+      );
+
+      let transcriptsFound = 0;
+      for (let i = 0; i < transcriptResults.length; i++) {
+        const result = transcriptResults[i];
+        if (result.status === "fulfilled" && result.value) {
+          const t = result.value;
+          transcriptsFound++;
+          // Enrich the matching videoTranscript entry
+          const existing = videoTranscripts.find(vt => vt.videoId === t.videoId);
+          if (existing) {
+            existing.transcriptText = t.transcript;
+            existing.transcriptWordCount = t.wordCount;
+            existing.transcriptSource = t.transcriptSource ?? "captions";
+          }
+          // Add to captions array for richer LLM analysis
+          if (t.transcript && t.wordCount > 10) {
+            videoCaptions.push(`[TRANSCRIPT] ${t.transcript.slice(0, 500)}`);
+          }
+        }
+      }
+      console.info(`[analyzeBrandTikTokChannel] Transcripts fetched: ${transcriptsFound}/${videosToTranscribe.length}`);
     }
 
     // Step 4: LLM analysis of brand voice (if we have captions or bio)
@@ -600,6 +618,7 @@ Return JSON:
 }`;
 
         const response = await invokeLLM({
+          purpose: "brand_channel_analysis",
           messages: [
             {
               role: "system",
@@ -708,6 +727,62 @@ Return JSON:
     else if (videos.length >= 4) postFrequency = "1-2x per week";
     else if (videos.length > 0) postFrequency = "sporadic";
 
+    // Temporal analysis of brand-owned videos
+    let temporalBuckets: { recent: number; mid: number; older: number } | undefined;
+    let culturalVelocity: "Focusing" | "Drifting" | "Insufficient Data" | undefined;
+    if (videos.length >= 3) {
+      const now = Date.now() / 1000;
+      const threeMonths = 90 * 24 * 60 * 60;
+      const twelveMonths = 365 * 24 * 60 * 60;
+      const recentVids: any[] = [];
+      const midVids: any[] = [];
+      const olderVids: any[] = [];
+
+      for (const v of videos) {
+        const ct = v.create_time || v.createTime || 0;
+        const age = now - ct;
+        if (age < threeMonths) recentVids.push(v);
+        else if (age < twelveMonths) midVids.push(v);
+        else olderVids.push(v);
+      }
+
+      temporalBuckets = {
+        recent: recentVids.length,
+        mid: midVids.length,
+        older: olderVids.length,
+      };
+
+      // Compute cultural velocity: compare recent caption keywords vs older
+      const extractWords = (vids: any[]) => {
+        const words = new Set<string>();
+        for (const v of vids) {
+          const desc = (v.desc || "").toLowerCase();
+          const tokens = desc.match(/[a-z]{3,}/g) || [];
+          tokens.forEach((t: string) => words.add(t));
+        }
+        return words;
+      };
+
+      if (recentVids.length >= 2 && (midVids.length >= 1 || olderVids.length >= 1)) {
+        const recentWords = extractWords(recentVids);
+        const olderWords = extractWords([...midVids, ...olderVids]);
+        if (recentWords.size > 0 && olderWords.size > 0) {
+          let overlap = 0;
+          const recentArr = Array.from(recentWords);
+          for (const w of recentArr) {
+            if (olderWords.has(w)) overlap++;
+          }
+          const overlapRatio = overlap / Math.min(recentWords.size, olderWords.size);
+          culturalVelocity = overlapRatio >= 0.4 ? "Focusing" : "Drifting";
+        } else {
+          culturalVelocity = "Insufficient Data";
+        }
+      } else {
+        culturalVelocity = "Insufficient Data";
+      }
+      console.info(`[analyzeBrandTikTokChannel] Temporal: recent=${recentVids.length}, mid=${midVids.length}, older=${olderVids.length}, velocity=${culturalVelocity}`);
+    }
+
     console.info(`[analyzeBrandTikTokChannel] Successfully analyzed @${handle}`);
 
     return {
@@ -727,6 +802,8 @@ Return JSON:
       rawKeywords,
       themeLabels,
       symbolicVocabulary,
+      temporalBuckets,
+      culturalVelocity,
     };
   } catch (err) {
     console.warn("[analyzeBrandTikTokChannel] Error:", err);

@@ -1,4 +1,5 @@
 import { ENV } from "./env";
+import { insertLlmInvocation } from "../db";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -67,6 +68,12 @@ export type InvokeParams = {
   output_schema?: OutputSchema;
   responseFormat?: ResponseFormat;
   response_format?: ResponseFormat;
+  /** Descriptive label for what this LLM call is doing (for logging) */
+  purpose?: string;
+  /** Subject UUID if available at call site */
+  subjectId?: string;
+  /** Observation UUID if available at call site */
+  observationId?: string;
 };
 
 export type ToolCall = {
@@ -211,13 +218,11 @@ const normalizeToolChoice = (
 };
 
 const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+  if (!ENV.geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
   }
 };
 
@@ -269,6 +274,7 @@ const normalizeResponseFormat = ({
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   assertApiKey();
 
+  const startTime = Date.now();
   const {
     messages,
     tools,
@@ -279,10 +285,14 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     responseFormat,
     response_format,
     temperature,
+    purpose,
+    subjectId,
+    observationId,
   } = params;
 
+  const modelName = "gemini-2.5-flash";
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: modelName,
     messages: messages.map(normalizeMessage),
   };
 
@@ -298,10 +308,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
-  }
+  payload.max_tokens = 32768;
   if (temperature !== undefined) {
     payload.temperature = temperature;
   }
@@ -321,7 +328,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${ENV.geminiApiKey}`,
     },
     body: JSON.stringify(payload),
   });
@@ -333,5 +340,24 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     );
   }
 
-  return (await response.json()) as InvokeResult;
+  const result = (await response.json()) as InvokeResult;
+  const durationMs = Date.now() - startTime;
+
+  // Fire-and-forget LLM invocation logging
+  try {
+    insertLlmInvocation({
+      purpose: purpose ?? "unknown",
+      model: modelName,
+      promptVersion: "1.0",
+      inputTokens: result.usage?.prompt_tokens,
+      outputTokens: result.usage?.completion_tokens,
+      durationMs,
+      subjectId: subjectId ?? undefined,
+      observationId: observationId ?? undefined,
+    }).catch(err => console.warn("[LLM] Invocation logging failed:", err));
+  } catch (err) {
+    console.warn("[LLM] Invocation logging failed:", err);
+  }
+
+  return result;
 }

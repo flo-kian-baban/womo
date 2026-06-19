@@ -8,7 +8,7 @@ const FEATURE_CARDS = [
     icon: Users,
     label: "Analyze Creator",
     description: "Extract a complete cultural profile from any TikTok or YouTube handle using AI and the F.I.T. framework.",
-    color: "oklch(0.65 0.15 240)",
+    color: "#6366F1",
     delay: "animate-stagger-1",
   },
   {
@@ -16,7 +16,7 @@ const FEATURE_CARDS = [
     icon: Building2,
     label: "Analyze Brand",
     description: "Research any brand or business to extract its archetype, symbolic position, and audience tribe.",
-    color: "oklch(0.65 0.15 145)",
+    color: "#10b981",
     delay: "animate-stagger-2",
   },
   {
@@ -24,7 +24,7 @@ const FEATURE_CARDS = [
     icon: BarChart3,
     label: "Cultural Match Score",
     description: "Calculate the Alignment, Pulse, and Stability scores for any creator-brand pair with full radar warnings.",
-    color: "oklch(0.78 0.12 75)",
+    color: "#38BDF8",
     delay: "animate-stagger-3",
   },
   {
@@ -32,7 +32,7 @@ const FEATURE_CARDS = [
     icon: BookOpen,
     label: "Profile Library",
     description: "Browse, search, and manage all saved creator profiles, brand profiles, and match records.",
-    color: "oklch(0.65 0.15 300)",
+    color: "#a78bfa",
     delay: "animate-stagger-4",
   },
 ];
@@ -52,11 +52,11 @@ export default function Home() {
     <div className="min-h-full px-6 py-8 lg:px-10 lg:py-10">
       {/* ─── Hero ──────────────────────────────────────────────────────────── */}
       <div className="mb-12 animate-fade-in-up">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5 mb-6">
-          <Zap className="w-3 h-3 text-primary" />
-          <span className="text-xs font-medium text-primary tracking-wide">Cultural Intelligence Platform</span>
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/20 bg-primary/[0.06] mb-6">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#38BDF8] animate-pulse" />
+          <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase">Cultural Intelligence Platform</span>
         </div>
-        <h1 className="text-4xl lg:text-5xl font-serif mb-4 leading-tight">
+        <h1 className="text-4xl lg:text-5xl font-black mb-4 leading-tight tracking-tight">
           The Cultural Match Score<br />
           <span className="gold-text">Engine</span>
         </h1>
@@ -74,9 +74,9 @@ export default function Home() {
           { label: "Cultural Match Score Reports", value: matches?.length ?? 0, href: "/library" },
         ].map((stat) => (
           <Link key={stat.label} href={stat.href}>
-            <div className="fit-card rounded-xl p-4 cursor-pointer hover:border-primary/30 transition-all duration-200 hover:connex-glow-sm">
-              <div className="text-2xl font-serif gold-text mb-1">{stat.value}</div>
-              <div className="text-xs text-muted-foreground">{stat.label}</div>
+            <div className="fit-card rounded-2xl p-4 cursor-pointer transition-all duration-300 group">
+              <div className="text-2xl font-black gold-text mb-1">{stat.value}</div>
+              <div className="text-xs text-muted-foreground font-medium">{stat.label}</div>
             </div>
           </Link>
         ))}
@@ -89,19 +89,19 @@ export default function Home() {
           return (
             <Link key={card.href} href={card.href}>
               <div
-                className={`fit-card rounded-xl p-6 cursor-pointer hover:border-primary/30 transition-all duration-200 group animate-fade-in-up ${card.delay}`}
+                className={`fit-card rounded-2xl p-6 cursor-pointer transition-all duration-300 group animate-fade-in-up ${card.delay}`}
               >
                 <div className="flex items-start gap-4">
                   <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-110"
-                    style={{ background: `${card.color}20`, border: `1px solid ${card.color}40` }}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-110"
+                    style={{ background: `${card.color}18`, border: `1px solid ${card.color}35` }}
                   >
                     <Icon className="w-5 h-5" style={{ color: card.color }} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-semibold text-foreground">{card.label}</h3>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all duration-150" />
+                      <h3 className="font-bold text-foreground">{card.label}</h3>
+                      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all duration-300" />
                     </div>
                     <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
                   </div>
@@ -114,25 +114,25 @@ export default function Home() {
 
       {/* ─── Framework Pillars ─────────────────────────────────────────────── */}
       <div className="animate-fade-in-up animate-stagger-5">
-        <h2 className="text-sm font-semibold tracking-[0.1em] uppercase text-muted-foreground mb-4">
+        <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-muted-foreground mb-4">
           Scoring Framework
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {FRAMEWORK_PILLARS.map((pillar, i) => {
             const Icon = pillar.icon;
             const colors = [
-              "oklch(0.65 0.15 240)",
-              "oklch(0.65 0.15 145)",
-              "oklch(0.78 0.12 75)",
+              "#6366F1",
+              "#10b981",
+              "#38BDF8",
             ];
             return (
               <div
                 key={pillar.label}
-                className="fit-card rounded-xl p-5"
+                className="fit-card rounded-2xl p-5"
               >
                 <div className="flex items-center gap-2 mb-3">
                   <Icon className="w-4 h-4" style={{ color: colors[i] }} />
-                  <span className="font-semibold text-sm">{pillar.label}</span>
+                  <span className="font-bold text-sm">{pillar.label}</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">{pillar.desc}</p>
               </div>
@@ -141,15 +141,15 @@ export default function Home() {
         </div>
 
         {/* Theory credits */}
-        <div className="mt-6 p-4 rounded-xl border border-border/50 bg-muted/20">
+        <div className="mt-6 p-4 rounded-2xl border border-border/50 bg-muted/30">
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground">
-            <span><strong className="text-foreground/60">Archetypes:</strong> Carl Jung</span>
-            <span><strong className="text-foreground/60">Symbolic Capital:</strong> Pierre Bourdieu</span>
-            <span><strong className="text-foreground/60">Myth Analysis:</strong> Roland Barthes</span>
-            <span><strong className="text-foreground/60">Stage Theory:</strong> Erving Goffman</span>
-            <span><strong className="text-foreground/60">Decoding:</strong> Stuart Hall</span>
-            <span><strong className="text-foreground/60">Adoption Curve:</strong> Everett Rogers</span>
-            <span><strong className="text-foreground/60">Liminality:</strong> Victor Turner</span>
+            <span><strong className="text-foreground/60 font-bold">Archetypes:</strong> Carl Jung</span>
+            <span><strong className="text-foreground/60 font-bold">Symbolic Capital:</strong> Pierre Bourdieu</span>
+            <span><strong className="text-foreground/60 font-bold">Myth Analysis:</strong> Roland Barthes</span>
+            <span><strong className="text-foreground/60 font-bold">Stage Theory:</strong> Erving Goffman</span>
+            <span><strong className="text-foreground/60 font-bold">Decoding:</strong> Stuart Hall</span>
+            <span><strong className="text-foreground/60 font-bold">Adoption Curve:</strong> Everett Rogers</span>
+            <span><strong className="text-foreground/60 font-bold">Liminality:</strong> Victor Turner</span>
           </div>
         </div>
       </div>

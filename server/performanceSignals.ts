@@ -10,8 +10,19 @@
  *   - Engagement rates are stored as percentages (e.g. 6.39 = 6.39%), NOT decimals
  */
 
-import type { CreatorProfile } from "../drizzle/schema";
-import type { BrandProfile } from "../drizzle/schema";
+// Local type aliases matching the flattened return shape from db.ts
+// getCreatorProfileById / getBrandProfileById. Uses Record intersection
+// so callers can pass objects with additional fields without conflicts.
+// Only fields that require specific types for scoring operations are declared.
+type CreatorProfile = Record<string, any> & {
+  engagementRate: number | null;
+  followerCount: number | null;
+};
+
+type BrandProfile = Record<string, any> & {
+  overallRating: number | null;
+  tiktokEngagementRate: number | null;
+};
 
 export interface SignalResult {
   score: number; // 0-100

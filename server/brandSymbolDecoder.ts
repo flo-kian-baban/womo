@@ -204,6 +204,7 @@ Rules:
     };
 
     const response = await invokeLLM({
+      purpose: "brand_symbol_decoding",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

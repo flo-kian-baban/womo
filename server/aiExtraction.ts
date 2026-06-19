@@ -181,6 +181,7 @@ CAMPAIGN TYPE SELECTION GUIDE — choose the most accurate fit:
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
 
   const response = await invokeLLM({
+    purpose: "creator_profile_extraction",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -502,6 +503,7 @@ CAMPAIGN TYPE SELECTION GUIDE — choose the most accurate fit:
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
 
   const response = await invokeLLM({
+    purpose: "brand_profile_extraction",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -633,6 +635,7 @@ Output a JSON object with:
 }`;
 
   const response = await invokeLLM({
+    purpose: "fit_narrative_generation",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },

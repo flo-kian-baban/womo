@@ -1,75 +1,19 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1779105637879,
-      "tag": "0000_mighty_miss_america",
+      "version": "7",
+      "when": 1780442507131,
+      "tag": "0000_adorable_bloodscream",
       "breakpoints": true
     },
     {
       "idx": 1,
-      "version": "5",
-      "when": 1779105794807,
-      "tag": "0001_peaceful_leech",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1779108926478,
-      "tag": "0002_striped_yellow_claw",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1779114610706,
-      "tag": "0003_complex_hellcat",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1779124216400,
-      "tag": "0004_jittery_dazzler",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1779128712940,
-      "tag": "0005_furry_rocket_raccoon",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1779129743226,
-      "tag": "0006_flat_blindfold",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "5",
-      "when": 1779130817282,
-      "tag": "0007_tan_ronan",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "5",
-      "when": 1779132510605,
-      "tag": "0008_modern_magus",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "5",
-      "when": 1779900800000,
-      "tag": "0009_add_tiktok_fields",
+      "version": "7",
+      "when": 1780620908678,
+      "tag": "0001_lumpy_dexter_bennett",
       "breakpoints": true
     }
   ]

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 
 export default function BrandDetail() {
   const { id } = useParams<{ id: string }>();
-  const brandId = parseInt(id ?? "0", 10);
+  const brandId = id ?? "";
   const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   const { data, isLoading, error, refetch } = trpc.brand.get.useQuery(

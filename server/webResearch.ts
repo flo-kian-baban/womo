@@ -25,7 +25,17 @@
  * NO YouTube fallback for TikTok creators — it causes hallucinations.
  */
 
-import { callDataApi } from "./_core/dataApi";
+import { fetchHtml, requestGovernor } from "./scraping/httpClient";
+import { getContext, retireContext } from "./scraping/browserClient";
+import pLimit from "p-limit";
+import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
+import { searchTikTokVideos } from "./scraping/tiktok/searchScraper";
+import { searchYouTube } from "./scraping/youtube/searchScraper";
+import { scrapeYouTubeChannelDetails, scrapeYouTubeChannelVideos } from "./scraping/youtube/channelScraper";
+import { searchWeb } from "./scraping/brand/searchFallback";
+import { scrapeInstagramProfile } from "./scraping/instagram/profileScraper";
+import { supplementPostsViaOEmbed } from "./scraping/instagram/postScraper";
+// Instagram types imported via scrapeInstagramProfile return value
 import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
@@ -33,6 +43,7 @@ import { fetchBrandReviews } from "./reviewResearch";
 import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
+import { insertScrapeEvent } from "./db";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +55,7 @@ export interface TranscriptEntry {
   wordCount: number;
   bucket?: "recent" | "mid" | "anchor"; // 6-3-3 temporal bucket
   createTime?: number;   // Unix timestamp (seconds)
-  transcriptSource?: "captions" | "whisper"; // how transcript was obtained
+  transcriptSource?: "captions" | "whisper" | "playwright-webvtt" | "playwright-xhr" | "caption"; // how transcript was obtained
   // Phase 1.6 metadata
   musicMetadata?: { soundName?: string; isOriginal?: boolean; isTrending?: boolean; niche?: "niche" | "mainstream" | "unknown" };
   remixMetadata?: { duetCount?: number; stitchCount?: number; remixTotal?: number };
@@ -68,6 +79,7 @@ export interface CreatorResearchResult {
   displayName: string;
   bio: string;
   followerCount: number;
+  followingCount?: number;
   videoCount: number;
   totalLikes: number;
   totalViews: number;
@@ -89,8 +101,13 @@ export interface CreatorResearchResult {
   longitudinalSample?: LongitudinalSample; // 6-3-3 stratified sample
   culturalVelocity?: "Focusing" | "Drifting" | "Insufficient Data";
   dataConfidenceLevel?: "high" | "medium" | "low";
-  // Supplemental video pool — all discovered-but-unsampled video URLs
-  discoveredVideoPool?: Array<{ id: string; url: string; caption: string; createTime: number }>;
+  // Supplemental video pool — all discovered video URLs with engagement stats
+  discoveredVideoPool?: Array<{
+    id: string; url: string; caption: string; createTime: number;
+    views: number; likes: number; comments: number; saves: number; shares: number;
+    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
+    durationSec: number;
+  }>;
 }
 
 export interface BrandResearchResult {
@@ -157,24 +174,24 @@ function extractHashtags(texts: string[]): string[] {
 
 function extractKeywords(texts: string[]): string[] {
   const stopWords = new Set([
-    "the","a","an","and","or","but","in","on","at","to","for","of","with","by",
-    "from","up","about","into","through","during","is","are","was","were","be",
-    "been","being","have","has","had","do","does","did","will","would","could",
-    "should","may","might","shall","can","i","my","me","we","our","you","your",
-    "he","she","it","they","them","this","that","these","those","what","which",
-    "who","how","when","where","why","all","each","every","both","few","more",
-    "most","other","some","such","no","not","only","same","so","than","too",
-    "very","just","also","new","get","got","let","like","make","know","think",
-    "see","look","come","go","take","give","use","find","want","need","day",
-    "time","year","way","part","place","case","week","company","number","group",
-    "problem","fact","video","watch","subscribe","follow","link","bio","check",
-    "click","here","now","today","back","first","last","next","own","old","big",
-    "high","long","great","little","good","bad","best","right","left","real",
-    "full","free","live","show","tell","feel","try","turn","ask","seem","leave",
-    "call","keep","put","set","run","move","play","pay","hear","help","talk",
-    "start","always","never","ever","still","already","again","once","often",
-    "yeah","okay","like","just","really","actually","gonna","wanna","gotta",
-    "um","uh","so","well","right","know","mean","think","said","went","came",
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+    "from", "up", "about", "into", "through", "during", "is", "are", "was", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "i", "my", "me", "we", "our", "you", "your",
+    "he", "she", "it", "they", "them", "this", "that", "these", "those", "what", "which",
+    "who", "how", "when", "where", "why", "all", "each", "every", "both", "few", "more",
+    "most", "other", "some", "such", "no", "not", "only", "same", "so", "than", "too",
+    "very", "just", "also", "new", "get", "got", "let", "like", "make", "know", "think",
+    "see", "look", "come", "go", "take", "give", "use", "find", "want", "need", "day",
+    "time", "year", "way", "part", "place", "case", "week", "company", "number", "group",
+    "problem", "fact", "video", "watch", "subscribe", "follow", "link", "bio", "check",
+    "click", "here", "now", "today", "back", "first", "last", "next", "own", "old", "big",
+    "high", "long", "great", "little", "good", "bad", "best", "right", "left", "real",
+    "full", "free", "live", "show", "tell", "feel", "try", "turn", "ask", "seem", "leave",
+    "call", "keep", "put", "set", "run", "move", "play", "pay", "hear", "help", "talk",
+    "start", "always", "never", "ever", "still", "already", "again", "once", "often",
+    "yeah", "okay", "like", "just", "really", "actually", "gonna", "wanna", "gotta",
+    "um", "uh", "so", "well", "right", "know", "mean", "think", "said", "went", "came",
   ]);
 
   const wordCounts: Record<string, number> = {};
@@ -226,6 +243,7 @@ Rules:
 Example output: ["Halal Street Food Reviews", "Toronto Local Culture", "Family & Parenting", "Muslim Identity Content"]`;
 
     const response = await invokeLLM({
+      purpose: "content_theme_extraction",
       messages: [
         { role: "system", content: "You are a content analyst. Output only valid JSON arrays." },
         { role: "user", content: prompt },
@@ -295,19 +313,9 @@ function formatNum(n: number): string {
   return String(n);
 }
 
-async function fetchHtml(url: string, extraHeaders?: Record<string, string>): Promise<string> {
-  const { default: axios } = await import("axios");
-  const response = await axios.get(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      ...extraHeaders,
-    },
-    timeout: 15000,
-  });
-  return response.data as string;
-}
+// fetchHtml is now imported from ./scraping/httpClient (top of file)
+// It provides: User-Agent rotation, retry with backoff, Cloudflare detection,
+// and a pluggable proxy interface for Phase 3.
 
 // ─── WEBVTT Parser ────────────────────────────────────────────────────────────
 
@@ -342,119 +350,233 @@ function parseWebVTT(vtt: string): string {
   return textLines.join(" ").replace(/\s+/g, " ").trim();
 }
 
-// ─── TikTok Transcript Fetcher ────────────────────────────────────────────────
+// ─── TikTok Transcript Fetcher — Multi-Path System ────────────────────────────
 
 /**
- * Fetch the WEBVTT transcript from a single TikTok video page.
- * If built-in captions are missing, falls back to Whisper AI transcription.
- * Returns null only if both methods fail.
+ * Multi-path transcript extraction for a single TikTok video.
+ *
+ * Path A: HTTP WEBVTT — fast path, fetch video page via HTTP, extract subtitleInfos
+ * Path B+C: Playwright combined — single browser navigation, extract subtitleInfos
+ *           via page.evaluate() AND intercept subtitle XHR requests simultaneously
+ * Path E: Caption fallback — store the video caption as a minimal transcript
+ *
+ * Path D (Whisper via Playwright video URL) is deferred to Pass 2.
  */
-async function fetchTikTokVideoTranscriptWithWhisperFallback(
+async function fetchVideoTranscriptMultiPath(
   handle: string,
   videoId: string,
   caption: string,
   bucket: "recent" | "mid" | "anchor" = "recent",
   createTime?: number,
-  metadata?: { musicTitle?: string; musicOriginal?: boolean; duetEnabled?: boolean; stitchEnabled?: boolean; durationMs?: number; collaborations?: string[] }
-): Promise<TranscriptEntry | null> {
-  // First try built-in captions
-  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
-  if (captionResult) {
-    const entry = { ...captionResult, bucket, createTime, transcriptSource: "captions" as const };
-    if (metadata?.musicTitle) entry.musicMetadata = { soundName: metadata.musicTitle, isOriginal: metadata.musicOriginal };
-    if (metadata?.duetEnabled || metadata?.stitchEnabled) entry.remixMetadata = { duetCount: 0, stitchCount: 0 };
-    if (metadata?.durationMs) entry.videoDuration = Math.round(metadata.durationMs / 1000);
-    if (metadata?.collaborations?.length) entry.collaborations = metadata.collaborations;
-    return entry;
-  }
-
-  // Whisper fallback: attempt to get the video download URL and transcribe
-  try {
-    const videoUrl = `https://www.tiktok.com/@${handle}/video/${videoId}`;
-    const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
-
-    // Extract video download URL from page data
-    const rehydrationMatch = html.match(
-      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
-    );
-    if (!rehydrationMatch) return null;
-
-    const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
-    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-    const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
-    const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
-    const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
-
-    // Try to get a playable URL for Whisper
-    const playAddr = (videoObj?.playAddr as string) ?? (videoObj?.downloadAddr as string) ?? "";
-    if (!playAddr || playAddr.length < 10) {
-      console.log(`[webResearch] Whisper fallback: no video URL for ${videoId}`);
-      return null;
-    }
-
-    console.log(`[webResearch] Whisper fallback: transcribing video ${videoId}`);
-    const result = await transcribeAudio({ audioUrl: playAddr, language: "en" });
-    if (!result || "error" in result || !result.text || result.text.length < 10) return null;
-
-    const transcript = result.text.trim();
-    const wordCount = transcript.split(/\s+/).length;
-    console.log(`[webResearch] ✅ Whisper transcript for video ${videoId}: ${wordCount} words`);
-    const entry: any = { videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "whisper" as const };
-    if (metadata?.musicTitle) entry.musicMetadata = { soundName: metadata.musicTitle, isOriginal: metadata.musicOriginal };
-    if (metadata?.duetEnabled || metadata?.stitchEnabled) entry.remixMetadata = { duetCount: 0, stitchCount: 0 };
-    if (metadata?.durationMs) entry.videoDuration = Math.round(metadata.durationMs / 1000);
-    if (metadata?.collaborations?.length) entry.collaborations = metadata.collaborations;
-    return entry;
-  } catch (err) {
-    console.warn(`[webResearch] Whisper fallback failed for video ${videoId}:`, (err as Error).message);
-    return null;
-  }
-}
-
-/**
- * Fetch the WEBVTT transcript from a single TikTok video page.
- * Returns null if no subtitle is available.
- */
-async function fetchTikTokVideoTranscript(
-  handle: string,
-  videoId: string,
-  caption: string
+  metadata?: { musicTitle?: string; musicOriginal?: boolean; duetEnabled?: boolean; stitchEnabled?: boolean; durationMs?: number; collaborations?: string[] },
+  /** Shared Playwright context — reused across the batch to avoid one browser tab per video */
+  sharedCtx?: { context: Awaited<ReturnType<typeof getContext>>["context"]; page?: null },
 ): Promise<TranscriptEntry | null> {
   const videoUrl = `https://www.tiktok.com/@${handle}/video/${videoId}`;
 
+  function enrichEntry(entry: TranscriptEntry): TranscriptEntry {
+    if (metadata?.musicTitle) entry.musicMetadata = { soundName: metadata.musicTitle, isOriginal: metadata.musicOriginal };
+    if (metadata?.duetEnabled || metadata?.stitchEnabled) entry.remixMetadata = { duetCount: 0, stitchCount: 0 };
+    if (metadata?.durationMs) entry.videoDuration = Math.round(metadata.durationMs / 1000);
+    if (metadata?.collaborations?.length) entry.collaborations = metadata.collaborations;
+    return entry;
+  }
+
+  // ── PATH A: HTTP WEBVTT (fast path) ─────────────────────────────────────────
   try {
-    const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
-
+    const html = await fetchHtml(videoUrl, { extraHeaders: { Referer: "https://www.tiktok.com/" } });
     const rehydrationMatch = html.match(
-      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
+      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/,
     );
-    if (!rehydrationMatch) {
-      console.log(`[webResearch] No rehydration data for video ${videoId}`);
-      return null;
+    if (rehydrationMatch) {
+      const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
+      const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
+      const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
+      const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
+      const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
+      const subtitleInfos = (videoObj?.subtitleInfos as Array<Record<string, unknown>>) ?? [];
+
+      console.log(`[transcript] ${videoId}: path-A attempted, subtitleInfos count: ${subtitleInfos.length}`);
+
+      if (subtitleInfos.length > 0) {
+        const transcript = await downloadAndParseSubtitle(subtitleInfos);
+        if (transcript) {
+          console.log(`[transcript] ${videoId}: path-A succeeded | ${transcript.wordCount} words`);
+          return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: "captions" as const });
+        }
+      }
+    } else {
+      console.log(`[transcript] ${videoId}: path-A no rehydration data`);
     }
+  } catch (err) {
+    console.warn(`[transcript] ${videoId}: path-A failed: ${(err as Error).message}`);
+  }
 
-    const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
-    const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-    const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
-    const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
-    const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
-    const subtitleInfos = (videoObj?.subtitleInfos as Array<Record<string, unknown>>) ?? [];
+  // ── PATH B+C: Playwright combined (subtitle extraction + XHR interception) ──
+  try {
+    await requestGovernor("tiktok");
 
-    if (subtitleInfos.length === 0) {
-      console.log(`[webResearch] No subtitles for video ${videoId} (${caption.slice(0, 40)})`);
-      return null;
+    // Get a page from the shared context or create new
+    const ctx = sharedCtx ?? await getContext("desktop-chrome");
+    const page = await ctx.context.newPage();
+
+    try {
+      // Set up XHR interception for subtitle files BEFORE navigating
+      let capturedSubtitleText: string | null = null;
+      let subtitleCaptured = false;
+
+      await page.route(/\.(vtt|webvtt)(\?|$)|subtitle|subtitles/i, async (route) => {
+        try {
+          const url = route.request().url();
+          // Only intercept from TikTok CDN domains
+          if (url.includes("tiktokcdn.com") || url.includes("tiktokv.com") || url.includes("musical.ly") || url.includes("byteicdn.com") || url.includes("ibytedtos.com")) {
+            const response = await route.fetch();
+            const body = await response.text();
+            if (body && (body.includes("WEBVTT") || body.includes("-->")) && body.length > 20) {
+              capturedSubtitleText = body;
+              subtitleCaptured = true;
+              console.log(`[transcript] ${videoId}: path-C XHR intercepted subtitle (${body.length} bytes)`);
+            }
+            await route.fulfill({ response });
+          } else {
+            await route.continue();
+          }
+        } catch {
+          await route.continue().catch(() => { });
+        }
+      });
+
+      // Navigate to the video page
+      await page.goto(videoUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {
+        // networkidle may time out — page can still be usable
+      });
+
+      // Wait a moment for any subtitle XHR to complete
+      await page.waitForTimeout(2000);
+
+      // PATH B: Extract subtitleInfos via page.evaluate()
+      const subtitleUrls = await page.evaluate(() => {
+        try {
+          // Try reading from window object first
+          const win = window as any;
+          let rehydrationData = win.__UNIVERSAL_DATA_FOR_REHYDRATION__;
+
+          // Fallback: parse from script tag
+          if (!rehydrationData) {
+            const scriptEl = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+            if (scriptEl?.textContent) {
+              rehydrationData = JSON.parse(scriptEl.textContent);
+            }
+          }
+
+          if (!rehydrationData) return [];
+
+          const scope = rehydrationData?.__DEFAULT_SCOPE__ ?? {};
+          const videoDetail = scope?.["webapp.video-detail"] ?? {};
+          const itemStruct = videoDetail?.itemInfo?.itemStruct ?? {};
+          const video = itemStruct?.video ?? {};
+          const subtitleInfos = video?.subtitleInfos ?? [];
+
+          if (!Array.isArray(subtitleInfos) || subtitleInfos.length === 0) return [];
+
+          // Return URLs, preferring English
+          return subtitleInfos.map((s: any) => ({
+            url: s?.Url ?? s?.url ?? "",
+            lang: s?.LanguageCodeName ?? s?.languageCodeName ?? "",
+            format: s?.Format ?? s?.format ?? "",
+          }));
+        } catch {
+          return [];
+        }
+      }) as Array<{ url: string; lang: string; format: string }>;
+
+      console.log(`[transcript] ${videoId}: path-B page.evaluate() found ${subtitleUrls.length} subtitles`);
+
+      // Try to download WEBVTT from the URLs found by page.evaluate()
+      if (subtitleUrls.length > 0) {
+        // Prefer English
+        const engSub = subtitleUrls.find(s => s.lang.startsWith("eng")) ?? subtitleUrls[0];
+        if (engSub.url) {
+          const transcript = await downloadWebVTT(engSub.url);
+          if (transcript) {
+            console.log(`[transcript] ${videoId}: path-B succeeded | ${transcript.wordCount} words`);
+            await page.close().catch(() => { });
+            return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: "playwright-webvtt" as const });
+          }
+        }
+      }
+
+      // PATH C: Check if XHR interception captured a subtitle file
+      // Wait a bit more for any late subtitle XHR
+      if (!subtitleCaptured) {
+        await page.waitForTimeout(2000);
+      }
+
+      if (capturedSubtitleText) {
+        const transcript = parseWebVTT(capturedSubtitleText);
+        if (transcript && transcript.length >= 10) {
+          const wordCount = transcript.split(/\s+/).length;
+          console.log(`[transcript] ${videoId}: path-C succeeded | ${wordCount} words`);
+          await page.close().catch(() => { });
+          return enrichEntry({ videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "playwright-xhr" as const });
+        }
+      }
+
+      console.log(`[transcript] ${videoId}: path-BC failed, no subtitles available`);
+      await page.close().catch(() => { });
+    } catch (innerErr) {
+      console.warn(`[transcript] ${videoId}: path-BC inner error: ${(innerErr as Error).message}`);
+      await page.close().catch(() => { });
     }
+  } catch (err) {
+    console.warn(`[transcript] ${videoId}: path-BC failed: ${(err as Error).message}`);
+  }
 
-    // Prefer English subtitle; fall back to first available
-    const engSub = subtitleInfos.find(
-      (s) => (s?.LanguageCodeName as string)?.startsWith("eng")
-    ) ?? subtitleInfos[0];
+  // ── PATH E: Caption fallback — only use if caption has real content ──────────
+  // Require >= 8 real words (not hashtags/mentions) to prevent thin data pollution
+  if (caption && caption.trim().length >= 10) {
+    const words = caption.trim().split(/\s+/);
+    const hashtagCount = words.filter(w => w.startsWith('#') || w.startsWith('@')).length;
+    const realWordCount = words.length - hashtagCount;
 
-    const subtitleUrl = engSub?.Url as string;
-    if (!subtitleUrl) return null;
+    if (realWordCount >= 8) {
+      console.log(`[transcript] ${videoId}: path-E caption fallback | ${realWordCount} real words (${hashtagCount} hashtags filtered)`);
+      return enrichEntry({ videoId, videoUrl, caption, transcript: caption.trim(), wordCount: words.length, bucket, createTime, transcriptSource: "caption" as const });
+    } else {
+      console.log(`[transcript] ${videoId}: path-E rejected — caption too thin: ${realWordCount} real words, ${hashtagCount} hashtags`);
+    }
+  }
 
+  console.log(`[transcript] ${videoId}: all paths exhausted (caption: ${caption?.length ?? 0} chars)`);
+  return null;
+}
+
+/**
+ * Download and parse a WEBVTT subtitle from a list of subtitleInfos.
+ * Prefers English; falls back to first available.
+ */
+async function downloadAndParseSubtitle(
+  subtitleInfos: Array<Record<string, unknown>>,
+): Promise<{ transcript: string; wordCount: number } | null> {
+  // Prefer English subtitle; fall back to first available
+  const engSub = subtitleInfos.find(
+    (s) => (s?.LanguageCodeName as string)?.startsWith("eng"),
+  ) ?? subtitleInfos[0];
+
+  const subtitleUrl = engSub?.Url as string;
+  if (!subtitleUrl) return null;
+
+  const transcript = await downloadWebVTT(subtitleUrl);
+  return transcript;
+}
+
+/**
+ * Download a WEBVTT file and parse to plain text.
+ */
+async function downloadWebVTT(url: string): Promise<{ transcript: string; wordCount: number } | null> {
+  try {
     const { default: axios } = await import("axios");
-    const subResponse = await axios.get(subtitleUrl, {
+    const subResponse = await axios.get(url, {
       headers: {
         "Referer": "https://www.tiktok.com/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -469,11 +591,9 @@ async function fetchTikTokVideoTranscript(
     if (!transcript || transcript.length < 10) return null;
 
     const wordCount = transcript.split(/\s+/).length;
-    console.log(`[webResearch] ✅ Transcript for video ${videoId}: ${wordCount} words`);
-
-    return { videoId, videoUrl, caption, transcript, wordCount };
+    return { transcript, wordCount };
   } catch (err) {
-    console.warn(`[webResearch] Transcript fetch failed for video ${videoId}:`, (err as Error).message);
+    console.warn(`[transcript] WEBVTT download failed: ${(err as Error).message}`);
     return null;
   }
 }
@@ -553,66 +673,41 @@ async function fetchTikTokVideosFromAPI(
   }> = [];
 
   try {
-    // First get user info to get secUid
-    const userResponse = await callDataApi("TikTok/get_user_info", {
-      query: { uniqueId: handle },
-    }) as Record<string, unknown>;
+    // Combined profile scrape gets user info + video list via XHR interception
+    const profileResult = await scrapeTikTokProfile(handle);
 
-    const userInfoData = (userResponse?.userInfo as Record<string, unknown>) ?? {};
-    const user = (userInfoData?.user as Record<string, unknown>) ?? {};
-    const secUid = (user?.secUid as string) ?? "";
+    const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
+    const user = userInfoData?.user ?? {} as Record<string, unknown>;
+    const secUid = user?.secUid ?? "";
 
     if (!secUid) {
       console.log(`[webResearch] @${handle}: could not get secUid from user info`);
       return items;
     }
 
-    // Fetch user's post list (up to 30 videos)
-    const postsResponse = await callDataApi("TikTok/get_user_post_list", {
-      query: { secUid, count: "30" },
-    }) as Record<string, unknown>;
-
-    const dataBlock = (postsResponse?.data as Record<string, unknown>) ?? postsResponse;
-    const itemList = (dataBlock?.itemList as unknown[]) ?? [];
+    // Get video list from the combined profile scrape
+    const itemList = profileResult.posts?.data?.itemList ?? [];
 
     console.log(`[webResearch] @${handle}: API fetch found ${itemList.length} videos`);
 
     for (const item of itemList) {
-      const v = item as Record<string, unknown>;
-      const videoId = (v?.id as string) ?? "";
+      const videoId = item.id ?? "";
       if (!videoId) continue;
-
-      const desc = (v?.desc as string) ?? "";
-      const statsObj = (v?.stats as Record<string, unknown>) ?? {};
-      const views = Number(statsObj?.playCount ?? 0);
-      const likes = Number(statsObj?.diggCount ?? 0);
-      const comments = Number(statsObj?.commentCount ?? 0);
-      const saves = Number(statsObj?.collectCount ?? 0);
-      const shares = Number(statsObj?.shareCount ?? 0);
-      const createTime = Number(v?.createTime ?? 0);
-
-      const music = (v?.music as Record<string, unknown>) ?? {};
-      const musicOriginal = Boolean(music?.original ?? false);
-      const duetEnabled = Boolean(v?.duetEnabled ?? false);
-      const stitchEnabled = Boolean(v?.stitchEnabled ?? false);
-      const isAd = Boolean(v?.isAd ?? false);
-      const videoObj = (v?.video as Record<string, unknown>) ?? {};
-      const durationMs = Number(videoObj?.duration ?? 0);
 
       items.push({
         id: videoId,
-        caption: desc,
-        views,
-        likes,
-        comments,
-        saves,
-        shares,
-        createTime,
-        musicOriginal,
-        duetEnabled,
-        stitchEnabled,
-        isAd,
-        durationMs,
+        caption: item.desc ?? "",
+        views: Number(item.stats?.playCount ?? 0),
+        likes: Number(item.stats?.diggCount ?? 0),
+        comments: Number(item.stats?.commentCount ?? 0),
+        saves: Number(item.stats?.collectCount ?? 0),
+        shares: Number(item.stats?.shareCount ?? 0),
+        createTime: Number(item.createTime ?? 0),
+        musicOriginal: Boolean(item.music?.original ?? false),
+        duetEnabled: Boolean(item.duetEnabled ?? false),
+        stitchEnabled: Boolean(item.stitchEnabled ?? false),
+        isAd: Boolean(item.isAd ?? false),
+        durationMs: Number(item.video?.duration ?? 0),
       });
     }
   } catch (err) {
@@ -631,7 +726,12 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   engagementSignals: EngagementSignals;
   quotaExhausted: boolean;
   longitudinalSample: LongitudinalSample;
-  discoveredVideoPool: Array<{ id: string; url: string; caption: string; createTime: number }>;
+  discoveredVideoPool: Array<{
+    id: string; url: string; caption: string; createTime: number;
+    views: number; likes: number; comments: number; saves: number; shares: number;
+    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
+    durationSec: number;
+  }>;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -692,9 +792,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
     for (const q of queries) {
       try {
-        const result = await callDataApi("TikTok/search_tiktok_video_general", {
-          query: { keyword: q, count: "20" },  // count MUST be a STRING
-        }) as Record<string, unknown>;
+        const result = await searchTikTokVideos(q) as unknown as Record<string, unknown>;
 
         const items = (result?.item_list as unknown[]) ?? [];
         console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
@@ -722,16 +820,16 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
           const desc = (v?.desc as string) ?? "";
           const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
-          const views    = Number(statsObj?.playCount   ?? statsObj?.play_count    ?? 0);
-          const likes    = Number(statsObj?.diggCount   ?? statsObj?.digg_count    ?? 0);
+          const views = Number(statsObj?.playCount ?? statsObj?.play_count ?? 0);
+          const likes = Number(statsObj?.diggCount ?? statsObj?.digg_count ?? 0);
           const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
-          const saves    = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
-          const shares   = Number(statsObj?.shareCount  ?? statsObj?.share_count   ?? 0);
+          const saves = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
+          const shares = Number(statsObj?.shareCount ?? statsObj?.share_count ?? 0);
           const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
 
           // Music signals
           const music = (v?.music as Record<string, unknown>) ?? {};
-          const musicTitle  = (music?.title      as string) ?? "";
+          const musicTitle = (music?.title as string) ?? "";
           const musicAuthor = (music?.authorName as string) ?? "";
           const musicOriginal = Boolean(music?.original ?? false);
           if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
@@ -744,11 +842,11 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
           }
 
           // Interaction flags
-          const duetEnabled   = Boolean(v?.duetEnabled   ?? v?.duet_enabled   ?? false);
+          const duetEnabled = Boolean(v?.duetEnabled ?? v?.duet_enabled ?? false);
           const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
-          const isAd          = Boolean(v?.isAd          ?? v?.is_ad          ?? false);
-          const videoObj      = (v?.video as Record<string, unknown>) ?? {};
-          const durationMs    = Number(videoObj?.duration ?? 0);
+          const isAd = Boolean(v?.isAd ?? v?.is_ad ?? false);
+          const videoObj = (v?.video as Record<string, unknown>) ?? {};
+          const durationMs = Number(videoObj?.duration ?? 0);
 
           // Collect hashtags from challenges and textExtra
           const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
@@ -781,12 +879,20 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     }
   }
 
+  const apiVideoCount = apiVideos.length;
+  const supplementalVideoCount = videoItems.length - apiVideoCount;
+  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
+
+  if (videoItems.length < 4) {
+    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
+  }
+
   console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
 
   // ─── 6-3-3 Stratified Sampling ─────────────────────────────────────────────
   // Sort all collected videos by createTime descending (newest first)
   const nowSec2 = Math.floor(Date.now() / 1000);
-  const nineMonthsSec  = 270 * 24 * 3600;  // ~9 months
+  const nineMonthsSec = 270 * 24 * 3600;  // ~9 months
   const eighteenMonthsSec = 540 * 24 * 3600; // ~18 months
 
   // Sort by createTime descending (newest first)
@@ -887,43 +993,57 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   const anchorUsedFallback = anchorFallback && anchorBucket.length > anchorCandidates.length;
   console.log(`[webResearch] @${handle}: 6-3-3 sample — recent=${recentBucket.length}, mid=${midBucket.length}${midUsedFallback ? "(+fallback)" : ""}, anchor=${anchorBucket.length}${anchorUsedFallback ? "(+fallback)" : ""} → ${sampledVideos.length} total`);
 
-  // Fetch transcripts for the 12 sampled videos in batches of 3
-  const batchSize = 3;
-  for (let i = 0; i < sampledVideos.length; i += batchSize) {
-    const batch = sampledVideos.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      batch.map(({ item, bucket }) => {
-        const collaborations = (item.caption.match(/@[a-zA-Z0-9_.]+/g) ?? []).map(m => m.slice(1));
-        return fetchTikTokVideoTranscriptWithWhisperFallback(handle, item.id, item.caption, bucket, item.createTime, {
+  // Fetch transcripts for the 12 sampled videos using p-limit concurrency
+  const transcriptLimit = pLimit(3);
+  // Acquire a shared Playwright context for all videos in this batch
+  let sharedCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+  try {
+    sharedCtx = await getContext("desktop-chrome");
+  } catch (err) {
+    console.warn(`[transcript] Failed to acquire Playwright context — will use per-video fallback:`, (err as Error).message);
+  }
+
+  const transcriptPromises = sampledVideos.map(({ item, bucket }) =>
+    transcriptLimit(async () => {
+      const collaborations = (item.caption.match(/@[a-zA-Z0-9_.]+/g) ?? []).map(m => m.slice(1));
+      try {
+        return await fetchVideoTranscriptMultiPath(handle, item.id, item.caption, bucket, item.createTime, {
           musicTitle: (item as any).musicTitle,
           musicOriginal: item.musicOriginal,
           duetEnabled: item.duetEnabled,
           stitchEnabled: item.stitchEnabled,
           durationMs: item.durationMs,
-          collaborations: collaborations.length > 0 ? collaborations : undefined
-        });
-      })
-    );
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value) {
-        transcripts.push(r.value);
+          collaborations: collaborations.length > 0 ? collaborations : undefined,
+        }, sharedCtx ? { context: sharedCtx.context } : undefined);
+      } catch (err) {
+        console.warn(`[transcript] ${item.id}: unexpected error: ${(err as Error).message}`);
+        return null;
       }
+    })
+  );
+
+  const transcriptResults = await Promise.allSettled(transcriptPromises);
+  for (const r of transcriptResults) {
+    if (r.status === "fulfilled" && r.value) {
+      transcripts.push(r.value);
     }
-    if (i + batchSize < sampledVideos.length) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+  }
+
+  // Clean up shared context after batch is done
+  if (sharedCtx) {
+    try { await retireContext(sharedCtx.context); } catch { /* ignore */ }
   }
 
   console.log(`[webResearch] @${handle}: ${transcripts.length} transcripts fetched out of ${sampledVideos.length} sampled videos`);
 
   // ─── Compute engagement signals from all collected videoItems ───────────────
   const nowSec = Math.floor(Date.now() / 1000);
-  const threeMonthsSec  = 90  * 24 * 3600;
+  const threeMonthsSec = 90 * 24 * 3600;
   const twelveMonthsSec = 365 * 24 * 3600;
 
   const recentVideos: TemporalVideoEntry[] = [];
-  const midVideos:    TemporalVideoEntry[] = [];
-  const olderVideos:  TemporalVideoEntry[] = [];
+  const midVideos: TemporalVideoEntry[] = [];
+  const olderVideos: TemporalVideoEntry[] = [];
 
   let sumCommentRate = 0, sumSaveRate = 0, sumShareRate = 0, sumLikeRate = 0;
   let sumOriginalAudio = 0, sumRemixEnabled = 0, sumIsAd = 0, sumDurationSec = 0;
@@ -937,55 +1057,55 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     };
     if (vi.createTime > 0) {
       const ageSec = nowSec - vi.createTime;
-      if (ageSec < threeMonthsSec)       recentVideos.push(entry);
+      if (ageSec < threeMonthsSec) recentVideos.push(entry);
       else if (ageSec < twelveMonthsSec) midVideos.push(entry);
-      else                               olderVideos.push(entry);
+      else olderVideos.push(entry);
     }
 
     if (vi.views > 0) {
       sumCommentRate += vi.comments / vi.views;
-      sumSaveRate    += vi.saves    / vi.views;
-      sumShareRate   += vi.shares   / vi.views;
-      sumLikeRate    += vi.likes    / vi.views;
+      sumSaveRate += vi.saves / vi.views;
+      sumShareRate += vi.shares / vi.views;
+      sumLikeRate += vi.likes / vi.views;
       rateCount++;
     }
-    sumOriginalAudio  += vi.musicOriginal ? 1 : 0;
-    sumRemixEnabled   += (vi.duetEnabled || vi.stitchEnabled) ? 1 : 0;
-    sumIsAd           += vi.isAd ? 1 : 0;
-    sumDurationSec    += vi.durationMs > 0 ? vi.durationMs / 1000 : 0;
+    sumOriginalAudio += vi.musicOriginal ? 1 : 0;
+    sumRemixEnabled += (vi.duetEnabled || vi.stitchEnabled) ? 1 : 0;
+    sumIsAd += vi.isAd ? 1 : 0;
+    sumDurationSec += vi.durationMs > 0 ? vi.durationMs / 1000 : 0;
   }
 
   const n = videoItems.length || 1;
   const engagementSignals: EngagementSignals = {
-    avgCommentRate:      rateCount > 0 ? sumCommentRate / rateCount : 0,
-    avgSaveRate:         rateCount > 0 ? sumSaveRate    / rateCount : 0,
-    avgShareRate:        rateCount > 0 ? sumShareRate   / rateCount : 0,
-    avgLikeRate:         rateCount > 0 ? sumLikeRate    / rateCount : 0,
-    originalAudioRate:   sumOriginalAudio  / n,
-    remixEnablementRate: sumRemixEnabled   / n,
-    adTagRate:           sumIsAd           / n,
-    avgDurationSeconds:  sumDurationSec    / n,
+    avgCommentRate: rateCount > 0 ? sumCommentRate / rateCount : 0,
+    avgSaveRate: rateCount > 0 ? sumSaveRate / rateCount : 0,
+    avgShareRate: rateCount > 0 ? sumShareRate / rateCount : 0,
+    avgLikeRate: rateCount > 0 ? sumLikeRate / rateCount : 0,
+    originalAudioRate: sumOriginalAudio / n,
+    remixEnablementRate: sumRemixEnabled / n,
+    adTagRate: sumIsAd / n,
+    avgDurationSeconds: sumDurationSec / n,
     recentVideos, midVideos, olderVideos,
     totalSampled: videoItems.length,
   };
 
-  console.log(`[webResearch] @${handle} engagement signals: commentRate=${(engagementSignals.avgCommentRate*100).toFixed(3)}% saveRate=${(engagementSignals.avgSaveRate*100).toFixed(3)}% originalAudio=${(engagementSignals.originalAudioRate*100).toFixed(0)}%`);
+  console.log(`[webResearch] @${handle} engagement signals: commentRate=${(engagementSignals.avgCommentRate * 100).toFixed(3)}% saveRate=${(engagementSignals.avgSaveRate * 100).toFixed(3)}% originalAudio=${(engagementSignals.originalAudioRate * 100).toFixed(0)}%`);
 
   // ─── Assemble LongitudinalSample from 6-3-3 transcripts ─────────────────────────────
-  const longitudinalRecent  = transcripts.filter(t => t.bucket === "recent");
-  const longitudinalMid     = transcripts.filter(t => t.bucket === "mid");
-  const longitudinalAnchor  = transcripts.filter(t => t.bucket === "anchor");
+  const longitudinalRecent = transcripts.filter(t => t.bucket === "recent");
+  const longitudinalMid = transcripts.filter(t => t.bucket === "mid");
+  const longitudinalAnchor = transcripts.filter(t => t.bucket === "anchor");
   const totalFetched = transcripts.length;
   const completeness: LongitudinalSample["completeness"] =
     totalFetched >= 12 ? "full" :
-    totalFetched >= 6  ? "partial" :
-    "insufficient";
+      totalFetched >= 6 ? "partial" :
+        "insufficient";
 
   // Cultural velocity: compare theme consistency across buckets
   // "Focusing" = themes are consistent across time; "Drifting" = themes diverge
   let culturalVelocity: LongitudinalSample["culturalVelocity"] = "Insufficient Data";
   if (longitudinalRecent.length > 0 && (longitudinalMid.length > 0 || longitudinalAnchor.length > 0)) {
-    const recentText  = longitudinalRecent.map(t => t.transcript).join(" ").toLowerCase();
+    const recentText = longitudinalRecent.map(t => t.transcript).join(" ").toLowerCase();
     const historicText = [...longitudinalMid, ...longitudinalAnchor].map(t => t.transcript).join(" ").toLowerCase();
     // Extract top 10 words from each period and measure overlap
     const topWords = (text: string): Set<string> => {
@@ -994,7 +1114,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
       for (const w of matches) counts[w] = (counts[w] ?? 0) + 1;
       return new Set(Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([w]) => w));
     };
-    const recentWords  = topWords(recentText);
+    const recentWords = topWords(recentText);
     const historicWords = topWords(historicText);
     const overlap = Array.from(recentWords).filter(w => historicWords.has(w)).length;
     // If >50% of top words overlap across time periods, creator is "Focusing"
@@ -1026,6 +1146,15 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
       url: `https://www.tiktok.com/@${handle}/video/${v.id}`,
       caption: v.caption,
       createTime: v.createTime,
+      views: v.views,
+      likes: v.likes,
+      comments: v.comments,
+      saves: v.saves,
+      shares: v.shares,
+      musicOriginal: v.musicOriginal,
+      musicTitle: "",
+      musicArtist: "",
+      durationSec: Math.round(v.durationMs / 1000),
       alreadySampled: sampledIds.has(v.id),
     }));
 
@@ -1170,9 +1299,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
 
   // Step 1: Find channel
   try {
-    const searchResponse = await callDataApi("Youtube/search", {
-      query: { q: handle, type: "channel", hl: "en", gl: "US" },
-    }) as Record<string, unknown>;
+    const searchResponse = await searchYouTube(handle, { type: "channel", hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
 
     const contents = (searchResponse?.contents as unknown[]) ?? [];
     for (const item of contents.slice(0, 3)) {
@@ -1193,9 +1320,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   // Step 2: Get channel details
   if (channelId) {
     try {
-      const details = await callDataApi("Youtube/get_channel_details", {
-        query: { id: channelId },
-      }) as Record<string, unknown>;
+      const details = await scrapeYouTubeChannelDetails(channelId) as unknown as Record<string, unknown>;
 
       if (details && !details.status) {
         displayName = (details.title as string) ?? displayName;
@@ -1219,9 +1344,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
     // Step 3: Get channel videos
     const videoIds: Array<{ id: string; title: string }> = [];
     try {
-      const videosResponse = await callDataApi("Youtube/get_channel_videos", {
-        query: { channelId, hl: "en", gl: "US" },
-      }) as Record<string, unknown>;
+      const videosResponse = await scrapeYouTubeChannelVideos(channelId) as unknown as Record<string, unknown>;
 
       const contents = (videosResponse?.contents as unknown[]) ?? [];
       for (const item of contents.slice(0, 15)) {
@@ -1262,9 +1385,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   // Fallback: video search if no channel found
   if (videoTitles.length < 3) {
     try {
-      const videoSearch = await callDataApi("Youtube/search", {
-        query: { q: `${handle} youtube`, hl: "en", gl: "US" },
-      }) as Record<string, unknown>;
+      const videoSearch = await searchYouTube(`${handle} youtube`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
       const contents = (videoSearch?.contents as unknown[]) ?? [];
       for (const item of contents.slice(0, 10)) {
         const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
@@ -1300,8 +1421,8 @@ function detectCreatorType(
 ): string {
   const allText = [...videoTitles, bio, transcriptText ?? ""].join(" ").toLowerCase();
   const hasNicheKeywords = [
-    "food","restaurant","review","recipe","travel","fitness","fashion","makeup",
-    "tutorial","how to","tech","gaming","business","finance","education","news"
+    "food", "restaurant", "review", "recipe", "travel", "fitness", "fashion", "makeup",
+    "tutorial", "how to", "tech", "gaming", "business", "finance", "education", "news"
   ].some(kw => allText.includes(kw));
 
   const emptyRatio = videoTitles.length === 0 ? 1 : (videoTitles.filter(t => t.trim().length < 5).length / videoTitles.length);
@@ -1350,8 +1471,8 @@ function buildCreatorEvidenceSummary(data: {
   const hasTranscripts = transcripts.length > 0;
   const transcriptBlock = hasTranscripts
     ? transcripts.slice(0, 5).map((t, i) =>
-        `  [Video ${i + 1}] "${t.caption.slice(0, 60) || "(no caption)"}" — ${t.wordCount} words spoken\n  TRANSCRIPT: ${t.transcript.slice(0, 500)}${t.transcript.length > 500 ? "..." : ""}`
-      ).join("\n\n")
+      `  [Video ${i + 1}] "${t.caption.slice(0, 60) || "(no caption)"}" — ${t.wordCount} words spoken\n  TRANSCRIPT: ${t.transcript.slice(0, 500)}${t.transcript.length > 500 ? "..." : ""}`
+    ).join("\n\n")
     : "  [No transcripts available — analysis based on video titles and profile metadata]";
 
   // ─── Build engagement signals block ───────────────────────────────────────────────────────────
@@ -1361,46 +1482,46 @@ function buildCreatorEvidenceSummary(data: {
     const sig = engagementSignals;
     const pct = (v: number) => (v * 100).toFixed(3) + "%";
     const pct1 = (v: number) => (v * 100).toFixed(1) + "%";
-    const secs = (s: number) => s > 0 ? `${Math.round(s)}s (${s >= 60 ? (s/60).toFixed(1)+"min" : "short-form"})` : "unknown";
+    const secs = (s: number) => s > 0 ? `${Math.round(s)}s (${s >= 60 ? (s / 60).toFixed(1) + "min" : "short-form"})` : "unknown";
 
     // Parasocial bond interpretation
     const commentPct = sig.avgCommentRate * 100;
     const bondLabel =
-      commentPct >= 0.5  ? "5.0 — Deep parasocial bond (audience treats creator as a close friend)" :
-      commentPct >= 0.25 ? "4.0 — Strong bond (regular emotional engagement)" :
-      commentPct >= 0.10 ? "3.0 — Moderate bond (engaged but professional distance)" :
-      commentPct >= 0.05 ? "2.0 — Weak bond (passive audience, low interaction)" :
-                           "1.0 — Transactional / informational (minimal emotional connection)";
+      commentPct >= 0.5 ? "5.0 — Deep parasocial bond (audience treats creator as a close friend)" :
+        commentPct >= 0.25 ? "4.0 — Strong bond (regular emotional engagement)" :
+          commentPct >= 0.10 ? "3.0 — Moderate bond (engaged but professional distance)" :
+            commentPct >= 0.05 ? "2.0 — Weak bond (passive audience, low interaction)" :
+              "1.0 — Transactional / informational (minimal emotional connection)";
 
     // Audience relationship interpretation
     const savePct = sig.avgSaveRate * 100;
     const relLabel =
       savePct >= 1.0 ? "Authority / Expert (audience saves content as a reference resource)" :
-      savePct >= 0.4 ? "Mentor (audience saves for future use — high utility value)" :
-                       "Friend / Entertainer (audience watches but does not save — entertainment-first)";
+        savePct >= 0.4 ? "Mentor (audience saves for future use — high utility value)" :
+          "Friend / Entertainer (audience watches but does not save — entertainment-first)";
 
     // Cultural capital interpretation
     const origAudio = sig.originalAudioRate;
-    const sharePct  = sig.avgShareRate * 100;
+    const sharePct = sig.avgShareRate * 100;
     const capitalLabel =
       origAudio >= 0.5 && sharePct >= 0.3 ? "PRODUCE — Creator originates culture (original audio + high share rate)" :
-      origAudio >= 0.3                    ? "PRODUCE (leaning) — Creates original audio but limited cultural spread" :
-      sharePct >= 0.5                     ? "RELAY (amplifier) — Spreads existing culture widely" :
-                                            "RELAY — Participates in existing trends, does not originate";
+        origAudio >= 0.3 ? "PRODUCE (leaning) — Creates original audio but limited cultural spread" :
+          sharePct >= 0.5 ? "RELAY (amplifier) — Spreads existing culture widely" :
+            "RELAY — Participates in existing trends, does not originate";
 
     // Remix signal
     const remixLabel = sig.remixEnablementRate >= 0.5
       ? `HIGH (${pct1(sig.remixEnablementRate)} of videos allow duet/stitch — community remix culture)`
       : sig.remixEnablementRate > 0
-      ? `LOW (${pct1(sig.remixEnablementRate)} allow remix — selective openness)`
-      : "NONE (all duet/stitch disabled — closed content strategy)";
+        ? `LOW (${pct1(sig.remixEnablementRate)} allow remix — selective openness)`
+        : "NONE (all duet/stitch disabled — closed content strategy)";
 
     // Brand saturation
     const adLabel = sig.adTagRate >= 0.3
       ? `HIGH (${pct1(sig.adTagRate)} of videos tagged as ads — significant commercial activity)`
       : sig.adTagRate > 0
-      ? `MODERATE (${pct1(sig.adTagRate)} ad-tagged)`
-      : "NONE detected in sampled videos";
+        ? `MODERATE (${pct1(sig.adTagRate)} ad-tagged)`
+        : "NONE detected in sampled videos";
 
     engagementBlock = `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1543,10 +1664,12 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   let displayName = handle;
   let bio = "";
   let followerCount = 0;
+  let followingCount = 0;
   let videoCount = 0;
   let totalLikes = 0;
   let location = "";
   let quotaExhausted = false;
+  const viewCounts: number[] = [];
 
   // Helper: detect quota exhaustion errors
   const isQuotaError = (err: unknown): boolean => {
@@ -1554,108 +1677,49 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
   };
 
-  // Step 1: TikTok user info (profile metadata)
+  // Step 1: Combined profile scrape (user info + video list via XHR interception)
+  const htmlTitles: string[] = [];
+  const popularTitles: string[] = [];
   try {
-    const userResponse = await callDataApi("TikTok/get_user_info", {
-      query: { uniqueId: handle },
-    }) as Record<string, unknown>;
+    const profileResult = await scrapeTikTokProfile(handle);
 
-    const userInfoData = (userResponse?.userInfo as Record<string, unknown>) ?? {};
-    const user = (userInfoData?.user as Record<string, unknown>) ?? {};
-    const stats = (userInfoData?.stats as Record<string, unknown>) ?? {};
+    const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
+    const user = userInfoData?.user ?? {} as Record<string, unknown>;
+    const stats = userInfoData?.stats ?? {} as Record<string, unknown>;
 
-    secUid = (user?.secUid as string) ?? "";
-    displayName = (user?.nickname as string) ?? handle;
-    bio = (user?.signature as string) ?? "";
+    secUid = user?.secUid ?? "";
+    displayName = user?.nickname ?? handle;
+    bio = user?.signature ?? "";
     followerCount = Number(stats?.followerCount ?? 0);
+    followingCount = Number(stats?.followingCount ?? 0);
     videoCount = Number(stats?.videoCount ?? 0);
     totalLikes = Number(stats?.heartCount ?? 0);
 
     const locationMatch = bio.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Calgary|Ottawa|Edmonton|Winnipeg|Quebec|Halifax|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
     if (locationMatch) location = locationMatch[1];
+
+    // Extract video titles and view counts from the combined post list
+    const itemList = profileResult.posts?.data?.itemList ?? [];
+    for (const item of itemList) {
+      const desc = item.desc ?? "";
+      const views = Number(item.stats?.playCount ?? 0);
+      if (desc.trim()) htmlTitles.push(desc.trim());
+      if (views > 0) viewCounts.push(views);
+    }
+
+    console.log(`[webResearch] @${handle}: scrapeTikTokProfile returned followerCount=${followerCount}, videos=${itemList.length}`);
   } catch (err) {
     if (isQuotaError(err)) quotaExhausted = true;
-    console.warn("[webResearch] TikTok user info failed:", err);
+    console.warn("[webResearch] TikTok profile scrape failed:", err);
   }
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts: transcriptViewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool } = transcriptData;
   if (searchQuotaExhausted) quotaExhausted = true;
-
-  // Step 3: HTML scrape for additional video titles (profile page)
-  const htmlTitles: string[] = [];
-  try {
-    const html = await fetchHtml(`https://www.tiktok.com/@${handle}`);
-    
-    // Try to extract follower count from HTML using multiple regex patterns
-    if (followerCount === 0) {
-      // Pattern 1: Look for followerCount in JSON-like structures
-      const followerPatterns = [
-        /"followerCount":(\d+)/,
-        /followerCount["']?\s*:\s*([\d,]+)/,
-        /followers["']?\s*:\s*([\d,]+)/i,
-        /"followers":(\d+)/i,
-      ];
-      
-      for (const pattern of followerPatterns) {
-        const match = html.match(pattern);
-        if (match && match[1]) {
-          const count = parseInt(match[1].replace(/,/g, ''), 10);
-          if (count > 0) {
-            followerCount = count;
-            console.log(`[webResearch] Extracted followerCount=${followerCount} for @${handle} using regex`);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Extract video titles and other data from JSON
-    const jsonMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
-    if (jsonMatch) {
-      try {
-        const pageData = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
-        const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-        const userDetail = (defaultScope?.["webapp.user-detail"] as Record<string, unknown>) ?? {};
-        
-        const itemList = (userDetail?.itemList as unknown[]) ?? [];
-        for (const item of itemList) {
-          const v = item as Record<string, unknown>;
-          const desc = (v?.desc as string) ?? "";
-          if (desc && !searchTitles.includes(desc)) htmlTitles.push(desc);
-        }
-      } catch { /* JSON parse failed */ }
-    }
-
-    if (!bio) {
-      const sigMatch = html.match(/"signature":"([^"]+)"/);
-      if (sigMatch) bio = sigMatch[1].replace(/\\n/g, " ").replace(/\\u[0-9a-fA-F]{4}/g, "").trim();
-    }
-  } catch (err) {
-    console.warn("[webResearch] TikTok HTML scrape failed:", err);
-  }
-
-  // Step 4: Popular posts (large creators only)
-  const popularTitles: string[] = [];
-  if (secUid) {
-    try {
-      const postsResponse = await callDataApi("TikTok/get_user_popular_posts", {
-        query: { secUid, count: "20" },
-      }) as Record<string, unknown>;
-
-      const dataBlock = (postsResponse?.data as Record<string, unknown>) ?? postsResponse;
-      const itemList = (dataBlock?.itemList as unknown[]) ?? [];
-      for (const item of itemList) {
-        const desc = ((item as Record<string, unknown>)?.desc as string) ?? "";
-        const stats = ((item as Record<string, unknown>)?.stats as Record<string, unknown>) ?? {};
-        const views = Number(stats?.playCount ?? 0);
-        if (desc.trim()) popularTitles.push(desc.trim());
-        if (views > 0) viewCounts.push(views);
-      }
-    } catch (err) {
-      console.warn("[webResearch] TikTok popular posts failed (expected for small creators):", err);
-    }
+  // Merge transcript view counts into main viewCounts array
+  for (const vc of transcriptViewCounts) {
+    if (vc > 0 && !viewCounts.includes(vc)) viewCounts.push(vc);
   }
 
   // NO YouTube fallback — removed entirely to prevent hallucination
@@ -1666,7 +1730,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Check if we have meaningful content data (bio alone is not enough)
   const hasContentData = transcripts.length > 0 || allTitles.length > 0;
   const hasAnyData = hasContentData || followerCount > 0 || bio.length > 0;
-  
+
   // Log extracted stats for debugging
   if (followerCount > 0) {
     console.log(`[webResearch] @${handle}: followerCount=${followerCount}, videoCount=${videoCount}, totalLikes=${totalLikes}`);
@@ -1693,6 +1757,20 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     throw new TRPCError({
       code: "NOT_FOUND",
       message: `No public content found for @${handle}. TikTok does not expose this creator's profile through the available APIs. Please verify the handle is correct and that the account is public.`,
+    });
+  }
+
+  // ── Minimum data threshold — prevent LLM from hallucinating on thin data ──
+  // If we have fewer than 2 real transcripts AND fewer than 4 video titles,
+  // the data is too thin for a reliable cultural analysis.
+  const realTranscripts = transcripts.filter(t => t.transcriptSource !== "caption");
+  const totalVideoPool = discoveredVideoPool?.length ?? 0;
+  console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
+
+  if (realTranscripts.length < 2 && allTitles.length < 4) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Insufficient data for @${handle}: ${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles. The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`,
     });
   }
 
@@ -1754,11 +1832,11 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Compute data confidence level
   const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
     transcripts.length >= 6 ? "high" :
-    transcripts.length >= 3 ? "medium" :
-    "low";
+      transcripts.length >= 3 ? "medium" :
+        "low";
 
   return {
-    handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
+    handle, platform: "TikTok", displayName, bio, followerCount, followingCount, videoCount,
     totalLikes, totalViews, avgViews, engagementRate, location,
     profileUrl: `https://www.tiktok.com/@${handle}`,
     recentVideoTitles: allTitles, topHashtags, rawKeywords,
@@ -1772,6 +1850,290 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     discoveredVideoPool,
   };
 }
+// ─── Instagram Creator Research ───────────────────────────────────────────────
+
+async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
+  const handle = extractHandle(handleOrUrl);
+
+  console.log(`[webResearch] Starting Instagram research for @${handle}`);
+
+  // Step 1: Scrape Instagram profile (multi-path)
+  const scraped = await scrapeInstagramProfile(handle);
+  const { profile, posts: rawPosts, source, confidence } = scraped;
+
+  // Step 2: Supplement incomplete posts with oEmbed
+  const posts = rawPosts.length > 0 ? await supplementPostsViaOEmbed(rawPosts) : [];
+
+  const hasProfileData = profile.follower_count > 0 || profile.biography.length > 0;
+  const hasPostData = posts.length > 0;
+  const hasAnyData = hasProfileData || hasPostData;
+
+  if (!hasAnyData) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `No public content found for @${handle} on Instagram. Please verify the handle is correct and that the account is public.`,
+    });
+  }
+
+  // Step 3: Extract captions, hashtags, and engagement data
+  const allCaptions = posts.map(p => p.caption).filter(c => c.length > 0);
+  const allHashtags = extractHashtags(allCaptions);
+  // Reel captions are extracted in Step 5 when flagging reels for Whisper
+
+  // Extract video titles (use first line of caption or first 60 chars)
+  const videoTitles = allCaptions.map(c => {
+    const firstLine = c.split("\n")[0];
+    return firstLine.length > 60 ? firstLine.slice(0, 57) + "..." : firstLine;
+  }).slice(0, 25);
+
+  // Step 4: Engagement metrics
+  const totalLikes = posts.reduce((sum, p) => sum + (p.like_count ?? 0), 0);
+  const avgLikes = posts.length > 0 ? Math.round(totalLikes / posts.length) : 0;
+  const engagementRate = profile.follower_count > 0 && avgLikes > 0
+    ? Math.min(100, Math.round((avgLikes / profile.follower_count) * 100 * 10) / 10)
+    : 0;
+
+  // FIX 2.1: Calculate real view counts from post data (GraphQL returns view_count for videos)
+  const totalViews = posts.reduce((sum, p) => sum + (p.view_count ?? 0), 0);
+  const avgViews = posts.length > 0 ? Math.round(totalViews / posts.length) : 0;
+
+  // Step 5: Transcripts — download via Playwright context.request (has Instagram cookies)
+  const transcripts: TranscriptEntry[] = [];
+  const reelPosts = posts.filter(p => p.media_type === "video" || p.media_type === "reel").slice(0, 6);
+
+  console.log(`[webResearch] Instagram @${handle}: ${reelPosts.length} video/reel posts found for transcript extraction`);
+
+  if (reelPosts.length > 0) {
+    // Import browserClient to get a context with cookies for downloading CDN videos
+    const { getContext } = await import("./scraping/browserClient");
+    const { requestGovernor } = await import("./scraping/httpClient");
+
+    let dlCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+    try {
+      await requestGovernor("instagram");
+      dlCtx = await getContext("mobile-ios", 10);
+      const { context: browserCtx } = dlCtx;
+
+      // Process reels in batches of 3 for speed
+      const batchSize = 3;
+      for (let i = 0; i < reelPosts.length && transcripts.length < 5; i += batchSize) {
+        const batch = reelPosts.slice(i, i + batchSize);
+
+        const batchResults = await Promise.allSettled(
+          batch.map(async (reel) => {
+            if (!reel.video_url) {
+              console.log(`[webResearch] Instagram reel ${reel.shortcode}: no video_url — skipping`);
+              return null;
+            }
+
+            // Download video via Playwright context.request (inherits cookies)
+            try {
+              console.log(`[webResearch] Instagram reel ${reel.shortcode}: downloading via context.request...`);
+              const dlRes = await browserCtx.request.get(reel.video_url, {
+                timeout: 20000,
+                headers: {
+                  "Accept": "*/*",
+                  "Referer": "https://www.instagram.com/",
+                },
+              });
+
+              if (!dlRes.ok()) {
+                console.log(`[webResearch] Instagram reel ${reel.shortcode}: download failed — HTTP ${dlRes.status()}`);
+                return null;
+              }
+
+              const audioBuffer = Buffer.from(await dlRes.body());
+              const mimeType = dlRes.headers()["content-type"] || "video/mp4";
+              const sizeMB = audioBuffer.length / (1024 * 1024);
+              console.log(`[webResearch] Instagram reel ${reel.shortcode}: downloaded ${sizeMB.toFixed(1)}MB`);
+
+              if (sizeMB < 0.01) {
+                console.log(`[webResearch] Instagram reel ${reel.shortcode}: file too small — skipping`);
+                return null;
+              }
+
+              // Transcribe with pre-downloaded buffer (no second download needed)
+              const result = await transcribeAudio({
+                audioUrl: reel.video_url,
+                language: "en",
+                audioBuffer,
+                mimeType: mimeType.includes("video") ? "video/mp4" : mimeType,
+              });
+
+              if (result && !("error" in result) && result.text && result.text.length >= 10) {
+                const wordCount = result.text.split(/\s+/).length;
+                console.log(`[webResearch] ✅ Instagram reel ${reel.shortcode}: ${wordCount} words transcribed`);
+                return {
+                  videoId: reel.shortcode,
+                  videoUrl: `https://www.instagram.com/p/${reel.shortcode}/`,
+                  caption: reel.caption.slice(0, 100),
+                  transcript: result.text.trim(),
+                  wordCount,
+                } as TranscriptEntry;
+              } else {
+                const errDetail = result && "error" in result
+                  ? `${(result as { error: string; details?: string }).error}: ${(result as { details?: string }).details ?? ""}`
+                  : "empty/short text";
+                console.log(`[webResearch] Instagram reel ${reel.shortcode}: transcription failed — ${errDetail}`);
+                return null;
+              }
+            } catch (err) {
+              console.log(`[webResearch] Instagram reel ${reel.shortcode}: download/transcribe error — ${(err as Error).message}`);
+              return null;
+            }
+          })
+        );
+
+        // Collect successful transcripts
+        for (const result of batchResults) {
+          if (result.status === "fulfilled" && result.value) {
+            transcripts.push(result.value);
+          }
+        }
+      }
+
+      // Close the download page
+      try { await dlCtx.page.close(); } catch { /* */ }
+    } catch (err) {
+      console.log(`[webResearch] Instagram @${handle}: transcript batch failed — ${(err as Error).message}`);
+      if (dlCtx) {
+        try { await dlCtx.page.close(); } catch { /* */ }
+      }
+    }
+  }
+
+  // Step 6: Keywords and themes
+  const transcriptTexts = transcripts.map(t => t.transcript);
+  const rawKeywords = extractKeywords([...videoTitles, profile.biography, ...transcriptTexts]);
+  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
+  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, allHashtags, videoTitles, profile.biography, combinedTranscriptText);
+  const contentThemes = inferContentThemes(videoTitles, allHashtags, profile.biography);
+
+  // Step 7: Location detection
+  let location = "";
+  const locationText = [profile.biography, ...videoTitles, combinedTranscriptText].join(" ");
+  const locationMatch = locationText.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
+  if (locationMatch) location = locationMatch[1];
+
+  // Step 8: Build transcript excerpts
+  const transcriptExcerpts = transcripts
+    .map(t => `[${t.caption.slice(0, 60) || "reel"}]: ${t.transcript}`)
+    .join("\n\n");
+
+  // Step 9: Symbol decoder
+  const decodedSymbols = await decodeCreatorSymbols({
+    handle,
+    bio: profile.biography,
+    videoTitles,
+    hashtags: allHashtags,
+    transcriptExcerpts: transcriptTexts,
+  });
+  const decodedSymbolsBlock = decodedSymbols ? formatDecodedSymbolsBlock(decodedSymbols) : "";
+
+  // Step 10: Build evidence summary with Instagram-specific signals
+  const businessSignal = profile.is_business_account
+    ? `\nINSTAGRAM BUSINESS SIGNALS:\n  Business Account: YES\n  Category: ${profile.category || "Not specified"}\n  Verified: ${profile.is_verified ? "YES" : "NO"}\n  External URL: ${profile.external_url || "None"}`
+    : "";
+
+  const evidenceSummary = buildCreatorEvidenceSummary({
+    handle,
+    platform: "Instagram",
+    displayName: profile.full_name || handle,
+    bio: profile.biography,
+    followerCount: profile.follower_count,
+    videoCount: profile.media_count,
+    totalLikes,
+    totalViews,
+    avgViews,
+    engagementRate,
+    location,
+    videoTitles,
+    topHashtags: allHashtags,
+    rawKeywords,
+    contentThemeLabels,
+    contentThemes,
+    transcripts,
+    decodedSymbolsBlock,
+  }) + businessSignal;
+
+  // Data confidence level — preliminary estimate based on scrape results.
+  // FIX 8.2: The authoritative value is recalculated in routers.ts after
+  // DB persistence confirms how many transcripts actually landed.
+  const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
+    transcripts.length >= 3 ? "high" :
+      (posts.length >= 6 || transcripts.length >= 1) ? "medium" :
+        "low";
+
+  console.log(`[webResearch] Instagram @${handle}: ${posts.length} posts, ${transcripts.length} transcripts, confidence=${dataConfidenceLevel}, source=${source}`);
+
+  // Map Instagram posts to discoveredVideoPool format (enables content_items persistence)
+  const discoveredVideoPool = posts.map(p => ({
+    id: p.shortcode || p.id,
+    url: p.shortcode ? `https://www.instagram.com/p/${p.shortcode}/` : "",
+    caption: p.caption || "",
+    createTime: p.timestamp || 0,
+    views: p.view_count || 0,
+    likes: p.like_count || 0,
+    comments: p.comment_count || 0,
+    saves: 0,
+    shares: 0,
+    musicOriginal: false,
+    musicTitle: undefined as string | undefined,
+    musicArtist: undefined as string | undefined,
+    durationSec: p.video_duration ? Math.round(p.video_duration) : 0,
+    videoUrl: p.video_url || undefined as string | undefined,
+    transcriptText: undefined as string | undefined,
+    transcriptWordCount: undefined as number | undefined,
+    transcriptSource: undefined as string | undefined,
+  }));
+
+  // Merge extracted transcripts into discoveredVideoPool
+  let mergedCount = 0;
+  for (const t of transcripts) {
+    const poolItem = discoveredVideoPool.find(v => v.id === t.videoId || v.url === t.videoUrl);
+    if (poolItem) {
+      poolItem.transcriptText = t.transcript;
+      poolItem.transcriptWordCount = t.wordCount;
+      poolItem.transcriptSource = "gemini-2.5-flash";
+      mergedCount++;
+      console.log(`[webResearch] Merged transcript into pool: ${t.videoId} (${t.wordCount} words)`);
+    } else {
+      console.log(`[webResearch] ⚠️ Transcript videoId=${t.videoId} NOT found in pool (pool IDs: ${discoveredVideoPool.map(v => v.id).join(', ')})`);
+    }
+  }
+
+  const poolWithTranscripts = discoveredVideoPool.filter(v => v.transcriptText);
+  console.log(`[webResearch] Instagram @${handle}: built discoveredVideoPool with ${discoveredVideoPool.length} items (${mergedCount} merged, ${poolWithTranscripts.length} with transcriptText)`);
+
+  return {
+    handle,
+    platform: "Instagram",
+    displayName: profile.full_name || handle,
+    bio: profile.biography,
+    followerCount: profile.follower_count,
+    videoCount: profile.media_count,
+    totalLikes,
+    totalViews,
+    avgViews,
+    engagementRate,
+    location,
+    profileUrl: `https://www.instagram.com/${handle}/`,
+    recentVideoTitles: videoTitles,
+    topHashtags: allHashtags,
+    rawKeywords,
+    contentThemeLabels,
+    contentThemes,
+    transcripts,
+    transcriptCount: transcripts.length,
+    transcriptExcerpts,
+    decodedSymbols: decodedSymbols as Record<string, unknown> | null,
+    evidenceSummary,
+    dataConfidenceLevel,
+    discoveredVideoPool,
+  };
+}
+
+
 
 // ─── YouTube Creator Research ─────────────────────────────────────────────────
 
@@ -1952,7 +2314,7 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
       const keywords = html.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i)?.[1] ?? "";
       const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
       const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1] ?? "";
-      
+
       if (metaDesc) snippets.push(`Page description (${new URL(url).pathname}): ${metaDesc}`);
       if (ogDesc && ogDesc !== metaDesc) snippets.push(`OG description: ${ogDesc}`);
       if (keywords) snippets.push(`Keywords: ${keywords}`);
@@ -1965,7 +2327,7 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
         const text = h.replace(/<[^>]+>/g, "").trim();
         if (text.length > 5) snippets.push(`Heading (${new URL(url).pathname}): ${text}`);
       }
-      
+
       // Extract structured data (JSON-LD schema.org)
       const jsonLdMatches = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([^<]+)<\/script>/gi) ?? [];
       for (const jsonLd of jsonLdMatches.slice(0, 2)) {
@@ -2001,6 +2363,56 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
 
   await crawlPage(startUrl);
 
+  // Playwright fallback: if HTTP returned very little content (< 100 words),
+  // the site is likely an SPA or JS-rendered. Try headless browser.
+  const httpWordCount = allTextParts.join(" ").split(/\s+/).filter(w => w.length > 0).length;
+  if (httpWordCount < 100) {
+    console.log(`[brandCrawl] HTTP returned ${httpWordCount} words, trying Playwright fallback`);
+    try {
+      const { getContext } = await import("./scraping/browserClient");
+      const ctx = await getContext("desktop-chrome");
+      const { page } = ctx;
+      try {
+        await page.goto(startUrl, { waitUntil: "networkidle", timeout: 20000 });
+        const pwHtml = await page.content();
+        const pwBodyText = extractTextFromHtml(pwHtml);
+        const pwWordCount = pwBodyText.split(/\s+/).filter(w => w.length > 0).length;
+        console.log(`[brandCrawl] Playwright returned ${pwWordCount} words`);
+
+        if (pwWordCount > httpWordCount) {
+          // Replace root page content with richer Playwright result
+          allTextParts.length = 0;
+          snippets.length = 0;
+          crawledPages.length = 0;
+
+          crawledPages.push(startUrl);
+          allTextParts.push(`=== PAGE: ${startUrl} (playwright) ===\n${pwBodyText.slice(0, 3000)}`);
+
+          // Re-extract metadata from Playwright-rendered HTML
+          const metaDesc = pwHtml.match(/<meta\s+(?:name|property)="description"\s+content="([^"]+)"/i)?.[1] ?? "";
+          const ogDesc = pwHtml.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1] ?? "";
+          const kw = pwHtml.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i)?.[1] ?? "";
+          const title = pwHtml.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
+
+          if (metaDesc) snippets.push(`Page description (/): ${metaDesc}`);
+          if (ogDesc && ogDesc !== metaDesc) snippets.push(`OG description: ${ogDesc}`);
+          if (kw) snippets.push(`Keywords: ${kw}`);
+          if (title) snippets.push(`Website title: ${title}`);
+
+          const headings = pwHtml.match(/<h[123][^>]*>([^<]+)<\/h[123]>/gi) ?? [];
+          for (const h of headings.slice(0, 10)) {
+            const text = h.replace(/<[^>]+>/g, "").trim();
+            if (text.length > 5) snippets.push(`Heading (/): ${text}`);
+          }
+        }
+      } finally {
+        await page.close().catch(() => {});
+      }
+    } catch (err) {
+      console.warn(`[brandCrawl] Playwright fallback failed:`, (err as Error).message);
+    }
+  }
+
   const allText = allTextParts.join("\n\n");
   const wordCount = allText.split(/\s+/).length;
   console.log(`[webResearch] Brand crawl complete: ${crawledPages.length} pages, ${wordCount} words`);
@@ -2018,7 +2430,7 @@ async function crawlBrandWebsite(startUrl: string): Promise<{
  */
 function extractMetadataKeywords(websiteText: string): string[] {
   const keywords: Set<string> = new Set();
-  
+
   // Extract from meta keywords tag
   const metaKeywordsMatch = websiteText.match(/<meta\s+name=["']keywords["'']\s+content=["'']([^"']+)["'']>/i);
   if (metaKeywordsMatch) {
@@ -2027,7 +2439,7 @@ function extractMetadataKeywords(websiteText: string): string[] {
       if (trimmed.length > 2 && trimmed.length < 50) keywords.add(trimmed);
     });
   }
-  
+
   // Extract from Open Graph description and title
   const ogDescMatch = websiteText.match(/<meta\s+property=["']og:description["'']\s+content=["'']([^"']+)["'']>/i);
   if (ogDescMatch) {
@@ -2036,7 +2448,7 @@ function extractMetadataKeywords(websiteText: string): string[] {
       if (clean.length > 2 && clean.length < 30) keywords.add(clean);
     });
   }
-  
+
   // Extract from schema.org description
   const schemaMatch = websiteText.match(/"description"\s*:\s*"([^"]+)"/i);
   if (schemaMatch) {
@@ -2045,11 +2457,11 @@ function extractMetadataKeywords(websiteText: string): string[] {
       if (clean.length > 2 && clean.length < 30) keywords.add(clean);
     });
   }
-  
+
   return Array.from(keywords).slice(0, 25);
 }
 
-export async function researchBrand(brandNameOrUrl: string): Promise<BrandResearchResult> {
+export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: string): Promise<BrandResearchResult> {
   const isUrl = brandNameOrUrl.startsWith("http");
   const brandName = isUrl
     ? brandNameOrUrl.replace(/https?:\/\/(www\.)?/, "").split("/")[0]
@@ -2063,6 +2475,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   if (isUrl) {
     try {
       // Phase 1.5: Recursive semantic crawl targeting 2,000+ words
+      const crawlStart = Date.now();
       const crawlResult = await crawlBrandWebsite(brandNameOrUrl);
       snippets = crawlResult.snippets;
       // Use full crawled text as description for richer AI analysis
@@ -2070,6 +2483,16 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
       semanticWordCount = crawlResult.wordCount;
       crawledPages = crawlResult.crawledPages;
       console.log(`[webResearch] Brand ${brandName}: crawled ${crawledPages.length} pages, ${semanticWordCount} words`);
+      // Log scrape event
+      try {
+        await insertScrapeEvent({
+          scrapeMethod: "website_crawl",
+          urlRequested: brandNameOrUrl,
+          httpStatus: semanticWordCount > 0 ? 200 : 204,
+          responseSizeBytes: crawlResult.allText.length,
+          durationMs: Date.now() - crawlStart,
+        });
+      } catch { /* non-fatal */ }
     } catch (err) {
       console.warn("[webResearch] Brand website crawl failed:", err);
     }
@@ -2078,9 +2501,8 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   // Fallback: If crawl was insufficient or no URL provided, use Google Search API first
   if (!isUrl || semanticWordCount < 500) {
     try {
-      const googleResponse = await callDataApi("Google/search", {
-        query: { q: `${brandName} company about mission values`, gl: "US", hl: "en" },
-      }) as Record<string, unknown>;
+      const searchStart = Date.now();
+      const googleResponse = await searchWeb(`${brandName} company about mission values`) as unknown as Record<string, unknown>;
       const results = (googleResponse?.results as unknown[]) ?? [];
       for (const result of results.slice(0, 3)) {
         const item = result as Record<string, unknown>;
@@ -2093,6 +2515,15 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
         description = snippets.join(" | ").slice(0, 2000);
       }
       console.log(`[webResearch] Brand ${brandName}: supplemented with Google Search results`);
+      // Log scrape event
+      try {
+        await insertScrapeEvent({
+          scrapeMethod: "google_search",
+          urlRequested: `Google Search: ${brandName}`,
+          httpStatus: results.length > 0 ? 200 : 204,
+          durationMs: Date.now() - searchStart,
+        });
+      } catch { /* non-fatal */ }
     } catch (err) {
       console.warn("[webResearch] Brand Google search failed (non-fatal):", err);
     }
@@ -2101,9 +2532,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
   // Secondary fallback: YouTube search if still insufficient
   if (!isUrl || (snippets.length < 3 && semanticWordCount < 300)) {
     try {
-      const ytResponse = await callDataApi("Youtube/search", {
-        query: { q: `${brandName} brand about`, hl: "en", gl: "US" },
-      }) as Record<string, unknown>;
+      const ytResponse = await searchYouTube(`${brandName} brand about`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
       const contents = (ytResponse?.contents as unknown[]) ?? [];
       for (const item of contents.slice(0, 5)) {
         const videoData = ((item as Record<string, unknown>)?.video as Record<string, unknown>);
@@ -2131,7 +2560,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     audiencePerceptionBlock: "",
   };
   try {
-    reviewResult = await fetchBrandReviews(brandName, isUrl ? brandNameOrUrl : "");
+    reviewResult = await fetchBrandReviews(brandName, isUrl ? brandNameOrUrl : "", googleMapsUrl);
   } catch (err) {
     console.warn("[webResearch] Review fetch failed (non-fatal):", err);
   }
@@ -2207,11 +2636,11 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
     if (combinedTextLength >= 80) {
       // Extract metadata keywords from website text (meta tags, Open Graph, JSON-LD)
       const metadataKeywords = extractMetadataKeywords(websiteText);
-      
+
       // Mention keywords and sentiment from TikTok audience mention analysis
       let mentionKeywords: string[] | undefined;
       let mentionSentiment: "positive" | "mixed" | "negative" | undefined;
-      
+
       if (audienceMentionData) {
         // Extract hashtags from mention data
         mentionKeywords = audienceMentionData.mentionHashtags || [];
@@ -2224,7 +2653,7 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
           mentionSentiment = "mixed";
         }
       }
-      
+
       brandDecodedSymbols = await decodeBrandSymbols({
         brandName,
         websiteText,
@@ -2252,11 +2681,61 @@ export async function researchBrand(brandNameOrUrl: string): Promise<BrandResear
 
   const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock + mentionEvidenceBlock;
 
+  // Actualize Goffman gap signal: compare brand-authored vocabulary vs audience vocabulary
+  if (audienceMentionData && brandDecodedSymbols) {
+    const brandVocab = new Set([
+      ...brandDecodedSymbols.rawKeywords.map(k => k.toLowerCase()),
+      ...brandDecodedSymbols.symbolicVocabulary.map(v => v.toLowerCase()),
+      ...brandDecodedSymbols.themeLabels.map(t => t.toLowerCase()),
+    ]);
+    const audienceVocab = new Set([
+      ...audienceMentionData.mentionHashtags.map(h => h.toLowerCase().replace(/^#/, "")),
+      ...audienceMentionData.audienceIdentityClaims.map(c => c.toLowerCase()),
+      ...audienceMentionData.audienceStatusSignals.map(s => s.toLowerCase()),
+    ]);
+    if (brandVocab.size > 0 && audienceVocab.size > 0) {
+      let overlap = 0;
+      const brandVocabArr = Array.from(brandVocab);
+      for (const word of brandVocabArr) {
+        if (audienceVocab.has(word)) overlap++;
+      }
+      const overlapRatio = overlap / Math.min(brandVocab.size, audienceVocab.size);
+      if (overlapRatio >= 0.3) {
+        audienceMentionData.goffmanGapSignal = "Consistent";
+      } else if (overlapRatio >= 0.1) {
+        audienceMentionData.goffmanGapSignal = "Minor Gap";
+      } else {
+        audienceMentionData.goffmanGapSignal = "Significant Gap";
+      }
+      console.log(`[webResearch] Goffman gap: brand vocab ${brandVocab.size}, audience vocab ${audienceVocab.size}, overlap ${overlap} (${(overlapRatio * 100).toFixed(1)}%) → ${audienceMentionData.goffmanGapSignal}`);
+    }
+  }
+
   // Compute data confidence level for brand
+  // P1-4: Factor review data into confidence — reviews provide genuine audience perception evidence
+  const reviewEvidenceBoost = reviewResult.totalReviews >= 30 ? 1000 :
+    reviewResult.totalReviews >= 10 ? 500 : 0;
+  const evidenceScore = semanticWordCount + reviewEvidenceBoost;
   const brandDataConfidenceLevel: BrandResearchResult["dataConfidenceLevel"] =
-    semanticWordCount >= 2000 ? "high" :
-    semanticWordCount >= 500  ? "medium" :
-    "low";
+    evidenceScore >= 2000 ? "high" :
+      evidenceScore >= 500 ? "medium" :
+        "low";
+
+  // ── P0-1: Minimum evidence guard ──
+  // Prevent fully hallucinated brand profiles when all evidence sources fail.
+  // This is the brand pipeline equivalent of the creator pipeline's transcript threshold.
+  const hasInsufficientWebsite = semanticWordCount < 100;
+  const hasNoReviews = reviewResult.totalReviews === 0;
+  const hasNoMentions = !audienceMentionData || audienceMentionData.totalMentions === 0;
+  const hasNoSnippets = snippets.length < 3;
+
+  if (hasInsufficientWebsite && hasNoReviews && hasNoMentions && hasNoSnippets) {
+    console.error(`[webResearch] Brand ${brandName}: INSUFFICIENT EVIDENCE — website: ${semanticWordCount} words, reviews: ${reviewResult.totalReviews}, mentions: ${audienceMentionData?.totalMentions ?? 0}, snippets: ${snippets.length}`);
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Insufficient data to analyze this brand. No website content, reviews, or social mentions could be found. Please verify the brand URL is accessible and try again.",
+    });
+  }
 
   // Build tiktokMetadata object for performance signals
   const tiktokMetadata = audienceMentionData ? {
@@ -2306,6 +2785,10 @@ export async function researchCreator(
 
   if (platform === "YouTube" || handleOrUrl.includes("youtube.com")) {
     return researchYouTubeCreator(handle);
+  }
+
+  if (platform === "Instagram" || handleOrUrl.includes("instagram.com")) {
+    return researchInstagramCreator(handle);
   }
 
   if (platform === "Multi") {
@@ -2384,7 +2867,7 @@ export async function fetchSingleTikTokTranscript(
   // Re-fetch the video page to get fresh subtitle URLs (playAddr/subtitleInfos expire)
   // This is more reliable than using cached URLs from the initial analysis
   try {
-    const html = await fetchHtml(videoUrl, { Referer: "https://www.tiktok.com/" });
+    const html = await fetchHtml(videoUrl, { extraHeaders: { Referer: "https://www.tiktok.com/" } });
     const rehydrationMatch = html.match(
       /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/
     );
@@ -2427,10 +2910,13 @@ export async function fetchSingleTikTokTranscript(
     console.warn(`[webResearch] Fresh page fetch failed for supplemental video ${videoId}:`, (err as Error).message);
   }
 
-  // Try the original caption fetch as a secondary attempt
-  const captionResult = await fetchTikTokVideoTranscript(handle, videoId, caption);
-  if (captionResult) return captionResult;
+  // Caption fallback: store the video caption as a minimal transcript
+  if (caption && caption.trim().length >= 10) {
+    const wordCount = caption.trim().split(/\s+/).length;
+    console.log(`[webResearch] Supplemental video ${videoId}: caption fallback | ${wordCount} words`);
+    return { videoId, videoUrl, caption, transcript: caption.trim(), wordCount, transcriptSource: "caption" as const };
+  }
 
-  console.log(`[webResearch] Supplemental video ${videoId}: no captions available (TikTok video download not supported server-side)`);
+  console.log(`[webResearch] Supplemental video ${videoId}: no captions available`);
   return null;
 }

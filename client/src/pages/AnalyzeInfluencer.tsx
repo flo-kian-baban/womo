@@ -11,11 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { trpc } from "@/lib/trpc";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import { Link } from "wouter";
-import type { CreatorProfile } from "../../../drizzle/schema";
+
 
 const schema = z.object({
   handleOrUrl: z.string().min(1, "Enter a handle or URL"),
-  platform: z.enum(["TikTok", "YouTube", "Multi"]),
+  platform: z.enum(["TikTok", "Instagram"]),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -33,7 +33,7 @@ const ANALYSIS_STEPS = [
 ];
 
 export default function AnalyzeInfluencer() {
-  const [result, setResult] = useState<{ profile: CreatorProfile } | null>(null);
+  const [result, setResult] = useState<{ profile: Record<string, any> & { id: string } } | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormValues>({
@@ -105,8 +105,7 @@ export default function AnalyzeInfluencer() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TikTok">TikTok</SelectItem>
-                  <SelectItem value="YouTube">YouTube</SelectItem>
-                  <SelectItem value="Multi">Multi-Platform (TikTok + YouTube)</SelectItem>
+                  <SelectItem value="Instagram">Instagram</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -119,8 +118,7 @@ export default function AnalyzeInfluencer() {
                 {...register("handleOrUrl")}
                 placeholder={
                   platform === "TikTok" ? "@username or tiktok.com/@username" :
-                  platform === "YouTube" ? "@username or youtube.com/@username" :
-                  "@username (will search TikTok + YouTube)"
+                  "@username or instagram.com/username"
                 }
                 className="bg-secondary border-border placeholder:text-muted-foreground/40"
               />

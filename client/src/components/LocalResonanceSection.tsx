@@ -4,10 +4,10 @@ import { Badge } from '@/components/ui/badge';
 
 export interface LocalResonanceProps {
   creatorRegion: string;
-  creatorLanguage: string;
+  creatorLanguage?: string;
   brandRegion: string;
-  brandLanguage: string;
-  geoMatch: 'exact' | 'regional' | 'cultural' | 'none';
+  brandLanguage?: string;
+  geoMatch: 'exact' | 'regional' | 'cross-regional' | 'cultural' | 'global' | 'none';
   matchStrength: number; // 0-100
 }
 
@@ -19,17 +19,21 @@ export function LocalResonanceSection({
   geoMatch,
   matchStrength,
 }: LocalResonanceProps) {
-  const geoMatchLabels = {
+  const geoMatchLabels: Record<string, string> = {
     exact: '🎯 Exact Geographic Match',
     regional: '🌍 Regional Alignment',
+    'cross-regional': '🌐 Cross-Regional',
     cultural: '🗣️ Cultural/Language Alignment',
+    global: '🌍 Global (No Regional Data)',
     none: '❌ Geographic Mismatch',
   };
 
-  const geoMatchColors = {
+  const geoMatchColors: Record<string, string> = {
     exact: 'bg-green-100 text-green-800',
     regional: 'bg-blue-100 text-blue-800',
+    'cross-regional': 'bg-amber-100 text-amber-800',
     cultural: 'bg-purple-100 text-purple-800',
+    global: 'bg-slate-100 text-slate-800',
     none: 'bg-gray-100 text-gray-800',
   };
 
@@ -51,9 +55,11 @@ export function LocalResonanceSection({
               <div className="text-sm">
                 <span className="text-gray-600">Region:</span> <strong>{creatorRegion}</strong>
               </div>
-              <div className="text-sm">
-                <span className="text-gray-600">Language:</span> <strong>{creatorLanguage}</strong>
-              </div>
+              {creatorLanguage && (
+                <div className="text-sm">
+                  <span className="text-gray-600">Language:</span> <strong>{creatorLanguage}</strong>
+                </div>
+              )}
             </div>
           </div>
           <div>
@@ -62,17 +68,19 @@ export function LocalResonanceSection({
               <div className="text-sm">
                 <span className="text-gray-600">Region:</span> <strong>{brandRegion}</strong>
               </div>
-              <div className="text-sm">
-                <span className="text-gray-600">Language:</span> <strong>{brandLanguage}</strong>
-              </div>
+              {brandLanguage && (
+                <div className="text-sm">
+                  <span className="text-gray-600">Language:</span> <strong>{brandLanguage}</strong>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         <div className="border-t pt-4">
           <div className="flex items-center justify-between mb-3">
-            <Badge className={geoMatchColors[geoMatch]}>
-              {geoMatchLabels[geoMatch]}
+            <Badge className={geoMatchColors[geoMatch] ?? geoMatchColors.none}>
+              {geoMatchLabels[geoMatch] ?? geoMatchLabels.none}
             </Badge>
             <span className="text-sm font-semibold">{matchStrength}% Match</span>
           </div>
@@ -97,10 +105,22 @@ export function LocalResonanceSection({
               cultural context and purchasing behaviors.
             </>
           )}
+          {geoMatch === 'cross-regional' && (
+            <>
+              ⚡ Creator and brand operate in different regions ({creatorRegion} vs {brandRegion}).
+              Cross-regional partnerships can work when cultural alignment is strong.
+            </>
+          )}
           {geoMatch === 'cultural' && (
             <>
               ✓ Creator and brand share cultural/language alignment. Audience may be diaspora or
               culturally-aligned communities.
+            </>
+          )}
+          {geoMatch === 'global' && (
+            <>
+              ℹ️ No specific regional data available for either entity.
+              Geographic alignment is not a factor in this match.
             </>
           )}
           {geoMatch === 'none' && (

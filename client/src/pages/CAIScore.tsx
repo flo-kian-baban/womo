@@ -6,7 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
-import type { CreatorProfile, BrandProfile, MatchRecord } from "../../../drizzle/schema";
+// Local types matching the flattened V2 return shapes from db.ts
+type CreatorProfile = Record<string, any> & { id: string };
+type BrandProfile = Record<string, any> & { id: string };
+type MatchRecord = Record<string, any> & { id: string };
 import { SignalPanel } from "@/components/SignalPanel";
 import { MetricTooltip } from "@/components/MetricTooltip";
 
@@ -170,6 +173,7 @@ type MatchResult = {
     sharedKeywords?: string[];
     sharedThemes?: string[];
     qovScore?: number;
+    dataConfidenceLevel?: string;
   };
   narrative: {
     narrativeSummary: string;
@@ -220,8 +224,8 @@ export default function FITScore() {
     if (!creatorId || !brandId) return;
     setMatchResult(null);
     calculateMutation.mutate({
-      creatorProfileId: parseInt(creatorId),
-      brandProfileId: parseInt(brandId),
+      creatorProfileId: creatorId,
+      brandProfileId: brandId,
     });
   };
 
@@ -249,7 +253,7 @@ export default function FITScore() {
             </label>
             <Select value={creatorId} onValueChange={setCreatorId}>
               <SelectTrigger className="bg-secondary border-border">
-                <SelectValue placeholder="Select influencer..." />
+                <SelectValue placeholder="Select creator..." />
               </SelectTrigger>
               <SelectContent>
                 {creators?.map((c) => (
@@ -261,7 +265,7 @@ export default function FITScore() {
             </Select>
             {(!creators || creators.length === 0) && (
               <p className="text-xs text-muted-foreground/60">
-                No profiles yet. <Link href="/analyze/influencer" className="text-primary underline">Analyze an influencer</Link>
+                No profiles yet. <Link href="/analyze/creator" className="text-primary underline">Analyze a creator</Link>
               </p>
             )}
           </div>
@@ -360,6 +364,26 @@ export default function FITScore() {
                   />
                 </div>
                 <FITStatusBadge status={matchResult.result.caiStatus} />
+                {/* Data Confidence Badge — P1-3 */}
+                {(() => {
+                  const dcl = matchResult.result.dataConfidenceLevel ?? (matchResult.creator as Record<string, unknown>).dataConfidenceLevel as string ?? "low";
+                  return (
+                    <div className={`flex items-center gap-1.5 mt-1.5 text-[10px] font-medium ${
+                      dcl === "high" ? "text-green-400" :
+                      dcl === "medium" ? "text-yellow-400" :
+                      "text-red-400"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        dcl === "high" ? "bg-green-400" :
+                        dcl === "medium" ? "bg-yellow-400" :
+                        "bg-red-400"
+                      }`} />
+                      {dcl === "high" ? "High Confidence" :
+                       dcl === "medium" ? "Medium Confidence" :
+                       "Low Confidence — interpret with caution"}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 

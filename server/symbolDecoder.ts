@@ -127,6 +127,7 @@ Rules:
 
   try {
     const response = await invokeLLM({
+      purpose: "creator_symbol_decoding",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,14 +11,40 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { trpc } from "@/lib/trpc";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import { Link } from "wouter";
-import type { CreatorProfile } from "../../../drizzle/schema";
+
 
 const schema = z.object({
   handleOrUrl: z.string().min(1, "Enter a handle or URL"),
-  platform: z.enum(["TikTok", "YouTube", "Multi"]),
+  platform: z.enum(["TikTok", "Instagram"]),
 });
 
 type FormValues = z.infer<typeof schema>;
+
+// ─── Platform Icons (inline SVG) ──────────────────────────────────────────────
+
+function TikTokIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.98a8.18 8.18 0 0 0 3.76.92V6.69" />
+    </svg>
+  );
+}
+
+function InstagramIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z" />
+    </svg>
+  );
+}
+
+/** Detect platform from URL/handle input */
+function detectPlatform(input: string): "TikTok" | "Instagram" | null {
+  const lower = input.toLowerCase().trim();
+  if (lower.includes("tiktok.com")) return "TikTok";
+  if (lower.includes("instagram.com")) return "Instagram";
+  return null;
+}
 
 const ANALYSIS_STEPS = [
   "Fetching 6 most recent videos for baseline analysis...",
@@ -37,8 +63,9 @@ const ANALYSIS_STEPS = [
 ];
 
 export default function AnalyzeCreator() {
-  const [result, setResult] = useState<{ profile: CreatorProfile } | null>(null);
+  const [result, setResult] = useState<{ profile: Record<string, any> & { id: string }; pipelineMetrics?: any } | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -46,15 +73,43 @@ export default function AnalyzeCreator() {
   });
 
   const platform = watch("platform");
+  const handleOrUrl = watch("handleOrUrl");
+
+  // Auto-detect platform from URL as user types
+  useEffect(() => {
+    if (!handleOrUrl) return;
+    const detected = detectPlatform(handleOrUrl);
+    if (detected && detected !== platform) {
+      setValue("platform", detected);
+    }
+  }, [handleOrUrl, platform, setValue]);
+
+  // Clear interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, []);
 
   const analyzeMutation = trpc.creator.analyze.useMutation({
     onSuccess: (data) => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       if (data.profile) {
-        setResult({ profile: data.profile });
+        setResult({ profile: data.profile, pipelineMetrics: data.pipelineMetrics });
         toast.success("Cultural profile extracted successfully");
       }
     },
     onError: () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       // Error is shown inline — no toast needed
     },
   });
@@ -62,10 +117,20 @@ export default function AnalyzeCreator() {
   const onSubmit = (values: FormValues) => {
     setResult(null);
     setStepIndex(0);
+    // Clear any previous interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
     // Cycle through steps for UX
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setStepIndex((prev) => {
-        if (prev >= ANALYSIS_STEPS.length - 1) { clearInterval(interval); return prev; }
+        if (prev >= ANALYSIS_STEPS.length - 1) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          return prev;
+        }
         return prev + 1;
       });
     }, 1800);
@@ -86,7 +151,7 @@ export default function AnalyzeCreator() {
           </div>
         </div>
         <p className="text-muted-foreground text-sm max-w-xl leading-relaxed">
-          Enter a TikTok or YouTube handle and our AI will research the creator's real public content — including
+          Enter a TikTok or Instagram handle and our AI will research the creator's real public content — including
           video titles, hashtags, stats, and bio — to extract their Jungian archetype, Barthes myth, Goffman stage
           consistency, Stuart Hall decoding classification, and full niche positioning.
         </p>
@@ -105,12 +170,30 @@ export default function AnalyzeCreator() {
                 onValueChange={(v) => setValue("platform", v as FormValues["platform"])}
               >
                 <SelectTrigger className="bg-secondary border-border">
-                  <SelectValue />
+                  <SelectValue>
+                    <span className="flex items-center gap-2">
+                      {platform === "TikTok" ? (
+                        <TikTokIcon className="w-4 h-4" />
+                      ) : (
+                        <InstagramIcon className="w-4 h-4" />
+                      )}
+                      {platform}
+                    </span>
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="TikTok">TikTok</SelectItem>
-                  <SelectItem value="YouTube">YouTube</SelectItem>
-                  <SelectItem value="Multi">Multi-Platform (TikTok + YouTube)</SelectItem>
+                  <SelectItem value="TikTok">
+                    <span className="flex items-center gap-2">
+                      <TikTokIcon className="w-4 h-4" />
+                      TikTok
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="Instagram">
+                    <span className="flex items-center gap-2">
+                      <InstagramIcon className="w-4 h-4" />
+                      Instagram
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -123,8 +206,7 @@ export default function AnalyzeCreator() {
                 {...register("handleOrUrl")}
                 placeholder={
                   platform === "TikTok" ? "@username or tiktok.com/@username" :
-                  platform === "YouTube" ? "@username or youtube.com/@username" :
-                  "@username (will search TikTok + YouTube)"
+                  "@username or instagram.com/username"
                 }
                 className="bg-secondary border-border placeholder:text-muted-foreground/40"
               />
@@ -246,7 +328,7 @@ export default function AnalyzeCreator() {
                 <CheckCircle2 className="w-4 h-4 text-green-400" />
                 <span className="text-sm font-semibold text-green-400">Profile Extracted & Saved</span>
               </div>
-              <CreatorProfileCard profile={result.profile} />
+              <CreatorProfileCard profile={result.profile} pipelineMetrics={result.pipelineMetrics} />
             </div>
           ) : !analyzeMutation.isPending ? (
             <div className="fit-card rounded-xl p-10 flex flex-col items-center justify-center text-center h-full min-h-64">

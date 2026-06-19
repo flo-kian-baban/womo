@@ -1,12 +1,24 @@
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
+import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { analysisRateLimitedProcedure, fitRateLimitedProcedure, bulkRateLimitedProcedure, loginRateLimitedProcedure } from "./_core/rateLimit";
+import { TRPCError } from "@trpc/server";
 import {
-  createCreatorProfile, getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, updateCreatorProfile,
-  createBrandProfile, getBrandProfileById, listBrandProfiles, deleteBrandProfile, updateBrandProfile,
-  createMatchRecord, getMatchRecordById, listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
+  // V2 write functions
+  upsertSubject, upsertPlatformHandle, insertObservation, insertCreatorObservation,
+  insertSignalValues, insertDecodedSignals, insertContentItems,
+  updateContentItemTranscript, updateObservationTranscriptCount,
+  updateCreatorObservationAvgDuration,
+  insertBrandObservation, insertAudienceMentions,
+  insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
+  insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
+  getLatestObservationId,
+  // V2 read functions
+  getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
+  getContentItemsBySubject, getProvenance,
+  getBrandProfileById, listBrandProfiles, deleteBrandProfile,
+  listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
 } from "./db";
 import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from "./aiExtraction";
@@ -14,55 +26,536 @@ import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES 
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
-import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata } from "./brandTikTokAnalysis";
+import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
+import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
+import type { DecodedSymbols } from "./symbolDecoder";
+
+// ─── V2 Pipeline Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Persist a full creator analysis result to the V2 schema.
+ * Wraps all writes in try/catch — DB failures must not break the analysis.
+ */
+type PersistSuccess = { subjectId: string };
+type PersistFailure = { error: string };
+type PersistResult = PersistSuccess | PersistFailure;
+
+async function persistCreatorToV2(params: {
+  handle: string;
+  platform: string;
+  profileUrl?: string;
+  displayName: string;
+  pronouns?: string;
+  extracted: Record<string, any>;
+  researchData: Record<string, any>;
+}): Promise<PersistResult> {
+  try {
+    const { handle, platform, profileUrl, displayName, pronouns, extracted, researchData } = params;
+
+    // 1. upsertSubject
+    const subjectId = await upsertSubject({
+      subjectType: "creator",
+      primaryHandle: handle,
+      primaryPlatform: platform,
+      displayName,
+      profileUrl,
+      pronouns,
+      latestArchetype: extracted.archetype,
+      engagementTier: computeEngagementTierLocal(researchData.followerCount),
+    });
+
+    // 2. upsertPlatformHandle
+    await upsertPlatformHandle(subjectId, platform, handle, profileUrl);
+
+    // 3. insertObservation
+    const observationId = await insertObservation(subjectId, {
+      followerCount: researchData.followerCount ?? null,
+      followingCount: researchData.followingCount ?? null,
+      engagementRate: researchData.engagementRate ?? null,
+      bio: researchData.bio ?? null,
+      dataConfidenceLevel: researchData.dataConfidenceLevel ?? null,
+      transcriptCount: researchData.transcriptCount ?? 0,
+    });
+
+    // 4. insertCreatorObservation
+    await insertCreatorObservation(observationId, {
+      totalLikes: researchData.totalLikes ?? null,
+      videoCount: researchData.videoCount ?? null,
+      totalViews: researchData.totalViews ?? null,
+      avgViews: researchData.avgViews ?? null,
+      avgVideoDuration: null, // I2: computed after contentItems insertion below
+      primaryRegion: researchData.location ?? null,
+      archetype: extracted.archetype,
+      toneRegister: extracted.toneRegister,
+      parasocialBondStrength: extracted.parasocialBondStrength,
+      audienceRelationshipType: extracted.audienceRelationshipType,
+      barthesMyth: extracted.barthesMyth,
+      culturalCapital: extracted.culturalCapital,
+      goffmanStageConsistency: extracted.goffmanStageConsistency,
+      driftSignal: extracted.driftSignal,
+      stuartHallDecoding: extracted.stuartHallDecoding,
+      nicheTopicNode: extracted.nicheTopicNode,
+      undergroundDensity: extracted.undergroundDensity,
+      mainstreamBleed: extracted.mainstreamBleed,
+      remixRate: extracted.remixRate,
+      brandSaturation: extracted.brandSaturation,
+      rogersAdopterStage: extracted.rogersAdopterStage,
+      creatorNichePosition: extracted.creatorNichePosition,
+      lifecyclePhase: extracted.lifecyclePhase,
+      barthesNicheMeaning: extracted.barthesNicheMeaning,
+      turnerLiminalPhase: extracted.turnerLiminalPhase,
+      culturalVelocity: researchData.culturalVelocity ?? null,
+      symbolicSummary: (researchData.decodedSymbols as any)?.symbolicSummary ?? null,
+      aiSummary: extracted.aiSummary,
+    });
+
+    // 5. insertSignalValues
+    const signals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
+    (researchData.rawKeywords as string[] ?? []).forEach((k: string, i: number) =>
+      signals.push({ domain: "keyword", signalKey: k, rank: i + 1, source: "creator" }));
+    (researchData.contentThemeLabels as string[] ?? []).forEach((t: string, i: number) =>
+      signals.push({ domain: "content_theme", signalKey: t, rank: i + 1, source: "creator" }));
+    (researchData.topHashtags as string[] ?? []).forEach((h: string, i: number) =>
+      signals.push({ domain: "hashtag", signalKey: h, rank: i + 1, source: "creator" }));
+    (extracted.recurringThemes as string[] ?? []).forEach((t: string, i: number) =>
+      signals.push({ domain: "theme", signalKey: t, rank: i + 1, source: "creator" }));
+    if (signals.length > 0) await insertSignalValues(subjectId, observationId, signals);
+
+    // 6. insertDecodedSignals
+    const ds = researchData.decodedSymbols as DecodedSymbols | null;
+    if (ds) {
+      const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
+      (ds.identityClaims ?? []).forEach(s => decodedRows.push({ category: "identity_claim", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
+      (ds.statusSignals ?? []).forEach(s => decodedRows.push({ category: "status_signal", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
+      (ds.communityReferences ?? []).forEach(s => decodedRows.push({ category: "community_reference", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
+      (ds.aspirationDrivers ?? []).forEach(s => decodedRows.push({ category: "aspiration_driver", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
+      if (decodedRows.length > 0) await insertDecodedSignals(subjectId, observationId, decodedRows);
+    }
+
+    // 7. insertContentItems (discoveredVideoPool with engagement stats)
+    type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string };
+    const rawPool = researchData.discoveredVideoPoolJson as PoolVideo[] ?? [];
+    console.log(`[persist] discoveredVideoPool received: ${rawPool.length} videos`);
+    const contentRows = rawPool.map(v => ({
+      platform,
+      platformVideoId: v.id,
+      videoUrl: v.videoUrl || v.url,
+      caption: v.caption,
+      createTime: v.createTime,
+      viewCount: v.views,
+      likeCount: v.likes,
+      commentCount: v.comments,
+      shareCount: v.shares,
+      saveCount: v.saves,
+      isOriginalAudio: v.musicOriginal,
+      musicTitle: v.musicTitle,
+      musicArtist: v.musicArtist,
+      videoDuration: v.durationSec,
+      transcriptText: v.transcriptText,
+      transcriptSource: v.transcriptSource,
+      transcriptWordCount: v.transcriptWordCount,
+      status: v.transcriptText ? "sampled" : "discovered",
+    }));
+    if (contentRows.length > 0) {
+      await insertContentItems(subjectId, observationId, contentRows);
+      console.log(`[persist] insertContentItems: ${contentRows.length} rows written for subject ${subjectId}`);
+
+      // I2: Compute avgVideoDuration from actual content_items data
+      const videosWithDuration = contentRows.filter(v => v.videoDuration && v.videoDuration > 0);
+      if (videosWithDuration.length > 0) {
+        const totalDuration = videosWithDuration.reduce((sum, v) => sum + (v.videoDuration ?? 0), 0);
+        const avgDuration = Math.round((totalDuration / videosWithDuration.length) * 10) / 10;
+        await updateCreatorObservationAvgDuration(observationId, avgDuration).catch((err) => {
+          console.warn(`[persist] Failed to update avgVideoDuration: ${err}`);
+        });
+      }
+    } else {
+      console.log(`[persist] insertContentItems: 0 rows — no videos in pool`);
+    }
+
+    // 8. Wire transcripts into content_items rows
+    const transcriptArray = researchData.transcripts as Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }> ?? [];
+    let transcriptSuccessCount = 0;
+    for (const t of transcriptArray) {
+      if (t.videoId && t.transcript) {
+        const updated = await updateContentItemTranscript(
+          subjectId, t.videoId, platform,
+          t.transcript, t.transcriptSource ?? "captions", t.wordCount,
+        );
+        if (updated) transcriptSuccessCount++;
+      }
+    }
+    // FIX 8.2: Always update observation with actual transcript count and derived confidence.
+    // This is the single source of truth — overrides any preliminary value from webResearch.ts.
+    const confidence: "high" | "medium" | "low" =
+      transcriptSuccessCount >= 6 ? "high" :
+      transcriptSuccessCount >= 3 ? "medium" : "low";
+    await updateObservationTranscriptCount(observationId, transcriptSuccessCount, confidence);
+
+    return { subjectId };
+  } catch (err) {
+    console.error("[V2 Pipeline] Creator persist failed:", err);
+    return { error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+/**
+ * Persist a full brand analysis result to the V2 schema.
+ */
+async function persistBrandToV2(params: {
+  brandName: string;
+  brandUrl?: string;
+  category?: string;
+  extracted: Record<string, any>;
+  weights: { alpha: number; beta: number; gamma: number; priority: string };
+  reviewFields: Record<string, any>;
+  tiktokMetadata: BrandTikTokMetadata | null;
+  instagramMetadata?: BrandInstagramMetadata | null;
+  mentionFields: Record<string, any>;
+  symbolFields: Record<string, any>;
+  dataConfidenceLevel?: string;
+  semanticWordCount?: number;
+  crawledPagesCount?: number;
+}): Promise<PersistResult> {
+  try {
+    const { brandName, brandUrl, category, extracted, weights, reviewFields, tiktokMetadata, instagramMetadata, mentionFields, symbolFields } = params;
+
+    // 1. upsertSubject
+    const subjectId = await upsertSubject({
+      subjectType: "brand",
+      displayName: brandName,
+      websiteUrl: brandUrl,
+      brandCategory: category ?? extracted.category,
+      latestArchetype: extracted.archetype,
+      latestBrandArchetype: extracted.brandArchetypeClassification,
+      brandType: extracted.brandType,
+      campaignType: extracted.campaignType,
+    });
+
+    // 2. insertObservation
+    // Use the higher follower count between TikTok and Instagram
+    const bestFollowerCount = Math.max(
+      tiktokMetadata?.followerCount ?? 0,
+      instagramMetadata?.followerCount ?? 0,
+    ) || null;
+    const observationId = await insertObservation(subjectId, {
+      followerCount: bestFollowerCount,
+      engagementRate: tiktokMetadata?.engagementRate ?? instagramMetadata?.engagementRate ?? null,
+      dataConfidenceLevel: params.dataConfidenceLevel ?? null,
+    });
+
+    // 3. insertBrandObservation
+    const tiktokHandle = tiktokMetadata?.channelHandle ?? null;
+    await insertBrandObservation(observationId, {
+      brandArchetypeClassification: extracted.brandArchetypeClassification,
+      archetype: extracted.archetype,
+      emotionalPromise: extracted.emotionalPromise,
+      audienceTribe: extracted.audienceTribe,
+      culturalTension: extracted.culturalTension,
+      brandTone: extracted.brandTone,
+      barthesMyth: extracted.barthesMyth,
+      brandCulturalCapital: extracted.brandCulturalCapital,
+      brandGoffmanConsistency: extracted.brandGoffmanStageConsistency,
+      brandDriftSignal: extracted.brandDriftSignal,
+      brandHallDecoding: extracted.brandStuartHallDecoding,
+      brandRogersStage: extracted.brandRogersAdopterStage,
+      brandLiminalPhase: extracted.brandTurnerLiminalPhase,
+      brandLifecyclePhase: extracted.brandLifecyclePhase,
+      brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
+      brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
+      weightAlpha: weights.alpha,
+      weightBeta: weights.beta,
+      weightGamma: weights.gamma,
+      weightPriority: weights.priority,
+      googleRating: reviewFields.googleRating ?? null,
+      googleReviewCount: reviewFields.googleReviewCount ?? null,
+      googleReviewExcerpts: reviewFields.googleReviewExcerpts ?? null,
+      yelpRating: reviewFields.yelpRating ?? null,
+      yelpReviewCount: reviewFields.yelpReviewCount ?? null,
+      overallRating: reviewFields.overallRating ?? null,
+      totalReviews: reviewFields.totalReviews ?? null,
+      tiktokHandle,
+      tiktokFollowerCount: tiktokMetadata?.followerCount ?? null,
+      tiktokEngagementRate: tiktokMetadata?.engagementRate ?? null,
+      mentionTotalCount: mentionFields.mentionTotalCount ?? null,
+      mentionUniqueAuthors: mentionFields.mentionUniqueAuthors ?? null,
+      mentionSentiment: mentionFields.mentionSentiment ?? null,
+      mentionSentimentConfidence: mentionFields.mentionSentimentConfidence ?? null,
+      mentionAudienceSummary: mentionFields.mentionAudienceSummary ?? null,
+      symbolicSummary: symbolFields.brandDecodedSymbols?.symbolicSummary ?? null,
+      aiSummary: extracted.aiSummary,
+      yelpReviewExcerpts: reviewFields.yelpReviewExcerpts ?? null,
+      semanticWordCount: params.semanticWordCount ?? null,
+      crawledPagesCount: params.crawledPagesCount ?? null,
+    });
+
+    // 4. insertSignalValues (brand keywords, themes, visual language, symbolic vocab, mention signals)
+    const signals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
+    const bk = symbolFields.brandRawKeywords ?? tiktokMetadata?.rawKeywords ?? [];
+    (bk as string[]).forEach((k: string, i: number) => signals.push({ domain: "keyword", signalKey: k, rank: i + 1, source: "brand" }));
+    const bt = symbolFields.brandThemeLabels ?? tiktokMetadata?.themeLabels ?? [];
+    (bt as string[]).forEach((t: string, i: number) => signals.push({ domain: "content_theme", signalKey: t, rank: i + 1, source: "brand" }));
+    (extracted.visualLanguage as string[] ?? []).forEach((v: string, i: number) => signals.push({ domain: "visual_language", signalKey: v, rank: i + 1, source: "brand" }));
+    const sv = symbolFields.brandSymbolicVocabulary ?? tiktokMetadata?.symbolicVocabulary ?? [];
+    (sv as string[]).forEach((s: string, i: number) => signals.push({ domain: "symbolic_vocabulary", signalKey: s, rank: i + 1, source: "brand" }));
+    // Mention signals
+    (mentionFields.mentionHashtagCloud as string[] ?? []).forEach((h: string, i: number) => signals.push({ domain: "hashtag", signalKey: h, rank: i + 1, source: "audience" }));
+    (mentionFields.mentionRawKeywords as string[] ?? []).forEach((k: string, i: number) => signals.push({ domain: "identity_claim", signalKey: k, rank: i + 1, source: "audience" }));
+    (mentionFields.mentionMusicSignals as string[] ?? []).forEach((m: string, i: number) => signals.push({ domain: "music_title", signalKey: m, rank: i + 1, source: "audience" }));
+    (mentionFields.mentionMusicArtists as string[] ?? []).forEach((a: string, i: number) => signals.push({ domain: "music_artist", signalKey: a, rank: i + 1, source: "audience" }));
+    if (signals.length > 0) await insertSignalValues(subjectId, observationId, signals);
+
+    // 5. insertDecodedSignals (brand decoded symbols — mirror creator pattern)
+    const bds = symbolFields.brandDecodedSymbols as import("./brandSymbolDecoder").BrandDecodedSymbols | null;
+    const tiktokDss = tiktokMetadata?.decodedSymbols as Array<{ phrase: string; meaning: string; category: string; source?: string }> | undefined;
+    if (bds) {
+      // BrandDecodedSymbols is an object with nested arrays — destructure like creator pipeline
+      const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
+      (bds.identityClaims ?? []).forEach(s => decodedRows.push({ category: "identity_claim", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
+      (bds.statusSignals ?? []).forEach(s => decodedRows.push({ category: "status_signal", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
+      (bds.communityReferences ?? []).forEach(s => decodedRows.push({ category: "community_reference", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
+      (bds.aspirationDrivers ?? []).forEach(s => decodedRows.push({ category: "aspiration_driver", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
+      (bds.audienceLanguage ?? []).forEach(s => decodedRows.push({ category: "audience_language", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "audience" }));
+      if (decodedRows.length > 0) await insertDecodedSignals(subjectId, observationId, decodedRows);
+    } else if (tiktokDss && Array.isArray(tiktokDss)) {
+      // Fallback: TikTok channel decoded symbols (flat array from Track A LLM)
+      const rows = tiktokDss.map(s => ({
+        category: s.category, phrase: s.phrase, meaning: s.meaning, source: s.source ?? "brand",
+      }));
+      if (rows.length > 0) await insertDecodedSignals(subjectId, observationId, rows);
+    }
+
+    // 6. insertAudienceMentions (raw mention videos)
+    const rawMentions = (mentionFields.mentionDecodedSymbols as any)?.rawMentionVideos as MentionVideo[] ?? [];
+    if (rawMentions.length > 0) {
+      await insertAudienceMentions(subjectId, observationId, rawMentions.map((m: MentionVideo) => ({
+        platform: "TikTok",
+        mentionVideoId: m.videoId,
+        authorHandle: m.authorHandle,
+        caption: m.caption,
+        viewCount: m.plays,
+        likeCount: m.likes,
+        commentCount: m.comments,
+        shareCount: m.shares,
+        saveCount: m.saves,
+        musicTitle: m.musicTitle,
+        musicArtist: m.musicArtist,
+      })));
+    }
+
+    // 7. insertContentItems (brand TikTok channel videos)
+    const brandVideos = tiktokMetadata?.videoTranscripts ?? [];
+    if (brandVideos.length > 0) {
+      const contentRows = brandVideos.map((v, i) => ({
+        platform: "TikTok" as const,
+        platformVideoId: v.videoId || `brand-video-${i}`,
+        caption: v.caption,
+        transcriptText: v.transcriptText ?? undefined,
+        transcriptWordCount: v.transcriptWordCount ?? undefined,
+        transcriptSource: v.transcriptSource ?? undefined,
+        createTime: v.postedDate ? Math.floor(new Date(v.postedDate).getTime() / 1000) : undefined,
+        status: v.transcriptText ? "sampled" : "discovered",
+      }));
+      await insertContentItems(subjectId, observationId, contentRows);
+      console.log(`[persist] Brand channel videos: ${contentRows.length} rows written`);
+    }
+
+    // 8. insertContentItems (audience mention videos as 'mention' status)
+    if (rawMentions.length > 0) {
+      const mentionContentRows = rawMentions.slice(0, 50).map(m => ({
+        platform: "TikTok" as const,
+        platformVideoId: m.videoId,
+        caption: m.caption,
+        viewCount: m.plays,
+        likeCount: m.likes,
+        commentCount: m.comments,
+        shareCount: m.shares,
+        saveCount: m.saves,
+        musicTitle: m.musicTitle,
+        musicArtist: m.musicArtist,
+        createTime: m.createdAt || undefined,
+        status: "mention",
+      }));
+      await insertContentItems(subjectId, observationId, mentionContentRows);
+      console.log(`[persist] Audience mention videos: ${mentionContentRows.length} rows written`);
+    }
+
+    // 9. Instagram platform handle
+    if (instagramMetadata?.channelHandle) {
+      await upsertPlatformHandle(
+        subjectId,
+        "instagram",
+        instagramMetadata.channelHandle,
+        `https://www.instagram.com/${instagramMetadata.channelHandle}/`,
+      );
+      console.log(`[persist] Instagram handle @${instagramMetadata.channelHandle} saved`);
+    }
+
+    // 10. Instagram post content items
+    if (instagramMetadata?.postCaptions && instagramMetadata.postCaptions.length > 0) {
+      const igContentRows = instagramMetadata.postCaptions.map((caption, i) => ({
+        platform: "instagram" as const,
+        platformVideoId: `ig-post-${instagramMetadata.channelHandle}-${i}`,
+        caption,
+        status: "sampled",
+      }));
+      await insertContentItems(subjectId, observationId, igContentRows);
+      console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written`);
+    }
+
+    // 11. Instagram signal values (keywords, themes, vocab from LLM analysis)
+    if (instagramMetadata) {
+      const igSignals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
+      (instagramMetadata.rawKeywords ?? []).forEach((k, i) => igSignals.push({ domain: "keyword", signalKey: k, rank: i + 1, source: "instagram" }));
+      (instagramMetadata.themeLabels ?? []).forEach((t, i) => igSignals.push({ domain: "content_theme", signalKey: t, rank: i + 1, source: "instagram" }));
+      (instagramMetadata.symbolicVocabulary ?? []).forEach((s, i) => igSignals.push({ domain: "symbolic_vocabulary", signalKey: s, rank: i + 1, source: "instagram" }));
+      if (igSignals.length > 0) {
+        await insertSignalValues(subjectId, observationId, igSignals);
+        console.log(`[persist] Instagram signal values: ${igSignals.length} rows written`);
+      }
+
+      // 12. Instagram decoded signals
+      if (instagramMetadata.decodedSymbols && instagramMetadata.decodedSymbols.length > 0) {
+        const igDecodedRows = instagramMetadata.decodedSymbols.map(s => ({
+          category: s.category,
+          phrase: s.phrase,
+          meaning: s.meaning,
+          source: "instagram",
+        }));
+        await insertDecodedSignals(subjectId, observationId, igDecodedRows);
+        console.log(`[persist] Instagram decoded signals: ${igDecodedRows.length} rows written`);
+      }
+    }
+
+    return { subjectId };
+  } catch (err) {
+    console.error("[V2 Pipeline] Brand persist failed (non-fatal):", err);
+    return { error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+function computeEngagementTierLocal(followers: number | undefined | null): string | undefined {
+  if (!followers) return undefined;
+  if (followers < 10_000) return "nano";
+  if (followers < 100_000) return "micro";
+  if (followers < 500_000) return "mid";
+  if (followers < 1_000_000) return "macro";
+  return "mega";
+}
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    login: loginRateLimitedProcedure
+      .input(z.object({ pin: z.string().min(1) }))
+      .mutation(({ input, ctx }) => {
+        if (input.pin === ENV.pinCode) {
+          ctx.res.cookie("womo_pilot_auth", "authenticated", {
+            httpOnly: true,
+            path: "/",
+            sameSite: "lax",
+            secure: ctx.req.protocol === "https" || ctx.req.headers["x-forwarded-proto"] === "https",
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+          });
+          return { success: true as const };
+        }
+        return { success: false as const, error: "Invalid PIN" };
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie("womo_pilot_auth", { path: "/" });
       return { success: true } as const;
+    }),
+    check: publicProcedure.query(({ ctx }) => {
+      return { authenticated: ctx.authenticated };
     }),
   }),
 
   // ─── Creator Routes ─────────────────────────────────────────────────────────
   creator: router({
-    analyze: publicProcedure
+    analyze: analysisRateLimitedProcedure
       .input(z.object({
         handleOrUrl: z.string().min(1),
-        platform: z.enum(["TikTok", "YouTube", "Multi"]), // Instagram removed from UI
+        platform: z.enum(["TikTok", "Instagram"]),
       }))
       .mutation(async ({ input }) => {
+        const pipelineStart = Date.now();
+        const stepTimings: Array<{ step: string; durationMs: number }> = [];
+
+        // ── FIX 1.1: Global analysis timeout ──
+        // Wrap research + extraction in Promise.race with a 3-minute timeout
+        // to prevent hung Playwright pages from blocking the server thread.
+        const ANALYSIS_TIMEOUT_MS = 3 * 60 * 1000;
+
+        const analysisPromise = (async () => {
+          // Step 1: Research
+          const t1 = Date.now();
+          const research = await researchCreator(input.handleOrUrl, input.platform);
+          stepTimings.push({ step: "Web Research & Scraping", durationMs: Date.now() - t1 });
+
+          // Step 2: AI Extraction (with retry)
+          const t2 = Date.now();
+          let extracted;
+          try {
+            extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+          } catch (firstErr) {
+            console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+            } catch (secondErr) {
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "Creator extraction failed after retry. Please try again.",
+              });
+            }
+          }
+          stepTimings.push({ step: "AI Profile Extraction", durationMs: Date.now() - t2 });
+
+          return { research, extracted };
+        })();
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(
+            new TRPCError({
+              code: "TIMEOUT",
+              message: "Analysis timed out after 3 minutes. The creator's page may be slow or unavailable. Please try again.",
+            })
+          ), ANALYSIS_TIMEOUT_MS)
+        );
+
+        const { research, extracted } = await Promise.race([analysisPromise, timeoutPromise]);
+
         // Step 1: Gather real evidence from the platform before AI analysis
         let evidenceSummary: string | undefined;
         let researchedProfileUrl: string | undefined;
         let researchData: {
-          followerCount?: number; totalLikes?: number; videoCount?: number;
+          followerCount?: number; followingCount?: number; totalLikes?: number; videoCount?: number;
           totalViews?: number; avgViews?: number; engagementRate?: number;
-          location?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
+          location?: string; bio?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
           topHashtags?: string[]; recentVideoTitles?: string[];
           transcriptCount?: number; transcriptExcerpts?: string;
           decodedSymbols?: Record<string, unknown>;
           culturalVelocity?: string;
           dataConfidenceLevel?: string;
           longitudinalSampleJson?: Record<string, unknown>;
-          discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number }>;
+          discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
+          transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
         } | undefined;
-        // Research layer throws TRPCError for insufficient data — let it propagate to the client
-        const research = await researchCreator(input.handleOrUrl, input.platform);
+
         evidenceSummary = research.evidenceSummary;
         researchedProfileUrl = research.profileUrl;
         researchData = {
           followerCount: research.followerCount || undefined,
+          // I1: Thread followingCount from scraper data
+          followingCount: research.followingCount || undefined,
           totalLikes: research.totalLikes || undefined,
           videoCount: research.videoCount || undefined,
           totalViews: research.totalViews || undefined,
           avgViews: research.avgViews || undefined,
           engagementRate: research.engagementRate || undefined,
           location: research.location || undefined,
+          bio: research.bio || undefined,
           rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
           contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
           topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
@@ -74,88 +567,104 @@ export const appRouter = router({
           dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
           longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
           discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+          transcripts: research.transcripts?.length ? research.transcripts : undefined,
         };
 
-        // Step 2: AI extraction grounded in real evidence
-        const extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, evidenceSummary);
-        const weights = getBrandWeights("Retail — Local Boutique"); // default, not used here
-        const insertResult = await createCreatorProfile({
+        // ── Step 3: DB Persistence ──
+        const t3 = Date.now();
+        const persistResult = await persistCreatorToV2({
           handle: extracted.handle,
           platform: extracted.platform,
           profileUrl: researchedProfileUrl ?? (input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined),
           displayName: extracted.displayName,
-          archetype: extracted.archetype,
-          recurringThemes: extracted.recurringThemes,
-          toneRegister: extracted.toneRegister,
-          parasocialBondStrength: extracted.parasocialBondStrength,
-          audienceRelationshipType: extracted.audienceRelationshipType,
-          barthesMyth: extracted.barthesMyth,
-          culturalCapital: extracted.culturalCapital,
-          goffmanStageConsistency: extracted.goffmanStageConsistency,
-          driftSignal: extracted.driftSignal,
-          stuartHallDecoding: extracted.stuartHallDecoding,
-          nicheTopicNode: extracted.nicheTopicNode,
-          undergroundDensity: extracted.undergroundDensity,
-          mainstreamBleed: extracted.mainstreamBleed,
-          remixRate: extracted.remixRate,
-          brandSaturation: extracted.brandSaturation,
-          rogersAdopterStage: extracted.rogersAdopterStage,
-          creatorNichePosition: extracted.creatorNichePosition,
-          lifecyclePhase: extracted.lifecyclePhase,
-          barthesNicheMeaning: extracted.barthesNicheMeaning,
-          turnerLiminalPhase: extracted.turnerLiminalPhase,
           pronouns: extracted.pronouns,
-          aiSummary: extracted.aiSummary,
-          rawAiResponse: extracted as unknown as Record<string, unknown>,
-          // Research metrics from platform APIs
-          followerCount: researchData?.followerCount ?? undefined,
-          totalLikes: researchData?.totalLikes ?? undefined,
-          videoCount: researchData?.videoCount ?? undefined,
-          totalViews: researchData?.totalViews ?? undefined,
-          avgViews: researchData?.avgViews ?? undefined,
-          engagementRate: researchData?.engagementRate ?? undefined,
-          location: researchData?.location ?? undefined,
-          rawKeywords: researchData?.rawKeywords ?? undefined,
-          contentThemeLabels: researchData?.contentThemeLabels ?? undefined,
-          topHashtags: researchData?.topHashtags ?? undefined,
-          recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
-          transcriptCount: researchData?.transcriptCount ?? 0,
-          transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
-          decodedSymbols: researchData?.decodedSymbols ?? undefined,
-          culturalVelocity: researchData?.culturalVelocity ?? undefined,
-          dataConfidenceLevel: researchData?.dataConfidenceLevel ?? undefined,
-          longitudinalSampleJson: researchData?.longitudinalSampleJson ?? undefined,
-          discoveredVideoPoolJson: researchData?.discoveredVideoPoolJson as unknown as Record<string, unknown> ?? undefined,
+          extracted,
+          researchData: researchData ?? {},
         });
-        // Get the inserted ID
-        const profiles = await listCreatorProfiles(undefined, extracted.handle);
-        const saved = profiles[0];
-        return { profile: saved, extracted };
+        stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
+
+        // ── Collect token metrics from llm_invocations (by time window, since LLM runs before subject exists) ──
+        const pipelineStartTime = new Date(pipelineStart);
+        const tokenMetrics = await getLlmTokenUsageByTimeWindow(pipelineStartTime)
+          .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
+
+        const totalDurationMs = Date.now() - pipelineStart;
+
+        // Check for persistence failure (discriminated union)
+        if ("error" in persistResult) {
+          console.warn(`[V2 Pipeline] ⚠️ Persistence failed but analysis completed. Error: ${persistResult.error}`);
+        }
+        const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
+
+        // Return saved profile + pipeline metrics
+        const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
+        return {
+          profile: saved,
+          extracted,
+          pipelineMetrics: {
+            totalDurationMs,
+            steps: stepTimings,
+            tokens: tokenMetrics,
+            transcriptCount: researchData?.transcriptCount ?? 0,
+            videosScraped: researchData?.discoveredVideoPoolJson?.length ?? 0,
+          },
+        };
       }),
 
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(async ({ input }) => {
         return listCreatorProfiles(undefined, input.search);
       }),
 
-    get: publicProcedure
-      .input(z.object({ id: z.number() }))
+    get: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         const profile = await getCreatorProfileById(input.id);
         if (!profile) throw new Error("Creator profile not found");
         return profile;
       }),
 
-    delete: publicProcedure
-      .input(z.object({ id: z.number() }))
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteCreatorProfile(input.id);
         return { success: true };
       }),
 
-    reanalyze: publicProcedure
-      .input(z.object({ id: z.number() }))
+    getContentItems: protectedProcedure
+      .input(z.object({ subjectId: z.string() }))
+      .query(async ({ input }) => {
+        return getContentItemsBySubject(input.subjectId);
+      }),
+
+    getProvenance: protectedProcedure
+      .input(z.object({ observationId: z.string() }))
+      .query(async ({ input }) => {
+        return getProvenance(input.observationId);
+      }),
+
+    getPipelineMetrics: protectedProcedure
+      .input(z.object({ subjectId: z.string(), observedAt: z.string().optional() }))
+      .query(async ({ input }) => {
+        // Try by subjectId first, fall back to time window around observedAt
+        let metrics = await getLlmTokenUsageBySubject(input.subjectId).catch(() => null);
+        if (metrics && metrics.llmCalls > 0) return metrics;
+
+        // Subject wasn't set on invocations — query by time window around observation
+        if (input.observedAt) {
+          const obsDate = new Date(input.observedAt);
+          const windowStart = new Date(obsDate.getTime() - 5 * 60_000); // 5 min before
+          const windowEnd = new Date(obsDate.getTime() + 60_000); // 1 min after (LLM logs can trail slightly)
+          metrics = await getLlmTokenUsageByTimeWindow(windowStart, windowEnd).catch(() => null);
+          if (metrics && metrics.llmCalls > 0) return metrics;
+        }
+
+        return { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" };
+      }),
+
+    reanalyze: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new Error("Creator profile not found");
@@ -176,6 +685,7 @@ export const appRouter = router({
             avgViews: research.avgViews || undefined,
             engagementRate: research.engagementRate || undefined,
             location: research.location || undefined,
+            bio: research.bio || undefined,
             rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
             contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
             topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
@@ -187,6 +697,7 @@ export const appRouter = router({
             dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
             longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
             discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+            transcripts: research.transcripts?.length ? research.transcripts : undefined,
           };
         } catch (err) {
           console.warn("[creator.reanalyze] Web research failed, proceeding without evidence:", err);
@@ -194,49 +705,15 @@ export const appRouter = router({
 
         const extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
 
-        await updateCreatorProfile(input.id, {
-          archetype: extracted.archetype,
-          recurringThemes: extracted.recurringThemes,
-          toneRegister: extracted.toneRegister,
-          parasocialBondStrength: extracted.parasocialBondStrength,
-          audienceRelationshipType: extracted.audienceRelationshipType,
-          barthesMyth: extracted.barthesMyth,
-          culturalCapital: extracted.culturalCapital,
-          goffmanStageConsistency: extracted.goffmanStageConsistency,
-          driftSignal: extracted.driftSignal,
-          stuartHallDecoding: extracted.stuartHallDecoding,
-          nicheTopicNode: extracted.nicheTopicNode,
-          undergroundDensity: extracted.undergroundDensity,
-          mainstreamBleed: extracted.mainstreamBleed,
-          remixRate: extracted.remixRate,
-          brandSaturation: extracted.brandSaturation,
-          rogersAdopterStage: extracted.rogersAdopterStage,
-          creatorNichePosition: extracted.creatorNichePosition,
-          lifecyclePhase: extracted.lifecyclePhase,
-          barthesNicheMeaning: extracted.barthesNicheMeaning,
-          turnerLiminalPhase: extracted.turnerLiminalPhase,
+        // V2: reanalyze creates a new observation (append-only)
+        await persistCreatorToV2({
+          handle: existing.handle,
+          platform: existing.platform as string,
+          profileUrl: researchedProfileUrl ?? existing.profileUrl ?? undefined,
+          displayName: extracted.displayName,
           pronouns: extracted.pronouns,
-          aiSummary: extracted.aiSummary,
-          rawAiResponse: extracted as unknown as Record<string, unknown>,
-          followerCount: researchData?.followerCount ?? undefined,
-          totalLikes: researchData?.totalLikes ?? undefined,
-          videoCount: researchData?.videoCount ?? undefined,
-          totalViews: researchData?.totalViews ?? undefined,
-          avgViews: researchData?.avgViews ?? undefined,
-          engagementRate: researchData?.engagementRate ?? undefined,
-          location: researchData?.location ?? undefined,
-          rawKeywords: researchData?.rawKeywords ?? undefined,
-          contentThemeLabels: researchData?.contentThemeLabels ?? undefined,
-          topHashtags: researchData?.topHashtags ?? undefined,
-          recentVideoTitles: researchData?.recentVideoTitles ?? undefined,
-          transcriptCount: researchData?.transcriptCount ?? 0,
-          transcriptExcerpts: researchData?.transcriptExcerpts ?? undefined,
-          decodedSymbols: researchData?.decodedSymbols ?? undefined,
-          culturalVelocity: researchData?.culturalVelocity ?? undefined,
-          dataConfidenceLevel: researchData?.dataConfidenceLevel ?? undefined,
-          longitudinalSampleJson: researchData?.longitudinalSampleJson ?? undefined,
-          discoveredVideoPoolJson: researchData?.discoveredVideoPoolJson as unknown as Record<string, unknown> ?? undefined,
-          updatedAt: new Date(),
+          extracted,
+          researchData,
         });
 
         const updated = await getCreatorProfileById(input.id);
@@ -246,9 +723,9 @@ export const appRouter = router({
     // ─── Supplemental Video Ingestion ─────────────────────────────────────────
     // Fetches transcript for a single TikTok video URL and appends it to the
     // creator profile's transcript pool, then updates the profile's data.
-    ingestSupplementalVideo: publicProcedure
+    ingestSupplementalVideo: protectedProcedure
       .input(z.object({
-        creatorProfileId: z.number(),
+        creatorProfileId: z.string(),
         videoUrl: z.string().url(),
         videoId: z.string(),
         caption: z.string().default(""),
@@ -267,9 +744,8 @@ export const appRouter = router({
 
         if (!transcript) {
           // No captions available — remove from pool so user doesn't retry indefinitely
-          await updateCreatorProfile(input.creatorProfileId, {
-            discoveredVideoPoolJson: updatedPool as unknown as Record<string, unknown>,
-          });
+          // V2: supplemental video results are not stored via updateCreatorProfile anymore.
+          // The pool is tracked in content_items. No incremental update needed.
           return {
             success: false,
             noCaptions: true,
@@ -293,12 +769,28 @@ export const appRouter = router({
         const newConfidence: "high" | "medium" | "low" =
           newCount >= 6 ? "high" : newCount >= 3 ? "medium" : "low";
 
-        await updateCreatorProfile(input.creatorProfileId, {
-          transcriptCount: newCount,
-          transcriptExcerpts: updatedExcerpts,
-          dataConfidenceLevel: newConfidence,
-          discoveredVideoPoolJson: updatedPool as unknown as Record<string, unknown>,
-        });
+        // V2: Store the transcript as a content_item linked to the latest observation
+        try {
+          const latestObsId = await getLatestObservationId(input.creatorProfileId);
+          if (!latestObsId) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "No observation found for this creator",
+            });
+          }
+          await insertContentItems(input.creatorProfileId, latestObsId, [{
+            platform: profile.platform as string,
+            platformVideoId: input.videoId,
+            videoUrl: input.videoUrl,
+            caption: input.caption,
+            transcriptText: transcript.transcript,
+            transcriptWordCount: transcript.wordCount,
+            transcriptSource: "whisper",
+            status: "transcribed",
+          }]);
+        } catch (err) {
+          console.error("[ingestSupplementalVideo] Failed to store content item:", err);
+        }
 
         return {
           success: true,
@@ -313,10 +805,10 @@ export const appRouter = router({
   }),
 
 
-    bulkAnalyze: publicProcedure
+    bulkAnalyze: bulkRateLimitedProcedure
       .input(z.object({
         handles: z.array(z.string().min(1)),
-        platform: z.enum(["TikTok", "YouTube", "Multi"]),
+        platform: z.enum(["TikTok", "Instagram"]),
       }))
       .mutation(async ({ input }) => {
         // Create a bulk job
@@ -334,51 +826,39 @@ export const appRouter = router({
               const research = await researchCreator(handle, input.platform);
               const extracted = await extractCreatorProfile(handle, input.platform, research.evidenceSummary);
               
-              const result = await createCreatorProfile({
-                handle: handle,
+              const bulkPersistResult = await persistCreatorToV2({
+                handle,
                 platform: input.platform,
                 profileUrl: research.profileUrl ?? "",
-                archetype: extracted.archetype ?? "The Everyman",
-                audienceRelationshipType: extracted.audienceRelationshipType,
-                barthesMyth: extracted.barthesMyth,
-                culturalCapital: extracted.culturalCapital,
-                goffmanStageConsistency: extracted.goffmanStageConsistency,
-                driftSignal: extracted.driftSignal,
-                stuartHallDecoding: extracted.stuartHallDecoding,
-                nicheTopicNode: extracted.nicheTopicNode,
-                undergroundDensity: extracted.undergroundDensity,
-                mainstreamBleed: extracted.mainstreamBleed,
-                remixRate: extracted.remixRate,
-                brandSaturation: extracted.brandSaturation,
-                rogersAdopterStage: extracted.rogersAdopterStage,
-                creatorNichePosition: extracted.creatorNichePosition,
-                lifecyclePhase: extracted.lifecyclePhase,
-                barthesNicheMeaning: extracted.barthesNicheMeaning,
-                turnerLiminalPhase: extracted.turnerLiminalPhase,
+                displayName: extracted.displayName,
                 pronouns: extracted.pronouns,
-                aiSummary: extracted.aiSummary,
-                rawAiResponse: extracted as unknown as Record<string, unknown>,
-                followerCount: research.followerCount ?? undefined,
-                totalLikes: research.totalLikes ?? undefined,
-                videoCount: research.videoCount ?? undefined,
-                totalViews: research.totalViews ?? undefined,
-                avgViews: research.avgViews ?? undefined,
-                engagementRate: research.engagementRate ?? undefined,
-                location: research.location ?? undefined,
-                rawKeywords: research.rawKeywords ?? undefined,
-                contentThemeLabels: research.contentThemeLabels ?? undefined,
-                topHashtags: research.topHashtags ?? undefined,
-                recentVideoTitles: research.recentVideoTitles ?? undefined,
-                transcriptCount: research.transcriptCount ?? 0,
-                transcriptExcerpts: research.transcriptExcerpts ?? undefined,
-                decodedSymbols: research.decodedSymbols ?? undefined,
-                culturalVelocity: research.culturalVelocity ?? undefined,
-                dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-                longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-                discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+                extracted,
+                researchData: {
+                  followerCount: research.followerCount ?? undefined,
+                  totalLikes: research.totalLikes ?? undefined,
+                  videoCount: research.videoCount ?? undefined,
+                  totalViews: research.totalViews ?? undefined,
+                  avgViews: research.avgViews ?? undefined,
+                  engagementRate: research.engagementRate ?? undefined,
+                  location: research.location ?? undefined,
+                  bio: research.bio ?? undefined,
+                  rawKeywords: research.rawKeywords ?? undefined,
+                  contentThemeLabels: research.contentThemeLabels ?? undefined,
+                  topHashtags: research.topHashtags ?? undefined,
+                  recentVideoTitles: research.recentVideoTitles ?? undefined,
+                  transcriptCount: research.transcriptCount ?? 0,
+                  transcriptExcerpts: research.transcriptExcerpts ?? undefined,
+                  decodedSymbols: research.decodedSymbols ?? undefined,
+                  culturalVelocity: research.culturalVelocity ?? undefined,
+                  dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+                  longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+                  discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+                  transcripts: research.transcripts?.length ? research.transcripts : undefined,
+                },
               });
               
-              updateJobResult(job.jobId, i, { creatorId: (result as any).id ?? (result as any).insertId });
+              const bulkSubjectId = "subjectId" in bulkPersistResult ? bulkPersistResult.subjectId : "unknown";
+              updateJobResult(job.jobId, i, { creatorId: bulkSubjectId });
               updateJobProgress(job.jobId, { completed: job.progress.completed + 1 });
             } catch (err) {
               recordJobError(job.jobId, i, input.handles[i], String(err));
@@ -393,15 +873,20 @@ export const appRouter = router({
 
     // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
-    analyze: publicProcedure
+    analyze: analysisRateLimitedProcedure
       .input(z.object({
         brandNameOrUrl: z.string().min(1),
         tiktokChannelUrl: z.string().optional().or(z.literal("")),
+        instagramHandle: z.string().optional().or(z.literal("")),
+        googleMapsUrl: z.string().optional().or(z.literal("")),
       }))
       .mutation(async ({ input }) => {
         // Step 1: Gather real evidence from the brand's website/web presence + review data + TikTok
         let brandEvidenceSummary: string | undefined;
         let tiktokMetadata: BrandTikTokMetadata | null = null;
+        let brandDataConfidenceLevel: string | undefined;
+        let brandSemanticWordCount: number | undefined;
+        let brandCrawledPagesCount: number | undefined;
         let reviewFields: {
           yelpRating?: number | null;
           yelpReviewCount?: number | null;
@@ -432,7 +917,7 @@ export const appRouter = router({
           mentionAudienceSummary?: string;
         } = {};
         try {
-          const brandResearch = await researchBrand(input.brandNameOrUrl);
+          const brandResearch = await researchBrand(input.brandNameOrUrl, input.googleMapsUrl || undefined);
           brandEvidenceSummary = brandResearch.evidenceSummary;
           reviewFields = {
             yelpRating: brandResearch.yelpRating,
@@ -470,6 +955,11 @@ export const appRouter = router({
               mentionAudienceSummary: m.audienceLanguageSummary,
             };
           }
+          // Capture data confidence level from brand research
+          brandDataConfidenceLevel = brandResearch.dataConfidenceLevel;
+          // P2-2: Capture crawl metadata for audit trail
+          brandSemanticWordCount = brandResearch.semanticWordCount;
+          brandCrawledPagesCount = brandResearch.crawledPages?.length;
         } catch (err) {
           console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
         }
@@ -487,87 +977,127 @@ export const appRouter = router({
           }
         }
 
+        // Step 1b2: Analyze Instagram channel if provided
+        let instagramMetadata: BrandInstagramMetadata | null = null;
+        if (input.instagramHandle?.trim()) {
+          try {
+            instagramMetadata = await analyzeBrandInstagramChannel(input.instagramHandle);
+            if (instagramMetadata) {
+              const igBlock = formatBrandInstagramEvidenceBlock(instagramMetadata);
+              brandEvidenceSummary = (brandEvidenceSummary ?? "") + "\n\n" + igBlock;
+              console.log("[brand.analyze] Instagram evidence block added");
+            }
+          } catch (err) {
+            console.warn("[brand.analyze] Instagram analysis failed, proceeding without Instagram data:", err);
+          }
+        }
+
+        // Step 1c: Minimum data threshold — prevent hallucinated profiles
+        const evidenceLength = (brandEvidenceSummary || "").length;
+        const hasReviewData = (reviewFields.totalReviews ?? 0) > 0;
+        const hasMentionData = (mentionFields.mentionTotalCount ?? 0) > 0;
+        const hasTikTokChannel = tiktokMetadata !== null;
+        const hasInstagramChannel = instagramMetadata !== null;
+        if (evidenceLength < 200 && !hasReviewData && !hasMentionData && !hasTikTokChannel && !hasInstagramChannel) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Insufficient data to analyze this brand. No website content, reviews, or social mentions were found. Please verify the brand URL and try again.",
+          });
+        }
+
         // Step 2: AI extraction grounded in real evidence
-        const extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
+        // P0-3: Wrap extraction in try-catch with single retry for malformed LLM JSON
+        let extracted: Awaited<ReturnType<typeof extractBrandProfile>>;
+        try {
+          extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
+        } catch (firstErr) {
+          const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+          if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
+            console.warn(`[brand.analyze] LLM JSON parse failed on first attempt: ${errMsg.slice(0, 500)}`);
+            console.warn(`[brand.analyze] Retrying extraction after 1s delay...`);
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
+            } catch (retryErr) {
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "Brand extraction failed after retry — please try again",
+              });
+            }
+          } else {
+            throw firstErr; // Non-JSON error, rethrow immediately
+          }
+        }
+
+        // P1-2: Validate brandType against BRAND_WEIGHT_TABLE keys
+        const validBrandTypes = Object.keys(BRAND_WEIGHT_TABLE);
+        if (!validBrandTypes.includes(extracted.brandType)) {
+          const invalidValue = extracted.brandType;
+          // Find closest match by checking substring containment
+          const closestMatch = validBrandTypes.find(vbt =>
+            vbt.toLowerCase().includes(invalidValue.toLowerCase()) ||
+            invalidValue.toLowerCase().includes(vbt.toLowerCase())
+          );
+          // Fallback: "Retail — E-Commerce / DTC Product" has α=0.5/β=0.3/γ=0.2 weights,
+          // which are closest to the table-wide average (α≈0.50, β≈0.29, γ≈0.20) across
+          // all 107 entries (Euclidean distance 0.011). It is also the most semantically
+          // generic consumer brand key — applicable to any DTC product regardless of category.
+          const fallback = closestMatch || "Retail — E-Commerce / DTC Product";
+          console.warn(`[brandType] Invalid value "${invalidValue}" received from LLM — defaulting to "${fallback}"`);
+          (extracted as unknown as Record<string, unknown>).brandType = fallback;
+        }
+
         // Apply campaign modifier (Rule 5) when campaignType is Long-Term Ambassador or Product Launch
         const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
-        await createBrandProfile({
+
+        // Step 3: Persist to V2 schema
+        const brandPersistResult = await persistBrandToV2({
           brandName: extracted.brandName,
           brandUrl: input.brandNameOrUrl.startsWith("http") ? input.brandNameOrUrl : undefined,
           category: extracted.category,
-          archetype: extracted.archetype,
-          brandArchetypeClassification: extracted.brandArchetypeClassification,
-          emotionalPromise: extracted.emotionalPromise,
-          visualLanguage: extracted.visualLanguage,
-          audienceTribe: extracted.audienceTribe,
-          culturalTension: extracted.culturalTension,
-          barthesMyth: extracted.barthesMyth,
-          brandTone: extracted.brandTone,
-          brandType: extracted.brandType,
-          campaignType: extracted.campaignType,
-          weightAlpha: weights.alpha,
-          weightBeta: weights.beta,
-          weightGamma: weights.gamma,
-          weightPriority: weights.priority,
-          // Creator-parity sociological framework fields
-          brandCulturalCapital: extracted.brandCulturalCapital,
-          brandGoffmanStageConsistency: extracted.brandGoffmanStageConsistency,
-          brandDriftSignal: extracted.brandDriftSignal,
-          brandStuartHallDecoding: extracted.brandStuartHallDecoding,
-          brandRogersAdopterStage: extracted.brandRogersAdopterStage,
-          brandTurnerLiminalPhase: extracted.brandTurnerLiminalPhase,
-          brandLifecyclePhase: extracted.brandLifecyclePhase,
-          brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
-          brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
-          ...reviewFields,
-          // Symbol fields: website-derived first, then TikTok overrides if available
-          ...symbolFields,
-          // TikTok fields (override symbol fields when TikTok data is present)
-          tiktokChannelUrl: input.tiktokChannelUrl || undefined,
-          tiktokMetadata: tiktokMetadata as unknown as Record<string, unknown> || undefined,
-          tiktokEngagementRate: tiktokMetadata?.engagementRate || undefined,
-          tiktokAudienceSize: tiktokMetadata?.followerCount || undefined,
-          // TikTok video transcripts — only set when TikTok data was fetched
-          ...(tiktokMetadata?.videoTranscripts && tiktokMetadata.videoTranscripts.length > 0 ? {
-            brandVideoTranscripts: tiktokMetadata.videoTranscripts as unknown as Record<string, unknown>[],
-            brandDecodedSymbols: tiktokMetadata.decodedSymbols as unknown as Record<string, unknown>[],
-            brandRawKeywords: tiktokMetadata.rawKeywords,
-            brandThemeLabels: tiktokMetadata.themeLabels,
-            brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
-          } : {}),
-          // Phase 6: Audience Mention Intelligence
-          ...mentionFields,
-          aiSummary: extracted.aiSummary,
-          rawAiResponse: extracted as unknown as Record<string, unknown>,
+          extracted,
+          weights,
+          reviewFields,
+          tiktokMetadata,
+          instagramMetadata,
+          mentionFields,
+          symbolFields,
+          dataConfidenceLevel: brandDataConfidenceLevel,
+          semanticWordCount: brandSemanticWordCount,
+          crawledPagesCount: brandCrawledPagesCount,
         });
-        const profiles = await listBrandProfiles(undefined, extracted.brandName);
-        const saved = profiles[0];
+
+        if ("error" in brandPersistResult) {
+          console.warn(`[V2 Pipeline] ⚠️ Brand persistence failed but analysis completed. Error: ${brandPersistResult.error}`);
+        }
+        const brandSubjectId = "subjectId" in brandPersistResult ? brandPersistResult.subjectId : null;
+        const saved = brandSubjectId ? await getBrandProfileById(brandSubjectId) : null;
         return { profile: saved, extracted, weights };
       }),
 
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(async ({ input }) => {
         return listBrandProfiles(undefined, input.search);
       }),
 
-    get: publicProcedure
-      .input(z.object({ id: z.number() }))
+    get: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         const profile = await getBrandProfileById(input.id);
         if (!profile) throw new Error("Brand profile not found");
         return profile;
       }),
 
-    delete: publicProcedure
-      .input(z.object({ id: z.number() }))
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteBrandProfile(input.id);
         return { success: true };
       }),
 
-    reanalyze: publicProcedure
-      .input(z.object({ id: z.number() }))
+    reanalyze: protectedProcedure
+      .input(z.object({ id: z.string(), instagramHandle: z.string().optional().or(z.literal("")), googleMapsUrl: z.string().optional().or(z.literal("")) }))
       .mutation(async ({ input }) => {
         const existing = await getBrandProfileById(input.id);
         if (!existing) throw new Error("Brand profile not found");
@@ -577,9 +1107,12 @@ export const appRouter = router({
         let symbolFields: any = {};
         let mentionFieldsReanalyze: any = {};
         let tiktokMetadata: BrandTikTokMetadata | null = null;
+        let brandDataConfidenceLevel: string | undefined;
+        let brandSemanticWordCountReanalyze: number | undefined;
+        let brandCrawledPagesCountReanalyze: number | undefined;
 
         try {
-          const brandResearch = await researchBrand(existing.brandUrl || existing.brandName);
+          const brandResearch = await researchBrand(existing.brandUrl || existing.brandName, input.googleMapsUrl || undefined);
           brandEvidenceSummary = brandResearch.evidenceSummary;
           reviewFields = {
             yelpRating: brandResearch.yelpRating,
@@ -616,6 +1149,10 @@ export const appRouter = router({
               mentionAudienceSummary: m.audienceLanguageSummary,
             };
           }
+          // Capture data confidence level from brand research
+          brandDataConfidenceLevel = brandResearch.dataConfidenceLevel;
+          brandSemanticWordCountReanalyze = brandResearch.semanticWordCount;
+          brandCrawledPagesCountReanalyze = brandResearch.crawledPages?.length;
         } catch (err) {
           console.warn("[brand.reanalyze] Web research failed, proceeding without evidence:", err);
         }
@@ -635,61 +1172,84 @@ export const appRouter = router({
           }
         }
 
-        const extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
+        // Re-run Instagram analysis if handle is provided or stored
+        let instagramMetadataReanalyze: BrandInstagramMetadata | null = null;
+        const igHandleToUse = input.instagramHandle?.trim() || (existing as any).instagramHandle;
+        if (igHandleToUse) {
+          try {
+            instagramMetadataReanalyze = await analyzeBrandInstagramChannel(igHandleToUse);
+            if (instagramMetadataReanalyze) {
+              const igBlock = formatBrandInstagramEvidenceBlock(instagramMetadataReanalyze);
+              if (igBlock) {
+                brandEvidenceSummary = brandEvidenceSummary + "\n\n" + igBlock;
+              }
+              console.log("[brand.reanalyze] Instagram evidence block added");
+            }
+          } catch (err) {
+            console.warn("[brand.reanalyze] Instagram analysis failed, proceeding without Instagram data:", err);
+          }
+        }
+
+        // P0-3: Wrap extraction with retry for malformed JSON
+        let extracted: Awaited<ReturnType<typeof extractBrandProfile>>;
+        try {
+          extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
+        } catch (firstErr) {
+          const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+          if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
+            console.warn(`[brand.reanalyze] LLM JSON parse failed, retrying after 1s...`);
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
+            } catch {
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "Brand extraction failed after retry — please try again",
+              });
+            }
+          } else {
+            throw firstErr;
+          }
+        }
+
+        // P1-2: Validate brandType
+        const validBrandTypesReanalyze = Object.keys(BRAND_WEIGHT_TABLE);
+        if (!validBrandTypesReanalyze.includes(extracted.brandType)) {
+          const invalidValue = extracted.brandType;
+          const closestMatch = validBrandTypesReanalyze.find(vbt =>
+            vbt.toLowerCase().includes(invalidValue.toLowerCase()) ||
+            invalidValue.toLowerCase().includes(vbt.toLowerCase())
+          );
+          // Same rationale as analyze path — closest to table-wide average α/β/γ weights
+          const fallback = closestMatch || "Retail — E-Commerce / DTC Product";
+          console.warn(`[brandType] Invalid value "${invalidValue}" received from LLM — defaulting to "${fallback}"`);
+          (extracted as unknown as Record<string, unknown>).brandType = fallback;
+        }
+
         const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
 
-        await updateBrandProfile(input.id, {
-          archetype: extracted.archetype,
-          brandArchetypeClassification: extracted.brandArchetypeClassification,
-          emotionalPromise: extracted.emotionalPromise,
-          visualLanguage: extracted.visualLanguage,
-          audienceTribe: extracted.audienceTribe,
-          culturalTension: extracted.culturalTension,
-          barthesMyth: extracted.barthesMyth,
-          brandTone: extracted.brandTone,
-          brandType: extracted.brandType,
-          campaignType: extracted.campaignType,
-          weightAlpha: weights.alpha,
-          weightBeta: weights.beta,
-          weightGamma: weights.gamma,
-          weightPriority: weights.priority,
-          // Creator-parity sociological framework fields
-          brandCulturalCapital: extracted.brandCulturalCapital,
-          brandGoffmanStageConsistency: extracted.brandGoffmanStageConsistency,
-          brandDriftSignal: extracted.brandDriftSignal,
-          brandStuartHallDecoding: extracted.brandStuartHallDecoding,
-          brandRogersAdopterStage: extracted.brandRogersAdopterStage,
-          brandTurnerLiminalPhase: extracted.brandTurnerLiminalPhase,
-          brandLifecyclePhase: extracted.brandLifecyclePhase,
-          brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
-          brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
-          ...reviewFields,
-          // Symbol fields: website-derived first, TikTok overrides if available
-          ...symbolFields,
-          // TikTok fields
-          tiktokMetadata: tiktokMetadata as unknown as Record<string, unknown> || undefined,
-          tiktokEngagementRate: tiktokMetadata?.engagementRate || undefined,
-          tiktokAudienceSize: tiktokMetadata?.followerCount || undefined,
-          // TikTok video transcripts — only set when TikTok data was fetched
-          ...(tiktokMetadata?.videoTranscripts && tiktokMetadata.videoTranscripts.length > 0 ? {
-            brandVideoTranscripts: tiktokMetadata.videoTranscripts as unknown as Record<string, unknown>[],
-            brandDecodedSymbols: tiktokMetadata.decodedSymbols as unknown as Record<string, unknown>[],
-            brandRawKeywords: tiktokMetadata.rawKeywords,
-            brandThemeLabels: tiktokMetadata.themeLabels,
-            brandSymbolicVocabulary: tiktokMetadata.symbolicVocabulary,
-          } : {}),
-          // Phase 6: Audience Mention Intelligence
-          ...mentionFieldsReanalyze,
-          aiSummary: extracted.aiSummary,
-          rawAiResponse: extracted as unknown as Record<string, unknown>,
-          updatedAt: new Date(),
+        // V2: reanalyze creates a new observation (append-only)
+        await persistBrandToV2({
+          brandName: existing.brandName,
+          brandUrl: existing.brandUrl ?? undefined,
+          category: extracted.category,
+          extracted,
+          weights,
+          reviewFields,
+          tiktokMetadata,
+          instagramMetadata: instagramMetadataReanalyze,
+          mentionFields: mentionFieldsReanalyze,
+          symbolFields,
+          dataConfidenceLevel: brandDataConfidenceLevel,
+          semanticWordCount: brandSemanticWordCountReanalyze,
+          crawledPagesCount: brandCrawledPagesCountReanalyze,
         });
 
         const updated = await getBrandProfileById(input.id);
         return { profile: updated, extracted, weights };
       }),
 
-    weightTable: publicProcedure.query(() => {
+    weightTable: protectedProcedure.query(() => {
       return Object.entries(BRAND_WEIGHT_TABLE).map(([type, weights]) => ({
         type,
         ...weights,
@@ -699,10 +1259,10 @@ export const appRouter = router({
 
     // ─── Cultural Match Score Routes ─────────────────────────────────────────────────────────────────────────────
   fit: router({
-    calculate: publicProcedure
+    calculate: fitRateLimitedProcedure
       .input(z.object({
-        creatorProfileId: z.number(),
-        brandProfileId: z.number(),
+        creatorProfileId: z.string(),
+        brandProfileId: z.string(),
       }))
       .mutation(async ({ input }) => {
         const creator = await getCreatorProfileById(input.creatorProfileId);
@@ -714,8 +1274,9 @@ export const appRouter = router({
         // Both profiles carry a barthesMyth field extracted by the AI.
         // We compute a heuristic score (0–10) by asking the LLM to compare them.
         // Fallback: 5 (neutral) if either field is missing.
-        let mythAlignmentScore = 5;
-        let tribMatchScore = 5;
+        let mythAlignmentScore: number | null = null;
+        let tribMatchScore: number | null = null;
+        let mythLlmFailed = false;
 
         if (creator.barthesMyth && brand.barthesMyth) {
           try {
@@ -748,6 +1309,7 @@ Brand Vocabulary: ${brandVocab.slice(0, 10).join(", ") || "none"}
 Brand Audience Mentions (TikTok): ${brandMentionKeywords.join(", ") || "none"}`;
             
             const mythResponse = await invokeLLM({
+              purpose: "myth_tension_analysis",
               messages: [
                 {
                   role: "system",
@@ -800,12 +1362,14 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
               },
             });
             const parsed = JSON.parse(mythResponse.choices[0]?.message?.content as string);
-            mythAlignmentScore = Math.min(10, Math.max(0, Number(parsed.mythAlignmentScore) || 5));
-            tribMatchScore = Math.min(10, Math.max(0, Number(parsed.tribMatchScore) || 5));
-          } catch {
-            // Fallback to neutral if LLM call fails
-            mythAlignmentScore = 5;
-            tribMatchScore = 5;
+            mythAlignmentScore = Math.min(10, Math.max(0, Number(parsed.mythAlignmentScore) || 3));
+            tribMatchScore = Math.min(10, Math.max(0, Number(parsed.tribMatchScore) || 3));
+          } catch (err) {
+            // FIX 5: Log clearly and use cautious fallback (3.0) instead of false-neutral (5.0)
+            console.error("[fit.calculate] myth/tribe LLM failed — scores will be defaulted:", err);
+            mythAlignmentScore = null;
+            tribMatchScore = null;
+            mythLlmFailed = true;
           }
         }
 
@@ -847,8 +1411,8 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorNichePosition: creator.creatorNichePosition ?? "Consistent",
           brandArchetype: brand.archetype ?? "The Everyman",
           brandType: brand.brandType ?? "Retail — Local Boutique",
-          mythAlignmentScore,
-          tribMatchScore,
+          mythAlignmentScore: mythAlignmentScore ?? 3.0,
+          tribMatchScore: tribMatchScore ?? 3.0,
           creatorKeywords,
           creatorThemes,
           brandKeywords,
@@ -882,6 +1446,13 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorMusicArtists,
         });
 
+        // FIX 5: Inject radar warning when myth/tribe LLM failed
+        if (mythLlmFailed) {
+          (result.radarWarnings as string[]).push(
+            "Myth/tribe alignment could not be computed \u2014 score may be unreliable"
+          );
+        }
+
         // Calculate performance signals using actual brand + creator data
         const performanceSignals = calculateAllSignals(
           creator,
@@ -899,6 +1470,7 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
         let contentDirections: Array<{ title: string; rationale: string; exampleAngle: string }> = [];
         try {
           const synergyResponse = await invokeLLM({
+            purpose: "cultural_synergy_analysis",
             messages: [
               {
                 role: "system",
@@ -1011,6 +1583,7 @@ Write the following in JSON format:
         let culturalBorrowingSummary: string | null = null;
         try {
           const borrowingResponse = await invokeLLM({
+            purpose: "cultural_borrowing_analysis",
             messages: [
               {
                 role: "system",
@@ -1051,66 +1624,96 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           console.warn("[routers] Cultural borrowing summary generation failed (non-fatal):", err);
         }
 
-        // Save match record
-        await createMatchRecord({
-          creatorProfileId: input.creatorProfileId,
-          brandProfileId: input.brandProfileId,
-          alignmentScoreRaw: result.alignmentScoreRaw,
-          pulseScoreRaw: result.pulseScoreRaw,
-          stabilityScoreRaw: result.stabilityScoreRaw,
-          archetypeMatchScore: result.archetypeMatchScore,
-          mythAlignmentScore: result.mythAlignmentScore,
-          tribMatchScore: result.tribMatchScore,
-          decodingModifier: result.decodingModifier,
-          rogersBaseScore: result.rogersBaseScore,
-          liminalAdjustment: result.liminalAdjustment,
-          goffmanScore: result.goffmanScore,
-          driftScore: result.driftScore,
-          weightAlpha: result.weightAlpha,
-          weightBeta: result.weightBeta,
-          weightGamma: result.weightGamma,
-          caiScore: result.caiScore,
-          caiStatus: result.caiStatus,
-          radarWarnings: result.radarWarnings,
-          narrativeSummary: narrative.narrativeSummary,
-          alignmentNotes: narrative.alignmentNotes as unknown as Record<string, unknown>,
-          // Verified F.I.T. Impressions Score
-          parrScore: result.parrScore,
-          parrLabel: result.parrLabel,
-          parrSignalBreakdown: result.parrSignalBreakdown as unknown as Record<string, unknown>,
-          symbolicOverlapScore: result.symbolicOverlapScore,
-          sharedKeywords: result.sharedKeywords as unknown as string[],
-          sharedThemes: result.sharedThemes as unknown as string[],
-          // QoV — Quality of View
-          qovScore: result.qovScore,
-          // Phase 1.5 Visual Intelligence
-          alignmentNarrative: result.alignmentNarrative || null,
-          culturalVelocity: result.culturalVelocity || null,
-          dataConfidenceLevel: result.dataConfidenceLevel || null,
-          // Synergy Narrative + Content Directions
-          synergyNarrative: synergyNarrative || null,
-          contentDirections: contentDirections.length > 0 ? contentDirections as unknown as Record<string, unknown>[] : null,
-          // Phase 6: Music Overlap + Cultural Borrowing
-          musicOverlap: result.musicOverlap as unknown as Record<string, unknown>,
-          culturalBorrowingSummary: culturalBorrowingSummary || null,
-          // Five Performance Signals (computed from actual brand + creator data)
-          creativeIntegritySignal: performanceSignals.creativeIntegrity.score,
-          creativeIntegrityConfidence: performanceSignals.creativeIntegrity.confidence,
-          performanceConsistencySignal: performanceSignals.performanceConsistency.score,
-          performanceConsistencyConfidence: performanceSignals.performanceConsistency.confidence,
-          communityQualitySignal: performanceSignals.communityQuality.score,
-          communityQualityConfidence: performanceSignals.communityQuality.confidence,
-          audienceReceptivitySignal: performanceSignals.audienceReceptivity.score,
-          audienceReceptivityConfidence: performanceSignals.audienceReceptivity.confidence,
-          brandTrustSignal: performanceSignals.brandTrust.score,
-          brandTrustConfidence: performanceSignals.brandTrust.confidence,
-        });
+        // Save match record — V2 pipeline
+        try {
+          const matchId = await insertMatchScore({
+            creatorSubjectId: input.creatorProfileId,
+            brandSubjectId: input.brandProfileId,
+            fitScore: result.caiScore,
+            fitStatus: result.caiStatus,
+            alignmentScoreRaw: result.alignmentScoreRaw,
+            pulseScoreRaw: result.pulseScoreRaw,
+            stabilityScoreRaw: result.stabilityScoreRaw,
+            parrScore: result.parrScore,
+            parrLabel: result.parrLabel,
+            qovScore: result.qovScore,
+            symbolicOverlapScore: result.symbolicOverlapScore,
+            archetypeMatchScore: result.archetypeMatchScore,
+            mythAlignmentScore: result.mythAlignmentScore,
+            tribMatchScore: result.tribMatchScore,
+            decodingModifier: result.decodingModifier,
+            rogersBaseScore: result.rogersBaseScore,
+            liminalAdjustment: result.liminalAdjustment,
+            goffmanScore: result.goffmanScore,
+            driftScore: result.driftScore,
+            weightAlpha: result.weightAlpha,
+            weightBeta: result.weightBeta,
+            weightGamma: result.weightGamma,
+            culturalVelocity: result.culturalVelocity || undefined,
+            dataConfidenceLevel: result.dataConfidenceLevel || undefined,
+            // Performance signals
+            creativeIntegritySignal: performanceSignals.creativeIntegrity.score,
+            creativeIntegrityConfidence: performanceSignals.creativeIntegrity.confidence,
+            performanceConsistencySignal: performanceSignals.performanceConsistency.score,
+            performanceConsistencyConfidence: performanceSignals.performanceConsistency.confidence,
+            communityQualitySignal: performanceSignals.communityQuality.score,
+            communityQualityConfidence: performanceSignals.communityQuality.confidence,
+            audienceReceptivitySignal: performanceSignals.audienceReceptivity.score,
+            audienceReceptivityConfidence: performanceSignals.audienceReceptivity.confidence,
+            brandTrustSignal: performanceSignals.brandTrust.score,
+            brandTrustConfidence: performanceSignals.brandTrust.confidence,
+            // C5: Wire PARR sub-scores into match persist
+            parrTribeOverlap: result.parrSignalBreakdown.tribeOverlap,
+            parrDecodingAcceptance: result.parrSignalBreakdown.decodingAcceptance,
+            parrArchetypeResonance: result.parrSignalBreakdown.archetypeResonance,
+            parrSymbolicOverlap: result.parrSignalBreakdown.symbolicVocabularyOverlap,
+            parrPersonaConsistency: result.parrSignalBreakdown.personaConsistency,
+            // C5: Wire music overlap + mention modifiers
+            musicOverlapStrength: result.musicOverlap.overlapStrength,
+            mentionSentimentPenalty: result.mentionSentimentPenalty,
+            mentionVocabBoost: result.mentionVocabBoost,
+            // C5: Wire observation IDs for provenance
+            creatorObservationId: (creator as Record<string, unknown>).observationId as string | undefined,
+            brandObservationId: (brand as Record<string, unknown>).observationId as string | undefined,
+          });
 
-        const matches = await listMatchRecords();
-        const saved = matches[0];
+          // Insert narratives (single row with all narrative fields)
+          await insertMatchNarrative(matchId, {
+            narrativeSummary: narrative.narrativeSummary,
+            synergyNarrative: synergyNarrative || undefined,
+            alignmentNarrative: result.alignmentNarrative || undefined,
+            culturalBorrowingSummary: culturalBorrowingSummary || undefined,
+            // C6: Wire narrative detail fields from generateFITNarrative
+            archetypeAnalysis: narrative.alignmentNotes?.archetypeAnalysis || undefined,
+            mythAlignment: narrative.alignmentNotes?.mythAlignment || undefined,
+            audienceOverlap: narrative.alignmentNotes?.audienceOverlap || undefined,
+            culturalMomentum: narrative.alignmentNotes?.culturalMomentum || undefined,
+            identityStability: narrative.alignmentNotes?.identityStability || undefined,
+            recommendation: narrative.alignmentNotes?.recommendation || undefined,
+          });
+
+          // Insert warnings
+          if (result.radarWarnings.length > 0) {
+            await insertMatchWarnings(matchId, result.radarWarnings);
+          }
+
+          // Insert overlaps
+          if (result.sharedKeywords.length > 0 || result.sharedThemes.length > 0) {
+            const overlaps: Array<{ domain: string; value: string }> = [];
+            result.sharedKeywords.forEach((k: string) => overlaps.push({ domain: "keyword", value: k }));
+            result.sharedThemes.forEach((t: string) => overlaps.push({ domain: "theme", value: t }));
+            await insertMatchOverlaps(matchId, overlaps);
+          }
+
+          // Insert content directions
+          if (contentDirections.length > 0) {
+            await insertMatchContentDirections(matchId, contentDirections);
+          }
+        } catch (err) {
+          console.error("[fit.calculate] Match record persist failed (non-fatal):", err);
+        }
 
         return {
-          match: saved,
           creator,
           brand,
           result,
@@ -1119,7 +1722,7 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         };
       }),
 
-    getJobProgress: publicProcedure
+    getJobProgress: protectedProcedure
       .input(z.object({ jobId: z.string() }))
       .query(({ input }) => {
         const job = getJob(input.jobId);
@@ -1134,26 +1737,26 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         };
       }),
 
-    get: publicProcedure
-      .input(z.object({ id: z.number() }))
+    get: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         return getMatchWithProfiles(input.id);
       }),
 
-    list: publicProcedure.query(async () => {
+    list: protectedProcedure.query(async () => {
       return listMatchRecords();
     }),
 
-    delete: publicProcedure
-      .input(z.object({ id: z.number() }))
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteMatchRecord(input.id);
         return { success: true };
       }),
 
-    comparable: publicProcedure
+    comparable: protectedProcedure
       .input(z.object({
-        matchId: z.number(),
+        matchId: z.string(),
         brandType: z.string().optional(),
         brandArchetypeClassification: z.string().optional(),
         creatorArchetype: z.string().optional(),

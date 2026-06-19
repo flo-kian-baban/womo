@@ -1,18 +1,28 @@
-import { Separator } from "@/components/ui/separator";
-import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic, Plus, ExternalLink, AlertTriangle, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import { MapPin, Users, Heart, Play, TrendingUp, Video, Hash, Tag, Film, Mic, Plus, ExternalLink, AlertTriangle, CheckCircle2, Loader2, AlertCircle, Clock, Shield, ChevronDown, ChevronUp, Activity, Cpu, Globe, Gauge, Timer, Zap, Database, DollarSign } from "lucide-react";
 import { MetricTooltip } from "@/components/MetricTooltip";
-import type { CreatorProfile } from "../../../drizzle/schema";
 import TranscriptPanel from "./TranscriptPanel";
 import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import { useState } from "react";
 
+// Flattened creator profile as returned by getCreatorProfileById in db.ts.
+// Uses Record<string, any> base so field access with `as` casts works
+// regardless of which fields the V2 schema exposes directly.
+type CreatorProfile = Record<string, any> & { id: string };
+
 interface CreatorProfileCardProps {
   profile: CreatorProfile;
   compact?: boolean;
   onReanalyze?: () => void;
   isReanalyzing?: boolean;
+  pipelineMetrics?: {
+    totalDurationMs: number;
+    steps: Array<{ step: string; durationMs: number }>;
+    tokens: { inputTokens: number; outputTokens: number; totalTokens: number; llmCalls: number; model: string };
+    transcriptCount: number;
+    videosScraped: number;
+  };
 }
 
 const FIELD_SECTIONS = [
@@ -41,6 +51,7 @@ const FIELD_SECTIONS = [
       { key: "creatorNichePosition", label: "Creator's Niche Position", type: "status" },
       { key: "lifecyclePhase", label: "Lifecycle Phase [PAE]", type: "badge" },
       { key: "turnerLiminalPhase", label: "Liminal Phase Check [Turner]", type: "badge" },
+      { key: "culturalVelocity", label: "Cultural Velocity", type: "status" },
       { key: "barthesNicheMeaning", label: "Meaning Check [Barthes]", type: "quote" },
     ],
   },
@@ -64,6 +75,11 @@ function getStatusColor(key: string, value: string) {
     if (value === "Minor Drift") return "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
     if (value === "Significant Drift") return "text-orange-400 bg-orange-400/10 border-orange-400/30";
     return "text-red-400 bg-red-400/10 border-red-400/30";
+  }
+  if (key === "culturalVelocity") {
+    if (value === "Focusing") return "text-green-400 bg-green-400/10 border-green-400/30";
+    if (value === "Drifting") return "text-orange-400 bg-orange-400/10 border-orange-400/30";
+    return "text-muted-foreground bg-muted/20 border-border/50";
   }
   if (key === "stuartHallDecoding") {
     if (value === "Dominant") return "text-green-400 bg-green-400/10 border-green-400/30";
@@ -261,7 +277,556 @@ function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
   );
 }
 
-export default function CreatorProfileCard({ profile, compact = false, onReanalyze, isReanalyzing = false }: CreatorProfileCardProps) {
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function humanScrapeMethod(m: string | null): string {
+  const map: Record<string, string> = {
+    tiktok_desktop_http: "Direct HTTP",
+    tiktok_mobile_http: "Mobile HTTP",
+    tiktok_playwright: "Playwright browser",
+    tiktok_google_cache: "Google Cache",
+    tiktok_search_xhr: "XHR Search",
+    tiktok_search_html: "HTML Search",
+    instagram_playwright: "Playwright browser",
+    instagram_picuki: "Picuki proxy",
+    instagram_oembed: "oEmbed",
+    youtube_api: "YouTube API",
+    youtube_html: "YouTube HTML",
+    google_maps_api: "Google Maps API",
+    google_search: "Google Search",
+    website_crawl: "Website Crawl",
+    whisper_transcription: "Whisper",
+    manual_entry: "Manual",
+  };
+  return m ? (map[m] ?? m) : "Unknown";
+}
+
+function humanPurpose(p: string): string {
+  const map: Record<string, string> = {
+    creator_extraction: "Cultural Extraction",
+    symbol_decode: "Symbol Decode",
+    brand_symbol_decode: "Brand Symbol Decode",
+    narrative: "Narrative Generation",
+    brand_extraction: "Brand Extraction",
+    fit_calculation: "F.I.T. Calculation",
+    fit_narrative: "F.I.T. Narrative",
+    brand_tiktok_analysis: "Brand TikTok Analysis",
+    niche_classification: "Niche Classification",
+    engagement_quality: "Engagement Quality",
+    cultural_velocity: "Cultural Velocity",
+  };
+  return map[p] ?? p;
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function relativeDate(date: Date | string | null): string {
+  if (!date) return "Unknown";
+  const d = typeof date === "string" ? new Date(date) : date;
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)}KB`;
+  return `${bytes}B`;
+}
+
+// ─── Data Health Bar ──────────────────────────────────────────────────────────
+
+function DataHealthBar({ profile }: { profile: CreatorProfile }) {
+  const confidence = profile.dataConfidenceLevel as string | null;
+  const transcriptCount = profile.transcriptCount ?? 0;
+  const contentItemCount = Array.isArray(profile.discoveredVideoPoolJson) ? (profile.discoveredVideoPoolJson as unknown[]).length : 0;
+  const observedAt = profile.observedAt ?? profile.createdAt;
+
+  const confColors: Record<string, string> = {
+    high: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+    medium: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
+    low: "text-red-400 bg-red-400/10 border-red-400/30",
+  };
+  const confLabels: Record<string, string> = {
+    high: "High", medium: "Medium", low: "Low",
+  };
+  const confKey = confidence ?? "low";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {/* Confidence badge */}
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${confColors[confKey] ?? confColors.low}`}>
+        <Shield className="w-3 h-3" />
+        {confLabels[confKey] ?? "Low"} Confidence
+      </span>
+
+      {/* Transcript count */}
+      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium border ${
+        transcriptCount > 0 ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/30" : "text-muted-foreground bg-secondary/50 border-border/50"
+      }`}>
+        <Mic className="w-2.5 h-2.5" />
+        {transcriptCount} transcript{transcriptCount !== 1 ? "s" : ""}
+      </span>
+
+      {/* Videos captured */}
+      {contentItemCount > 0 && (
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium text-muted-foreground bg-secondary/50 border border-border/50">
+          <Video className="w-2.5 h-2.5" />
+          {contentItemCount} video{contentItemCount !== 1 ? "s" : ""} captured
+        </span>
+      )}
+
+      {/* Analysis date */}
+      {observedAt && (
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium text-muted-foreground bg-secondary/50 border border-border/50">
+          <Clock className="w-2.5 h-2.5" />
+          Analyzed {relativeDate(observedAt)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Video Evidence Table ─────────────────────────────────────────────────────
+
+function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: contentItems, isLoading } = trpc.creator.getContentItems.useQuery(
+    { subjectId: profile.id },
+    { enabled: expanded },
+  );
+
+  const videoCount = contentItems?.length ?? (Array.isArray(profile.discoveredVideoPoolJson) ? (profile.discoveredVideoPoolJson as unknown[]).length : 0);
+  if (videoCount === 0 && !expanded) return null;
+
+  return (
+    <div className="rounded-xl border border-border/50 bg-secondary/20 overflow-hidden">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/30 transition-colors"
+      >
+        <Film className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground flex-1">
+          Video Evidence — {videoCount} video{videoCount !== 1 ? "s" : ""} captured
+        </span>
+        {expanded
+          ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50" />
+          : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50" />
+        }
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/30">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6 text-muted-foreground/50">
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              <span className="text-xs">Loading video data…</span>
+            </div>
+          ) : contentItems && contentItems.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/30 text-muted-foreground/60">
+                    <th className="text-left px-3 py-2 font-medium">Caption</th>
+                    <th className="text-left px-3 py-2 font-medium">Date</th>
+                    <th className="text-right px-3 py-2 font-medium">Views</th>
+                    <th className="text-right px-3 py-2 font-medium">Likes</th>
+                    <th className="text-right px-3 py-2 font-medium">Comments</th>
+                    <th className="text-center px-3 py-2 font-medium">Duration</th>
+                    <th className="text-left px-3 py-2 font-medium">Audio</th>
+                    <th className="text-center px-3 py-2 font-medium">Transcript</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/20">
+                  {[...contentItems].sort((a, b) => {
+                    const tA = a.createTime ? new Date(a.createTime).getTime() : 0;
+                    const tB = b.createTime ? new Date(b.createTime).getTime() : 0;
+                    return tB - tA;
+                  }).map((ci) => (
+                    <tr key={ci.id} className={`hover:bg-secondary/30 transition-colors ${ci.transcriptText ? "border-l-2 border-l-emerald-500/40" : ""}`}>
+                      <td className="px-3 py-2 max-w-[200px]">
+                        <span className="text-foreground/80 truncate block" title={ci.caption ?? ""}>
+                          {ci.caption ? (ci.caption.length > 60 ? ci.caption.slice(0, 60) + "…" : ci.caption) : "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                        {ci.createTime ? new Date(ci.createTime).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right text-foreground/80">{ci.viewCount ? formatNum(ci.viewCount) : "—"}</td>
+                      <td className="px-3 py-2 text-right text-foreground/80">{ci.likeCount ? formatNum(ci.likeCount) : "—"}</td>
+                      <td className="px-3 py-2 text-right text-foreground/80">{ci.commentCount ? formatNum(ci.commentCount) : "—"}</td>
+                      <td className="px-3 py-2 text-center text-muted-foreground">
+                        {ci.videoDuration ? formatDuration(ci.videoDuration) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap max-w-[120px]">
+                        {ci.isOriginalAudio
+                          ? <span className="text-emerald-400">🎵 Original</span>
+                          : ci.musicTitle
+                            ? <span className="truncate block" title={ci.musicTitle}>🎵 {ci.musicTitle.length > 15 ? ci.musicTitle.slice(0, 15) + "…" : ci.musicTitle}</span>
+                            : "—"
+                        }
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {ci.transcriptText ? <span className="text-emerald-400">✅</span> : <span className="text-muted-foreground/40">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground/50">
+              No video data captured for this creator
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Pipeline Metrics Section (self-fetching for library view) ────────────────
+
+function PipelineMetricsSection({ profile, propMetrics }: {
+  profile: CreatorProfile;
+  propMetrics?: CreatorProfileCardProps["pipelineMetrics"];
+}) {
+  // If we have prop metrics (from analyze mutation), use them directly
+  if (propMetrics) return <PipelinePerformance metrics={propMetrics} />;
+
+  // Otherwise, fetch from DB for library view
+  const rawObservedAt = profile.observedAt;
+  const observedAt = rawObservedAt instanceof Date
+    ? rawObservedAt.toISOString()
+    : typeof rawObservedAt === "string" ? rawObservedAt : undefined;
+
+  const { data: tokenData } = trpc.creator.getPipelineMetrics.useQuery(
+    { subjectId: profile.id, observedAt },
+    { enabled: !!profile.id },
+  );
+
+  if (!tokenData || tokenData.llmCalls === 0) return null;
+
+  // Build a partial metrics object — no step timings available from DB,
+  // but we can show tokens/cost which is the key info
+  const metricsFromDb: NonNullable<CreatorProfileCardProps["pipelineMetrics"]> = {
+    totalDurationMs: 0,
+    steps: [],
+    tokens: tokenData,
+    transcriptCount: (profile.transcriptCount as number) ?? 0,
+    videosScraped: 0,
+  };
+
+  return <PipelinePerformance metrics={metricsFromDb} />;
+}
+
+// ─── Pipeline Performance ─────────────────────────────────────────────────────
+
+function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileCardProps["pipelineMetrics"]> }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const formatDuration = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+
+  const formatTokens = (n: number) => {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  };
+
+  // Cost calculation per model (USD per 1M tokens)
+  const MODEL_PRICING: Record<string, { input: number; output: number; label: string }> = {
+    "gemini-2.5-flash": { input: 0.15, output: 0.60, label: "Gemini 2.5 Flash" },
+    "gemini-2.5-pro": { input: 1.25, output: 10.00, label: "Gemini 2.5 Pro" },
+    "gemini-2.0-flash": { input: 0.10, output: 0.40, label: "Gemini 2.0 Flash" },
+    "gemini-1.5-flash": { input: 0.075, output: 0.30, label: "Gemini 1.5 Flash" },
+    "gemini-1.5-pro": { input: 1.25, output: 5.00, label: "Gemini 1.5 Pro" },
+  };
+
+  const modelKey = metrics.tokens.model || "unknown";
+  const pricing = MODEL_PRICING[modelKey] ?? { input: 0, output: 0, label: modelKey };
+  const inputCost = (metrics.tokens.inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (metrics.tokens.outputTokens / 1_000_000) * pricing.output;
+  const totalCost = inputCost + outputCost;
+
+  const formatCost = (c: number) => {
+    if (c < 0.001) return "<$0.001";
+    if (c < 0.01) return `$${c.toFixed(4)}`;
+    return `$${c.toFixed(3)}`;
+  };
+
+  const maxStepMs = Math.max(...metrics.steps.map(s => s.durationMs), 1);
+
+  return (
+    <div className="mt-6 pt-5 border-t border-border/40">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between group hover:opacity-80 transition-opacity"
+      >
+        <div className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-violet-400" />
+          <span className="text-sm font-semibold text-foreground/80">Pipeline Performance</span>
+          {metrics.totalDurationMs > 0 && (
+            <span className="text-xs text-muted-foreground/60 font-mono">
+              {formatDuration(metrics.totalDurationMs)}
+            </span>
+          )}
+          {metrics.tokens.totalTokens > 0 && (
+            <span className="text-xs text-emerald-400/70 font-mono">
+              · {formatCost(totalCost)}
+            </span>
+          )}
+        </div>
+        {expanded ? (
+          <ChevronUp className="w-4 h-4 text-muted-foreground/50" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-muted-foreground/50" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-4 space-y-4 animate-fade-in-up">
+          {/* Summary cards */}
+          <div className={`grid gap-2.5 ${metrics.totalDurationMs > 0 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            {metrics.totalDurationMs > 0 && (
+            <div className="rounded-lg bg-violet-500/5 border border-violet-500/10 p-3 text-center">
+              <Timer className="w-3.5 h-3.5 text-violet-400 mx-auto mb-1" />
+              <div className="text-base font-bold text-violet-300 font-mono">{formatDuration(metrics.totalDurationMs)}</div>
+              <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Total Time</div>
+            </div>
+            )}
+            <div className="rounded-lg bg-amber-500/5 border border-amber-500/10 p-3 text-center">
+              <Zap className="w-3.5 h-3.5 text-amber-400 mx-auto mb-1" />
+              <div className="text-base font-bold text-amber-300 font-mono">{formatTokens(metrics.tokens.totalTokens)}</div>
+              <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Tokens Used</div>
+            </div>
+            <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/10 p-3 text-center">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1" />
+              <div className="text-base font-bold text-emerald-300 font-mono">{formatCost(totalCost)}</div>
+              <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Est. Cost</div>
+            </div>
+            <div className="rounded-lg bg-blue-500/5 border border-blue-500/10 p-3 text-center">
+              <Cpu className="w-3.5 h-3.5 text-blue-400 mx-auto mb-1" />
+              <div className="text-base font-bold text-blue-300 font-mono">{metrics.tokens.llmCalls}</div>
+              <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">LLM Calls</div>
+            </div>
+            <div className="rounded-lg bg-rose-500/5 border border-rose-500/10 p-3 text-center">
+              <Database className="w-3.5 h-3.5 text-rose-400 mx-auto mb-1" />
+              <div className="text-base font-bold text-rose-300 font-mono">{metrics.transcriptCount}</div>
+              <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Transcripts</div>
+            </div>
+          </div>
+
+          {/* Step timeline (only when steps are available — analyze page only) */}
+          {metrics.steps.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Step Breakdown</h4>
+            {metrics.steps.map((step, i) => {
+              const pct = Math.max((step.durationMs / maxStepMs) * 100, 3);
+              const stepColors = [
+                { bar: "bg-violet-500/40", text: "text-violet-400" },
+                { bar: "bg-amber-500/40", text: "text-amber-400" },
+                { bar: "bg-emerald-500/40", text: "text-emerald-400" },
+              ];
+              const color = stepColors[i % stepColors.length];
+              return (
+                <div key={step.step} className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground w-40 shrink-0 truncate">{step.step}</span>
+                  <div className="flex-1 h-5 rounded-md bg-card/50 overflow-hidden relative">
+                    <div
+                      className={`h-full rounded-md ${color.bar} transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className={`text-xs font-mono font-medium w-14 text-right ${color.text}`}>
+                    {formatDuration(step.durationMs)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          )}
+
+          {/* Token + cost detail */}
+          {metrics.tokens.totalTokens > 0 && (
+            <div className="pt-3 border-t border-border/20 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold">Model</span>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/15 text-blue-300">
+                  {pricing.label}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground/40">Input:</span>
+                  <span className="text-blue-400">{formatTokens(metrics.tokens.inputTokens)}</span>
+                  <span className="text-muted-foreground/30">×</span>
+                  <span className="text-muted-foreground/50">${pricing.input}/1M</span>
+                  <span className="text-muted-foreground/30">=</span>
+                  <span className="text-blue-300">{formatCost(inputCost)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground/40">Output:</span>
+                  <span className="text-amber-400">{formatTokens(metrics.tokens.outputTokens)}</span>
+                  <span className="text-muted-foreground/30">×</span>
+                  <span className="text-muted-foreground/50">${pricing.output}/1M</span>
+                  <span className="text-muted-foreground/30">=</span>
+                  <span className="text-amber-300">{formatCost(outputCost)}</span>
+                </div>
+              </div>
+              {metrics.videosScraped > 0 && (
+                <div className="text-xs text-muted-foreground/40">
+                  {metrics.videosScraped} videos scraped
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Provenance Footer ────────────────────────────────────────────────────────
+
+function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
+  const [expanded, setExpanded] = useState(false);
+  const observationId = profile.observationId as string | undefined;
+  const { data: provenance, isLoading } = trpc.creator.getProvenance.useQuery(
+    { observationId: observationId ?? "" },
+    { enabled: expanded && !!observationId },
+  );
+
+  if (!observationId) return null;
+
+  return (
+    <div className="rounded-xl border border-border/30 bg-muted/10 overflow-hidden">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-secondary/20 transition-colors"
+      >
+        <Cpu className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground/50 flex-1">
+          Analysis Provenance
+        </span>
+        {expanded
+          ? <ChevronUp className="w-3 h-3 text-muted-foreground/30" />
+          : <ChevronDown className="w-3 h-3 text-muted-foreground/30" />
+        }
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/20 px-4 py-3 space-y-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4 text-muted-foreground/50">
+              <Loader2 className="w-3 h-3 animate-spin mr-2" />
+              <span className="text-[10px]">Loading provenance…</span>
+            </div>
+          ) : provenance ? (
+            <>
+              {/* Analysis date */}
+              {provenance.analyzedAt && (
+                <div className="text-[10px] text-muted-foreground/60">
+                  Analysis run: {new Date(provenance.analyzedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                </div>
+              )}
+
+              {/* LLM Calls */}
+              {provenance.llmCalls.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Activity className="w-3 h-3 text-violet-400/60" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-400/60">
+                      LLM Calls ({provenance.llmCalls.length})
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/40 ml-auto">
+                      {formatNum(provenance.llmCalls.reduce((s, c) => s + (c.inputTokens ?? 0) + (c.outputTokens ?? 0), 0))} tokens total
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {provenance.llmCalls.map((call, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20"
+                        title={`${call.purpose} • ${call.model} • ${(call.inputTokens ?? 0) + (call.outputTokens ?? 0)} tokens • ${call.durationMs ?? 0}ms`}
+                      >
+                        {humanPurpose(call.purpose)}
+                        <span className="text-violet-400/50">·</span>
+                        <span className="text-violet-400/60">{call.model?.split("/").pop()?.split("-").slice(0, 2).join("-") ?? call.model}</span>
+                        <span className="text-violet-400/50">·</span>
+                        <span className="text-violet-400/60">{call.durationMs ? `${(call.durationMs / 1000).toFixed(1)}s` : "—"}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scrape Events */}
+              {provenance.scrapeEvents.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Globe className="w-3 h-3 text-sky-400/60" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-400/60">
+                      Scrape Events ({provenance.scrapeEvents.length})
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/40 ml-auto">
+                      {(provenance.scrapeEvents.reduce((s, e) => s + (e.durationMs ?? 0), 0) / 1000).toFixed(1)}s total
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {provenance.scrapeEvents.map((evt, i) => {
+                      const failed = evt.silentFailureDetected || (evt.httpStatus !== null && evt.httpStatus >= 400);
+                      return (
+                        <span
+                          key={i}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium border ${
+                            failed
+                              ? "bg-red-500/10 text-red-300 border-red-500/20"
+                              : "bg-sky-500/10 text-sky-300 border-sky-500/20"
+                          }`}
+                          title={evt.urlRequested ?? ""}
+                        >
+                          {failed ? "❌" : "✅"}
+                          {humanScrapeMethod(evt.scrapeMethod)}
+                          <span className="opacity-50">·</span>
+                          <span className="opacity-60">{evt.httpStatus ?? "—"}</span>
+                          <span className="opacity-50">·</span>
+                          <span className="opacity-60">{evt.durationMs ? `${evt.durationMs}ms` : "—"}</span>
+                          {evt.responseSizeBytes ? (
+                            <>
+                              <span className="opacity-50">·</span>
+                              <span className="opacity-60">{formatBytes(evt.responseSizeBytes)}</span>
+                            </>
+                          ) : null}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-[10px] text-muted-foreground/40 text-center py-2">No provenance data available</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function CreatorProfileCard({ profile, compact = false, onReanalyze, isReanalyzing = false, pipelineMetrics }: CreatorProfileCardProps) {
   const themes = (profile.contentThemeLabels as string[] | null) ?? [];
   const hashtags = (profile.topHashtags as string[] | null) ?? [];
   const keywords = (profile.rawKeywords as string[] | null) ?? [];
@@ -271,8 +836,8 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
   const hasKeywordData = themes.length > 0 || hashtags.length > 0 || keywords.length > 0;
   const transcriptCount = profile.transcriptCount ?? 0;
 
-  // Data confidence level based on transcripts + video titles
-  const dataConfidence = transcriptCount >= 3 ? 'transcript' : videoTitles.length >= 10 ? 'high' : videoTitles.length >= 3 ? 'medium' : 'low';
+  // Data confidence from DB (use stored value, not client-computed)
+  const dataConfidence = (profile.dataConfidenceLevel as string | null) ?? (transcriptCount >= 3 ? 'high' : videoTitles.length >= 3 ? 'medium' : 'low');
 
   return (
     <div className="space-y-6">
@@ -325,27 +890,38 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
         )}
       </div>
 
+      {/* ── Data Health Bar ───────────────────────────────────────────────── */}
+      {!compact && <DataHealthBar profile={profile} />}
+
       {/* ── Transcript Badge ─────────────────────────────────────────────── */}
-      {transcriptCount > 0 && (
+      {dataConfidence === 'high' && transcriptCount > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10">
           <Mic className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
           <span className="text-xs font-medium text-emerald-400">
-            Analyzed from {transcriptCount} video transcript{transcriptCount !== 1 ? 's' : ''} — spoken content used as primary evidence
+            ✅ High confidence — analyzed from {transcriptCount} video transcript{transcriptCount !== 1 ? 's' : ''}
           </span>
         </div>
       )}
-      {transcriptCount === 0 && videoTitles.length > 0 && (
+      {dataConfidence === 'medium' && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10">
           <Film className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
           <span className="text-xs font-medium text-yellow-400">
-            No transcripts available — analysis based on {videoTitles.length} video titles and profile metadata
+            ⚠️ Medium confidence — {transcriptCount > 0 ? `${transcriptCount} transcript${transcriptCount !== 1 ? 's' : ''}, ` : ''}{videoTitles.length} video{videoTitles.length !== 1 ? 's' : ''} analyzed
+          </span>
+        </div>
+      )}
+      {dataConfidence === 'low' && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+          <span className="text-xs font-medium text-red-400">
+            ⚠️ Low confidence — limited transcript data available
           </span>
         </div>
       )}
 
       {/* ── Stats Bar ───────────────────────────────────────────────────────── */}
       {hasStats && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {(profile.followerCount ?? 0) > 0 && (
             <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center relative">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
@@ -416,7 +992,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             </div>
           )}
           {(profile.engagementRate ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center col-span-2 sm:col-span-1">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <TrendingUp className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Engagement</span>
@@ -515,8 +1091,8 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
         </div>
       )}
 
-      {/* ── Supplemental Video Pool ─────────────────────────────────────────── */}
-      {!compact && <SupplementalVideoPanel profile={profile} />}
+      {/* ── Video Evidence Table ──────────────────────────────────────────── */}
+      {!compact && <VideoEvidenceTable profile={profile} />}
 
       {/* ── AI Summary ──────────────────────────────────────────────────────── */}
       {profile.aiSummary && (
@@ -578,6 +1154,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
           ))}
         </>
       )}
+
+      {/* ── Pipeline Performance ──────────────────────────────────────────── */}
+      {!compact && <PipelineMetricsSection profile={profile} propMetrics={pipelineMetrics} />}
+
+      {/* ── Provenance Footer ──────────────────────────────────────────────── */}
+      {!compact && <ProvenanceFooter profile={profile} />}
     </div>
   );
 }

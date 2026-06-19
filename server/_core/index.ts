@@ -36,6 +36,25 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+
+  // Pre-flight browser check — verify Playwright Chromium is available
+  try {
+    const { ensureBrowser } = await import("../scraping/browserClient");
+    const browser = await ensureBrowser();
+    if (browser) {
+      console.log("✓ Playwright browser ready");
+    }
+  } catch (err) {
+    console.warn(
+      "⚠ Playwright browser check failed — scraping features will not work.",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // Health check — lightweight, unauthenticated endpoint for load balancers
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
   // tRPC API
   app.use(
     "/api/trpc",

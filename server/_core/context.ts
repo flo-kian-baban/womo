@@ -1,28 +1,29 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
+import { parse as parseCookieHeader } from "cookie";
+
+const PILOT_COOKIE_NAME = "womo_pilot_auth";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
-  user: User | null;
+  /** True when the pilot PIN cookie is present and valid */
+  authenticated: boolean;
 };
 
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  let user: User | null = null;
+  const cookieHeader = opts.req.headers.cookie;
+  let authenticated = false;
 
-  try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
-    user = null;
+  if (cookieHeader) {
+    const cookies = parseCookieHeader(cookieHeader);
+    authenticated = cookies[PILOT_COOKIE_NAME] === "authenticated";
   }
 
   return {
     req: opts.req,
     res: opts.res,
-    user,
+    authenticated,
   };
 }

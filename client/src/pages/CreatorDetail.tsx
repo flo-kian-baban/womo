@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 
 export default function CreatorDetail() {
   const { id } = useParams<{ id: string }>();
-  const creatorId = parseInt(id ?? "0", 10);
+  const creatorId = id ?? "";
   const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   const { data, isLoading, error, refetch } = trpc.creator.get.useQuery(

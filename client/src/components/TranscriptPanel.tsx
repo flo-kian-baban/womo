@@ -14,7 +14,9 @@ import {
   Mic, ChevronDown, ChevronUp, MapPin, Utensils, Sparkles, User,
   Fingerprint, TrendingUp, Users, Heart, BookOpen,
 } from "lucide-react";
-import type { CreatorProfile } from "../../../drizzle/schema";
+
+// Flattened creator profile as returned by getCreatorProfileById in db.ts.
+type CreatorProfile = Record<string, any> & { id: string };
 
 // ─── Decoded Symbols Types ────────────────────────────────────────────────────
 
@@ -172,7 +174,7 @@ function buildEntityMap(profile: CreatorProfile): {
 
   const claims: string[] = [];
   if (profile.nicheTopicNode) {
-    profile.nicheTopicNode.split(/[\s,/]+/).forEach(w => {
+    (profile.nicheTopicNode as string).split(/[\s,/]+/).forEach((w: string) => {
       if (w.length >= 4 && !stopwords.has(w.toLowerCase())) claims.push(w);
     });
   }
@@ -182,13 +184,13 @@ function buildEntityMap(profile: CreatorProfile): {
     });
   }
   if (profile.barthesMyth) {
-    const mythWords = profile.barthesMyth.split(/\s+/).filter(w => w.length >= 5 && !stopwords.has(w.toLowerCase()));
+    const mythWords = (profile.barthesMyth as string).split(/\s+/).filter((w: string) => w.length >= 5 && !stopwords.has(w.toLowerCase()));
     claims.push(...mythWords.slice(0, 6));
   }
 
   const persons: string[] = [];
   if (profile.displayName) {
-    const nameParts = profile.displayName.split(/\s+/).filter(p => p.length >= 3 && /^[A-Z]/.test(p));
+    const nameParts = (profile.displayName as string).split(/\s+/).filter((p: string) => p.length >= 3 && /^[A-Z]/.test(p));
     persons.push(...nameParts);
   }
 
@@ -391,12 +393,28 @@ interface TranscriptPanelProps {
 
 export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
   const transcriptCount = profile.transcriptCount ?? 0;
-  const transcriptExcerpts = profile.transcriptExcerpts ?? "";
+  const transcriptExcerpts = profile.transcriptExcerpts;
 
-  const entries = useMemo(
-    () => (transcriptExcerpts ? parseExcerpts(transcriptExcerpts, profile) : []),
-    [transcriptExcerpts, profile]
-  );
+  const entries = useMemo(() => {
+    if (!transcriptExcerpts) return [];
+    // New format: array of objects from content_items
+    if (Array.isArray(transcriptExcerpts)) {
+      const entityMap = buildEntityMap(profile);
+      return (transcriptExcerpts as Array<{ videoId?: string; caption?: string; transcriptText: string }>)
+        .filter(t => t.transcriptText)
+        .map((t, i) => {
+          const label = t.caption
+            ? (t.caption.length > 50 ? t.caption.slice(0, 50) + "…" : t.caption)
+            : `Video ${i + 1}`;
+          return { label, text: t.transcriptText, segments: tokenize(t.transcriptText, entityMap) };
+        });
+    }
+    // Legacy format: concatenated string
+    if (typeof transcriptExcerpts === "string") {
+      return parseExcerpts(transcriptExcerpts, profile);
+    }
+    return [];
+  }, [transcriptExcerpts, profile]);
 
   const decodedSymbols = useMemo((): DecodedSymbols | null => {
     const raw = profile.decodedSymbols as DecodedSymbols | null;

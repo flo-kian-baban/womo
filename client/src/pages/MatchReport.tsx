@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useParams, Link } from "wouter";
 import {
   ArrowLeft, FileJson, AlertTriangle, CheckCircle2, XCircle, AlertCircle,
@@ -11,7 +12,7 @@ import { toast } from "sonner";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
 import BrandProfileCard from "@/components/BrandProfileCard";
 import { MetricTooltip } from "@/components/MetricTooltip";
-import { ObjectiveSignalsPanel, type ObjectiveSignal } from "@/components/ObjectiveSignalsPanel";
+
 import { SignalPanel } from "@/components/SignalPanel";
 import { LocalResonanceSection } from "@/components/LocalResonanceSection";
 
@@ -95,7 +96,6 @@ function PARRMeter({ score, label }: { score: number; label: string }) {
 
 function SemanticWordCloud({ keywords, maxCount = 10 }: { keywords: string[]; maxCount?: number }) {
   const words = keywords.slice(0, maxCount);
-  if (words.length === 0) return null;
 
   // Assign visual weight based on position (first = largest)
   const sizes = [
@@ -106,12 +106,18 @@ function SemanticWordCloud({ keywords, maxCount = 10 }: { keywords: string[]; ma
   const opacities = ["opacity-100", "opacity-90", "opacity-85", "opacity-80", "opacity-75",
     "opacity-70", "opacity-65", "opacity-60", "opacity-55", "opacity-50"];
 
-  // Shuffle for visual variety while keeping weight
-  const shuffled = words.map((w, i) => ({ word: w, size: sizes[i] ?? "text-xs", opacity: opacities[i] ?? "opacity-50" }));
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
-  }
+  // Memoize shuffle so layout doesn't jump on every re-render
+  const shuffled = useMemo(() => {
+    const items = words.map((w, i) => ({ word: w, size: sizes[i] ?? "text-xs", opacity: opacities[i] ?? "opacity-50" }));
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j]!, items[i]!];
+    }
+    return items;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keywords.join(",")]);
+
+  if (words.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-2 items-baseline justify-center py-2">
@@ -186,7 +192,7 @@ function SignalBreakdownBar({ label, value, max = 10 }: { label: string; value: 
 
 export default function MatchReport() {
   const params = useParams<{ id: string }>();
-  const id = parseInt(params.id ?? "0");
+  const id = params.id ?? "";
 
   const { data, isLoading, error } = trpc.fit.get.useQuery({ id }, { enabled: !!id });
 
@@ -285,15 +291,17 @@ export default function MatchReport() {
     : "text-red-400";
 
   // Phase 6: Music Overlap + Cultural Exchange
-  const musicOverlap = (match as Record<string, unknown>).musicOverlap as {
+  const musicOverlap = match.musicOverlap as {
     sharedTitles: string[];
     sharedArtists: string[];
     overlapStrength: "strong" | "moderate" | "none";
   } | null;
   const culturalBorrowingSummary = (match as Record<string, unknown>).culturalBorrowingSummary as string | null;
   const mentionSentiment = brand?.mentionSentiment as string | null;
-  const mentionHashtagCloud = (brand?.mentionHashtagCloud as string[] | null) ?? [];
-  const mentionMusicSignals = (brand?.mentionMusicSignals as string[] | null) ?? [];
+  const rawHashtags = brand?.mentionHashtagCloud;
+  const mentionHashtagCloud = Array.isArray(rawHashtags) ? rawHashtags : (typeof rawHashtags === "string" && rawHashtags ? [rawHashtags] : []);
+  const rawMusic = brand?.mentionMusicSignals;
+  const mentionMusicSignals = Array.isArray(rawMusic) ? rawMusic : (typeof rawMusic === "string" && rawMusic ? [rawMusic] : []);
   const mentionTotalCount = brand?.mentionTotalCount ?? 0;
 
   const signalLabels: Record<string, string> = {
@@ -356,6 +364,21 @@ export default function MatchReport() {
                 {match.caiStatus === "Proceed with Caution" && "🟡 "}
                 {match.caiStatus === "Do Not Proceed" && "🔴 "}
                 {match.caiStatus}
+              </div>
+              {/* Data Confidence Badge — P1-3 */}
+              <div className={`flex items-center gap-1.5 mt-1.5 text-[10px] font-medium ${
+                dataConfidenceLevel === "high" ? "text-green-400" :
+                dataConfidenceLevel === "medium" ? "text-yellow-400" :
+                "text-red-400"
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  dataConfidenceLevel === "high" ? "bg-green-400" :
+                  dataConfidenceLevel === "medium" ? "bg-yellow-400" :
+                  "bg-red-400"
+                }`} />
+                {dataConfidenceLevel === "high" ? "High Confidence" :
+                 dataConfidenceLevel === "medium" ? "Medium Confidence" :
+                 "Low Confidence — interpret with caution"}
               </div>
             </div>
           </div>
@@ -460,17 +483,73 @@ export default function MatchReport() {
         )}
       </div>
 
-      {/* ─── Data Confidence Warning ──────────────────────────────────────── */}
-      {dataConfidenceLevel === "low" && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-yellow-400/30 bg-yellow-400/5 mb-6 animate-fade-in-up">
-          <ShieldAlert className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <div className="text-sm font-semibold text-yellow-400">Low Data Confidence</div>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              The 6-3-3 longitudinal sample or brand semantic crawl returned below-threshold data for this match.
-              Scores are directionally valid but may be refined with a re-analysis once more content is available.
-            </p>
+      {/* ─── Score Component Breakdown — P1-4 ──────────────────────────── */}
+      {(match.archetypeMatchScore != null || match.mythAlignmentScore != null) && (
+        <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-2">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="w-4 h-4 text-primary/70" />
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+              Score Component Breakdown
+            </div>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+            {[
+              { label: "Archetype Match Score", value: Number(match.archetypeMatchScore ?? 0), max: 10, group: "α" },
+              { label: "Myth Alignment Score", value: Number(match.mythAlignmentScore ?? 0), max: 10, group: "α" },
+              { label: "Tribe Match Score", value: Number(match.tribMatchScore ?? 0), max: 10, group: "α" },
+              { label: "Decoding Modifier", value: Number(match.decodingModifier ?? 0), max: 1, group: "α", signed: true },
+              { label: "Rogers Base Score", value: Number(match.rogersBaseScore ?? 0), max: 10, group: "β" },
+              { label: "Liminal Adjustment", value: Number(match.liminalAdjustment ?? 0), max: 1, group: "β" },
+              { label: "Goffman Stage Score", value: Number(match.goffmanScore ?? 0), max: 10, group: "γ" },
+              { label: "Drift Score", value: Number(match.driftScore ?? 0), max: 10, group: "γ" },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center gap-3">
+                <span className="text-[10px] font-mono text-muted-foreground/50 w-4 flex-shrink-0">{item.group}</span>
+                <span className="text-xs text-muted-foreground w-40 flex-shrink-0 truncate">{item.label}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-border overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary/60"
+                    style={{ width: `${Math.max(0, (item.value / item.max) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-mono text-primary w-10 text-right">
+                  {(item as any).signed && item.value > 0 ? "+" : ""}{item.value.toFixed(item.max === 1 ? 2 : 1)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {/* Mention Modifiers — P3-4 */}
+          {(Number(match.mentionSentimentPenalty ?? 0) !== 0 || Number(match.mentionVocabBoost ?? 0) !== 0) && (
+            <div className="mt-4 pt-4 border-t border-border/30">
+              <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-2">
+                Score Modifiers Applied
+              </div>
+              <div className="space-y-2">
+                {Number(match.mentionSentimentPenalty ?? 0) !== 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground w-44 flex-shrink-0">Audience Sentiment Adjustment</span>
+                    <span className={`text-xs font-mono w-12 text-right ${
+                      Number(match.mentionSentimentPenalty) < 0 ? "text-red-400" : "text-green-400"
+                    }`}>
+                      {Number(match.mentionSentimentPenalty) > 0 ? "+" : ""}{Number(match.mentionSentimentPenalty).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/50">Negative brand sentiment in creator content reduces partnership viability</span>
+                  </div>
+                )}
+                {Number(match.mentionVocabBoost ?? 0) !== 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground w-44 flex-shrink-0">Shared Vocabulary Bonus</span>
+                    <span className={`text-xs font-mono w-12 text-right ${
+                      Number(match.mentionVocabBoost) < 0 ? "text-red-400" : "text-green-400"
+                    }`}>
+                      {Number(match.mentionVocabBoost) > 0 ? "+" : ""}{Number(match.mentionVocabBoost).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/50">Vocabulary overlap between creator and brand audience amplifies cultural fit</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -695,55 +774,22 @@ export default function MatchReport() {
         )}
       </div>
 
-      {/* ─── Objective Signals ────────────────────────────────────────────────── */}
-      {match && (
-        <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-4">
-          <ObjectiveSignalsPanel
-            signals={[
-              {
-                category: "Music",
-                metric: "Sound Profile",
-                value: "Trending + Original Audio Mix",
-                interpretation: "Creator balances trending sounds with original content — signals cultural participation",
-                confidence: "high",
-              },
-              {
-                category: "Remix",
-                metric: "Duet/Stitch Rate",
-                value: "12-18% of videos",
-                interpretation: "Moderate participatory culture — audience engagement in creator's format",
-                confidence: "high",
-              },
-              {
-                category: "Growth",
-                metric: "Follower Velocity",
-                value: "Steady growth (3-6% monthly)",
-                interpretation: "Stable niche position — audience trust and consistent delivery",
-                confidence: "medium",
-              },
-              {
-                category: "Collaboration",
-                metric: "Peer Network",
-                value: "Food/Lifestyle creators (consistent)",
-                interpretation: "Symbolic peer group alignment validates archetype consistency",
-                confidence: "high",
-              },
-            ]}
-            creatorHandle={creator?.handle || "Unknown"}
-            brandName={brand?.brandName || "Unknown"}
-          />
-        </div>
-      )}
-
       {/* ─── Local Resonance ────────────────────────────────────────────────────── */}
       {match && (
         <div className="fit-card rounded-xl p-6 mb-6 animate-fade-in-up animate-stagger-4">
           <LocalResonanceSection
-            creatorRegion={creator?.location || "Global"}
-            creatorLanguage="English"
-            brandRegion={brand?.category || "Multi-region"}
-            brandLanguage="English"
-            geoMatch={creator?.location && brand?.category ? "regional" : "cultural"}
+            creatorRegion={creator?.primaryRegion || creator?.location || "Global"}
+            brandRegion={(brand as Record<string, unknown>)?.primaryRegion as string ?? "Global"}
+            geoMatch={
+              (() => {
+                const cRegion = creator?.primaryRegion || creator?.location;
+                const bRegion = (brand as Record<string, unknown>)?.primaryRegion as string | undefined;
+                if (cRegion && bRegion && cRegion.toLowerCase() === bRegion.toLowerCase()) return "regional";
+                if (cRegion && bRegion) return "cross-regional";
+                if (!cRegion && !bRegion) return "global";
+                return "cross-regional";
+              })()
+            }
             matchStrength={match.caiScore ? Math.min(100, Math.round(match.caiScore * 10)) : 50}
           />
         </div>
@@ -874,8 +920,8 @@ export default function MatchReport() {
                 {
                   trait: "Style",
                   tooltip: "Visual language and aesthetic signals",
-                  creatorVal: (() => { const t = (creator?.recurringThemes as string[] | null) ?? []; return t.length > 0 ? t.slice(0, 3).join(", ") : "—"; })(),
-                  brandVal: (() => { const vl = (brand?.visualLanguage as string[] | null) ?? []; return vl.length > 0 ? vl.join(", ") : "—"; })(),
+                  creatorVal: (() => { const raw = creator?.recurringThemes; const t = Array.isArray(raw) ? raw : (typeof raw === "string" && raw ? [raw] : []); return t.length > 0 ? t.slice(0, 3).join(", ") : "—"; })(),
+                  brandVal: (() => { const raw = brand?.visualLanguage; const vl = Array.isArray(raw) ? raw : (typeof raw === "string" && raw ? [raw] : []); return vl.length > 0 ? vl.join(", ") : "—"; })(),
                   type: "text" as const,
                 },
                 {
