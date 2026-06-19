@@ -81,7 +81,7 @@ export default function Login() {
   const isLoading = loginMutation.isPending;
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-[100dvh] flex items-center justify-center px-4 relative overflow-hidden">
       {/* Background */}
       <div
         className="absolute inset-0"
