@@ -17,7 +17,7 @@ import Login from "./pages/Login";
 import { useAuth } from "./_core/hooks/useAuth";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, error } = useAuth();
 
   if (loading) {
     return (
@@ -33,7 +33,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated) {
+  // If auth check failed (API error) or not authenticated, go to login
+  if (!isAuthenticated || error) {
     return <Redirect to="/login" />;
   }
 

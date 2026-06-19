@@ -5,8 +5,10 @@ export function useAuth() {
   const utils = trpc.useUtils();
 
   const checkQuery = trpc.auth.check.useQuery(undefined, {
-    retry: false,
+    retry: 1,
+    retryDelay: 1000,
     refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 
   const logoutMutation = trpc.auth.logout.useMutation({
