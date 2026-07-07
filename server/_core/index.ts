@@ -58,24 +58,12 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
 
-  // Pre-flight browser check — verify Playwright Chromium is available
-  try {
-    const { ensureBrowser } = await import("../scraping/browserClient");
-    const browser = await ensureBrowser();
-    if (browser) {
-      console.log("✓ Playwright browser ready");
-    }
-  } catch (err) {
-    console.warn(
-      "⚠ Playwright browser check failed — scraping features will not work.",
-      err instanceof Error ? err.message : err,
-    );
-  }
-
-  // Health check — lightweight, unauthenticated endpoint for load balancers
+  // Health check — registered early so Railway/load-balancer probes respond
+  // immediately, before any slow initialisation (e.g. Playwright browser).
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -84,6 +72,7 @@ async function startServer() {
       createContext,
     })
   );
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -100,6 +89,21 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+
+    // Pre-flight browser check — runs in background AFTER the server is
+    // already listening so health checks are never blocked by Playwright init.
+    import("../scraping/browserClient").then(({ ensureBrowser }) =>
+      ensureBrowser()
+        .then(browser => {
+          if (browser) console.log("✓ Playwright browser ready");
+        })
+        .catch(err => {
+          console.warn(
+            "⚠ Playwright browser check failed — scraping features will not work.",
+            err instanceof Error ? err.message : err,
+          );
+        })
+    );
   });
 }
 
