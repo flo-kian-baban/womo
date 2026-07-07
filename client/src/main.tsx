@@ -39,10 +39,16 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+// In production (Vercel), set VITE_API_URL to the Railway backend URL,
+// e.g. https://your-backend.up.railway.app
+// In development, requests go to the same origin (localhost).
+const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
+const trpcUrl = `${apiBase}/api/trpc`;
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: trpcUrl,
       transformer: superjson,
       fetch(input, init) {
         return globalThis.fetch(input, {

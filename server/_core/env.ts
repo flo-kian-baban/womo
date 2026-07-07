@@ -38,6 +38,10 @@ export const ENV = {
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
 
+  // ─── CORS — comma-separated list of allowed origins ───────────────────────
+  // In Railway, set to your Vercel URL: https://your-app.vercel.app
+  allowedOrigins: process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://localhost:3001",
+
   // ─── Deprecated: Forge keys (kept for non-data modules) ───────────────────
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",

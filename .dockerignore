@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.local
+.env.*.local
+dist
+.git
+*.log
+client/node_modules
+.manus-logs
+test_*.mjs
+test-*.mjs
