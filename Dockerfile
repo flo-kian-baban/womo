@@ -77,20 +77,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.4.1 --activate
-
 # Set Playwright browser install path BEFORE installing browsers
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV NODE_ENV=production
 
-# Copy only production dependencies
-COPY package.json pnpm-lock.yaml ./
-COPY patches/ ./patches/
-RUN pnpm install --frozen-lockfile --prod
+# ─── node_modules strategy ────────────────────────────────────────────────────
+# The server bundle is built with esbuild --packages=external, which means ALL
+# node_module imports (including devDeps like 'vite') remain as bare specifiers
+# in dist/index.js and must be resolvable at runtime.  Copying the full
+# node_modules from the builder stage (which installed everything) is the
+# correct pattern for this setup — no --prod reinstall needed.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/patches ./patches
+
+# package.json is required so Node.js picks up "type": "module"
+COPY package.json ./
 
 # Install Playwright Chromium binary into /ms-playwright
-RUN npx playwright install chromium
-RUN npx playwright install-deps chromium
+# Uses the playwright CLI already present in node_modules
+RUN node_modules/.bin/playwright install chromium
 
 # Copy built artifacts from builder
 COPY --from=builder /app/dist ./dist
