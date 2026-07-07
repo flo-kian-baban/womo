@@ -147,6 +147,10 @@ export async function ensureBrowser(): Promise<Browser> {
         "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
         "--disable-infobars",
+        // Required in headless Docker to prevent GPU initialization crashes
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--single-process",
       ],
     });
 

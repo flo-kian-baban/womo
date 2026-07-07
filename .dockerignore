@@ -7,5 +7,16 @@ dist
 *.log
 client/node_modules
 .manus-logs
+# Test scripts — not needed in production image
 test_*.mjs
 test-*.mjs
+test_*.ts
+# Documentation — not needed in production image
+*.md
+references/
+# Dev config files
+.gitignore
+.env.example
+.prettierrc
+.prettierignore
+todo.md

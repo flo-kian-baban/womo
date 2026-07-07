@@ -47,7 +47,41 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 };
 
+// ─── Development warnings ──────────────────────────────────────────────────
+
 // Warn if using default PIN
 if (!process.env.PIN_CODE) {
   console.warn("[auth] ⚠️  Using default PIN code — set PIN_CODE env var for production");
+}
+
+// ─── Production required-variable check ───────────────────────────────────────
+// Crash fast on startup if critical env vars are missing in production.
+// This prevents a misconfigured deployment from passing the health check
+// and then failing mysteriously on the first real request.
+
+const REQUIRED_IN_PRODUCTION = [
+  "PIN_CODE",
+  "GEMINI_API_KEY",
+  "DATABASE_URL",
+  "JWT_SECRET",
+  "ALLOWED_ORIGINS",
+] as const;
+
+if (process.env.NODE_ENV === "production") {
+  const missing = REQUIRED_IN_PRODUCTION.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(
+      `[env] FATAL: Missing required env vars in production: ${missing.join(", ")}\n` +
+      `[env] Set these in Railway's Variables panel before deploying.`
+    );
+    process.exit(1);
+  }
+  // Warn if ALLOWED_ORIGINS still contains localhost in production
+  if (ENV.allowedOrigins.includes("localhost")) {
+    console.warn(
+      "[env] ⚠️  ALLOWED_ORIGINS contains 'localhost' in production — " +
+      "cross-origin requests from your Vercel frontend will be blocked. " +
+      "Set ALLOWED_ORIGINS to your Vercel deployment URL."
+    );
+  }
 }

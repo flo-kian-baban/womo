@@ -45,6 +45,18 @@ queryClient.getMutationCache().subscribe(event => {
 const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
 const trpcUrl = `${apiBase}/api/trpc`;
 
+// Warn in production if VITE_API_URL is not set.
+// Without it, all tRPC calls target the Vercel origin which has no /api/trpc
+// route — every API call will fail silently with a 404.
+if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+  console.warn(
+    "[trpc] VITE_API_URL is not set in production. " +
+    "All API calls will go to the Vercel origin and fail. " +
+    "Set VITE_API_URL to your Railway backend URL in Vercel project settings " +
+    "(e.g. https://your-app.up.railway.app)."
+  );
+}
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({

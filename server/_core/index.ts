@@ -1,7 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
-import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -10,28 +9,16 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { ENV } from "./env";
 
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
-  });
-}
-
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
-}
-
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
+  // ─── Trust proxy ────────────────────────────────────────────────────────────
+  // Required for Railway (and any reverse-proxy deployment):
+  //  - Makes req.protocol return "https" correctly
+  //  - Makes req.ip resolve to the real client IP (not the proxy)
+  //  - Required for secure cookie detection and rate-limit IP extraction
+  app.set("trust proxy", 1);
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   // Reads ALLOWED_ORIGINS env var (comma-separated). In Railway, set this to
@@ -80,30 +67,54 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
-
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
-  }
+  // ─── Port binding ────────────────────────────────────────────────────────────
+  // Bind directly to process.env.PORT — no port scanning.
+  // Railway injects PORT automatically; Dockerfile EXPOSE 8080 matches.
+  // If the port is unavailable, fail immediately so Railway restarts the container.
+  const port = parseInt(process.env.PORT || "3000", 10);
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    console.log(`[server] Listening on port ${port}`);
 
     // Pre-flight browser check — runs in background AFTER the server is
     // already listening so health checks are never blocked by Playwright init.
     import("../scraping/browserClient").then(({ ensureBrowser }) =>
       ensureBrowser()
-        .then(browser => {
-          if (browser) console.log("✓ Playwright browser ready");
-        })
+        .then(() => console.log("[startup] Playwright browser ready"))
         .catch(err => {
           console.warn(
-            "⚠ Playwright browser check failed — scraping features will not work.",
+            "[startup] Playwright browser check failed — scraping features will not work.",
             err instanceof Error ? err.message : err,
           );
         })
     );
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    console.error("[server] Failed to bind port:", err.message);
+    process.exit(1);
+  });
+
+  // ─── Graceful shutdown on SIGTERM ────────────────────────────────────────────
+  // Railway sends SIGTERM before killing a container during deploys/restarts.
+  // This allows in-flight requests to complete and the browser pool to close cleanly.
+  process.on("SIGTERM", () => {
+    console.log("[server] SIGTERM received — shutting down gracefully");
+    server.close(async () => {
+      try {
+        const { shutdown } = await import("../scraping/browserClient");
+        await shutdown();
+        console.log("[server] Shutdown complete");
+      } catch {
+        // ignore shutdown errors
+      }
+      process.exit(0);
+    });
+    // Force-kill after 10s if graceful shutdown hangs
+    setTimeout(() => {
+      console.error("[server] Shutdown timeout — force exiting");
+      process.exit(1);
+    }, 10_000);
   });
 }
 

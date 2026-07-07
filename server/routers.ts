@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHmac } from "crypto";
 import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -30,6 +31,14 @@ import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTi
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
 import type { DecodedSymbols } from "./symbolDecoder";
+import pLimit from "p-limit";
+
+// ─── Concurrency limiter ─────────────────────────────────────────────────────
+// Limits simultaneous full creator/brand analyses to 2.
+// Each analysis holds Playwright browser contexts + LLM API slots.
+// Without this, 3+ concurrent requests can exhaust the browser pool (max 5 contexts)
+// and cause context eviction mid-analysis.
+const analysisConcurrencyLimit = pLimit(2);
 
 // ─── V2 Pipeline Helpers ─────────────────────────────────────────────────────
 
@@ -444,6 +453,19 @@ function computeEngagementTierLocal(followers: number | undefined | null): strin
   return "mega";
 }
 
+// ─── Auth Cookie Helpers ────────────────────────────────────────────────────
+
+/**
+ * Returns an HMAC-SHA256 signature of "womo_pilot_auth" using JWT_SECRET.
+ * The cookie is set to this value on login and compared against it on every
+ * authenticated request. Anyone who does not know JWT_SECRET cannot forge it.
+ */
+function signedCookieValue(secret: string): string {
+  return createHmac("sha256", secret)
+    .update("womo_pilot_auth")
+    .digest("hex");
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -451,11 +473,14 @@ export const appRouter = router({
       .input(z.object({ pin: z.string().min(1) }))
       .mutation(({ input, ctx }) => {
         if (input.pin === ENV.pinCode) {
-          ctx.res.cookie("womo_pilot_auth", "authenticated", {
+          // Set an HMAC-signed cookie value — cannot be forged without JWT_SECRET.
+          // sameSite: "none" + secure: true is required for cross-origin deployments
+          // (Vercel frontend → Railway backend on different domains).
+          ctx.res.cookie("womo_pilot_auth", signedCookieValue(ENV.cookieSecret), {
             httpOnly: true,
             path: "/",
-            sameSite: "lax",
-            secure: ctx.req.protocol === "https" || ctx.req.headers["x-forwarded-proto"] === "https",
+            sameSite: "none",
+            secure: true,
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
           });
           return { success: true as const };
@@ -463,7 +488,13 @@ export const appRouter = router({
         return { success: false as const, error: "Invalid PIN" };
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
-      ctx.res.clearCookie("womo_pilot_auth", { path: "/" });
+      // Must pass same sameSite/secure options when clearing, otherwise browsers
+      // with strict security won't treat it as the same cookie.
+      ctx.res.clearCookie("womo_pilot_auth", {
+        path: "/",
+        sameSite: "none",
+        secure: true,
+      });
       return { success: true } as const;
     }),
     check: publicProcedure.query(({ ctx }) => {
@@ -524,7 +555,9 @@ export const appRouter = router({
           ), ANALYSIS_TIMEOUT_MS)
         );
 
-        const { research, extracted } = await Promise.race([analysisPromise, timeoutPromise]);
+        const { research, extracted } = await analysisConcurrencyLimit(() =>
+          Promise.race([analysisPromise, timeoutPromise])
+        );
 
         // Step 1: Gather real evidence from the platform before AI analysis
         let evidenceSummary: string | undefined;
@@ -807,7 +840,7 @@ export const appRouter = router({
 
     bulkAnalyze: bulkRateLimitedProcedure
       .input(z.object({
-        handles: z.array(z.string().min(1)),
+        handles: z.array(z.string().min(1)).max(10, "Bulk analysis is limited to 10 handles per request"),
         platform: z.enum(["TikTok", "Instagram"]),
       }))
       .mutation(async ({ input }) => {
@@ -859,7 +892,9 @@ export const appRouter = router({
               
               const bulkSubjectId = "subjectId" in bulkPersistResult ? bulkPersistResult.subjectId : "unknown";
               updateJobResult(job.jobId, i, { creatorId: bulkSubjectId });
-              updateJobProgress(job.jobId, { completed: job.progress.completed + 1 });
+              // Use loop index i + 1 as completed count — job.progress is a stale
+              // snapshot from job creation time and does not reflect live progress.
+              updateJobProgress(job.jobId, { completed: i + 1 });
             } catch (err) {
               recordJobError(job.jobId, i, input.handles[i], String(err));
             }

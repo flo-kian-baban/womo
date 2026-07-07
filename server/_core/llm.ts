@@ -324,23 +324,50 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.geminiApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  // ─── Request with 429 retry ─────────────────────────────────────────────────
+  // Gemini rate-limit responses (429) are retried with exponential backoff.
+  // All other non-OK responses are thrown immediately.
+  const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+  let response: Response | null = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    response = await fetch(resolveApiUrl(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${ENV.geminiApiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 429) {
+      if (attempt < RETRY_DELAYS_MS.length) {
+        const delayMs = RETRY_DELAYS_MS[attempt]!;
+        console.warn(
+          `[llm] Rate limited (429) — retry ${attempt + 1}/${RETRY_DELAYS_MS.length} in ${delayMs / 1000}s` +
+          (purpose ? ` (purpose: ${purpose})` : "")
+        );
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+      // All retries exhausted
+      throw new Error(
+        "Gemini API rate limit exceeded. Please try again in a few minutes."
+      );
+    }
+
+    // Not a 429 — break the retry loop (success or other error)
+    break;
+  }
+
+  if (!response!.ok) {
+    const errorText = await response!.text();
     throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+      `LLM invoke failed: ${response!.status} ${response!.statusText} – ${errorText}`
     );
   }
 
-  const result = (await response.json()) as InvokeResult;
+  const result = (await response!.json()) as InvokeResult;
   const durationMs = Date.now() - startTime;
 
   // Fire-and-forget LLM invocation logging
