@@ -2,8 +2,5 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist/public",
   "framework": "vite",
-  "installCommand": "pnpm install",
-  "rewrites": [
-    { "source": "/api/trpc/:path*", "destination": "/api/trpc" }
-  ]
+  "installCommand": "pnpm install"
 }
