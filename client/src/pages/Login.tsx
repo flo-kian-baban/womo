@@ -1,226 +1,232 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useLocation } from "wouter";
-import { Shield, Loader2, ArrowRight } from "lucide-react";
+import { ShieldCheck, KeyRound, Eye, EyeOff, Loader2, ArrowRight, AlertCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 
 export default function Login() {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [shake, setShake] = useState(false);
+  const [reveal, setReveal] = useState(false);
   const [, setLocation] = useLocation();
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const utils = trpc.useUtils();
+
+  const failFeedback = (message: string) => {
+    setError(message);
+    setPin("");
+    setShake(true);
+    // Return focus so the operator can immediately retry.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
       if (data.success) {
+        // Preserve the existing auth flow exactly: prime the cached session
+        // and redirect home. AuthGate reads auth.check from this cache.
         utils.auth.check.setData(undefined, { authenticated: true });
         setLocation("/");
       } else {
-        setError(data.error ?? "Invalid PIN");
-        setPin("");
-        inputRefs.current[0]?.focus();
+        failFeedback(data.error ?? "Invalid access code");
       }
     },
-    onError: () => {
-      setError("Unable to connect. Try again.");
-      setPin("");
-      inputRefs.current[0]?.focus();
+    onError: (err) => {
+      // The login procedure is rate-limited (5 attempts / 15 min per IP).
+      if (err.data?.code === "TOO_MANY_REQUESTS") {
+        failFeedback("Too many attempts — wait 15 minutes.");
+      } else {
+        failFeedback("Unable to connect. Try again.");
+      }
     },
   });
 
-  useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
-
-  const handleDigitChange = (index: number, value: string) => {
-    if (!/^\d?$/.test(value)) return;
-
-    const newPin = pin.split("");
-    newPin[index] = value;
-    const joined = newPin.join("").slice(0, 4);
-    setPin(joined);
-    setError("");
-
-    // Move to next input
-    if (value && index < 3) {
-      inputRefs.current[index + 1]?.focus();
-    }
-
-    // Auto-submit on 4th digit
-    if (joined.length === 4 && index === 3) {
-      loginMutation.mutate({ pin: joined });
-    }
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !pin[index] && index > 0) {
-      const newPin = pin.split("");
-      newPin[index - 1] = "";
-      setPin(newPin.join(""));
-      inputRefs.current[index - 1]?.focus();
-    }
-    if (e.key === "Enter" && pin.length === 4) {
-      loginMutation.mutate({ pin });
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 4);
-    if (pasted.length > 0) {
-      setPin(pasted);
-      const lastIndex = Math.min(pasted.length - 1, 3);
-      inputRefs.current[lastIndex]?.focus();
-      if (pasted.length === 4) {
-        loginMutation.mutate({ pin: pasted });
-      }
-    }
-  };
-
   const isLoading = loginMutation.isPending;
+  const canSubmit = !isLoading && pin.length > 0;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    loginMutation.mutate({ pin });
+  };
 
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center px-4 relative overflow-hidden">
-      {/* Background */}
+    // NOTE: index.css sets a global `.flex { min-height: 0 }` (unlayered CSS that
+    // overrides the `min-h-[100dvh]` utility), so the full viewport height is
+    // applied inline to keep the card vertically centered.
+    <div
+      className="flex items-center justify-center px-4 relative overflow-hidden"
+      style={{ minHeight: "100dvh" }}
+    >
+      {/* Scoped animations — entrance + error shake, both gated behind
+          prefers-reduced-motion so reduced-motion users get a static, legible UI. */}
+      <style>{`
+        .womo-card { opacity: 1; }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes womo-rise {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes womo-shake {
+            10%, 90% { transform: translateX(-1px); }
+            20%, 80% { transform: translateX(2px); }
+            30%, 50%, 70% { transform: translateX(-5px); }
+            40%, 60% { transform: translateX(5px); }
+          }
+          .womo-card  { animation: womo-rise 0.5s cubic-bezier(0.23, 1, 0.32, 1) both; }
+          .womo-shake { animation: womo-shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+        }
+      `}</style>
+
+      {/* Background — brand radial wash on near-black (static). */}
       <div
         className="absolute inset-0"
         style={{
-          background: "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 80% 100%, rgba(56,189,248,0.06) 0%, transparent 50%), #030712",
+          background:
+            "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99,102,241,0.14) 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 80% 100%, rgba(56,189,248,0.07) 0%, transparent 50%), #030712",
         }}
       />
-
-      {/* Subtle grid pattern */}
+      {/* Subtle static grid. */}
       <div
         className="absolute inset-0 opacity-[0.03]"
         style={{
-          backgroundImage: "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
           backgroundSize: "64px 64px",
         }}
       />
 
-      <div className="w-full max-w-[360px] relative z-10">
-        {/* Logo + Branding */}
-        <div className="flex flex-col items-center mb-12">
+      <div className="womo-card w-full max-w-[380px] relative z-10">
+        {/* Brand */}
+        <div className="flex flex-col items-center mb-10">
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 relative"
-            style={{
-              background: "linear-gradient(135deg, #6366F1 0%, #818cf8 50%, #38BDF8 100%)",
-              boxShadow: "0 12px 40px rgba(99, 102, 241, 0.35), 0 4px 16px rgba(56, 189, 248, 0.2)",
-            }}
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 connex-glow"
+            style={{ background: "linear-gradient(135deg, #6366F1 0%, #818cf8 50%, #38BDF8 100%)" }}
           >
-            <Shield className="w-8 h-8 text-white" strokeWidth={2} />
-            {/* Pulse ring */}
-            <div
-              className="absolute inset-0 rounded-2xl animate-ping"
-              style={{
-                background: "linear-gradient(135deg, #6366F1, #38BDF8)",
-                opacity: 0.15,
-                animationDuration: "3s",
-              }}
-            />
+            <ShieldCheck className="w-8 h-8 text-white" strokeWidth={2} />
           </div>
-          <h1 className="text-3xl font-black tracking-tight gold-text">Womo</h1>
-          <p className="text-xs font-semibold tracking-[0.25em] uppercase mt-2 text-[#475569]">
+          <h1 className="text-3xl font-black tracking-tight gold-text">WOMO</h1>
+          <p className="text-[11px] font-semibold tracking-[0.25em] uppercase mt-2 text-[#475569]">
             Cultural Intelligence
           </p>
         </div>
 
-        {/* PIN Card */}
+        {/* Access card */}
         <div
           className="rounded-3xl p-8 relative"
           style={{
             background: "linear-gradient(145deg, rgba(15,23,42,0.8) 0%, rgba(10,15,30,0.9) 100%)",
             border: "1px solid rgba(99, 102, 241, 0.12)",
             backdropFilter: "blur(40px)",
+            WebkitBackdropFilter: "blur(40px)",
             boxShadow: "0 24px 80px rgba(0,0,0,0.4), 0 0 1px rgba(99,102,241,0.2) inset",
           }}
         >
-          {/* Header */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-7">
             <h2 className="text-lg font-bold text-white mb-1">Welcome back</h2>
-            <p className="text-sm text-[#64748b]">Enter your 4-digit access code</p>
+            <p className="text-sm text-[#64748b]">Enter your access code to continue</p>
           </div>
 
-          {/* PIN Input Boxes */}
-          <div className="flex justify-center gap-3 mb-6" onPaste={handlePaste}>
-            {[0, 1, 2, 3].map((i) => (
-              <input
-                key={i}
-                ref={(el) => { inputRefs.current[i] = el; }}
-                type="password"
-                inputMode="numeric"
-                maxLength={1}
-                value={pin[i] ?? ""}
-                onChange={(e) => handleDigitChange(i, e.target.value)}
-                onKeyDown={(e) => handleKeyDown(i, e)}
-                disabled={isLoading}
-                autoComplete="off"
-                className="w-14 h-16 text-center text-2xl font-bold rounded-xl
-                  bg-[#0a0e1a] border-2 text-white
-                  focus:outline-none transition-all duration-200
-                  disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{
-                  borderColor: pin[i]
-                    ? "rgba(99, 102, 241, 0.6)"
-                    : error
-                      ? "rgba(239, 68, 68, 0.4)"
-                      : "rgba(30, 41, 59, 0.8)",
-                  boxShadow: pin[i]
-                    ? "0 0 20px rgba(99, 102, 241, 0.15), 0 0 4px rgba(99, 102, 241, 0.1) inset"
-                    : "none",
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div
-              className="mb-5 py-2.5 px-4 rounded-xl text-center"
-              style={{
-                background: "rgba(239, 68, 68, 0.08)",
-                border: "1px solid rgba(239, 68, 68, 0.15)",
-              }}
-            >
-              <p className="text-sm text-red-400 font-medium">{error}</p>
-            </div>
-          )}
-
-          {/* Submit */}
-          <button
-            onClick={() => pin.length === 4 && loginMutation.mutate({ pin })}
-            disabled={isLoading || pin.length < 4}
-            className="w-full py-4 rounded-xl text-sm font-bold text-white
-              transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed
-              active:scale-[0.98] cursor-pointer group"
-            style={{
-              background: pin.length === 4 && !isLoading
-                ? "linear-gradient(135deg, #6366F1 0%, #4F46E5 50%, #6366F1 100%)"
-                : "rgba(30, 41, 59, 0.4)",
-              boxShadow: pin.length === 4 && !isLoading
-                ? "0 8px 32px rgba(99, 102, 241, 0.3), 0 2px 8px rgba(99, 102, 241, 0.2)"
-                : "none",
-              backgroundSize: "200% 100%",
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
             }}
           >
-            {isLoading ? (
-              <span className="flex items-center justify-center gap-2.5">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Verifying…
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                Continue
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-              </span>
+            <label
+              htmlFor="access-code"
+              className="block text-[11px] font-bold tracking-[0.18em] uppercase text-[#64748b] mb-2.5"
+            >
+              Access code
+            </label>
+
+            {/* Length-agnostic, alphanumeric password field. No per-digit boxes,
+                no maxLength, no numeric filter. */}
+            <div
+              onAnimationEnd={() => setShake(false)}
+              className={cn(
+                "relative flex items-center rounded-xl bg-[#0a0e1a] transition-all duration-200 border",
+                error ? "border-destructive/50" : "border-[#1e293b]",
+                "focus-within:border-primary/70 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.10),0_0_28px_rgba(99,102,241,0.14)]",
+                shake && "womo-shake",
+              )}
+            >
+              <KeyRound className="ml-4 w-[18px] h-[18px] text-[#475569] flex-shrink-0" strokeWidth={2} />
+              <input
+                ref={inputRef}
+                id="access-code"
+                name="pin"
+                type={reveal ? "text" : "password"}
+                autoComplete="current-password"
+                autoFocus
+                spellCheck={false}
+                aria-invalid={!!error}
+                aria-describedby={error ? "access-error" : undefined}
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value);
+                  if (error) setError("");
+                }}
+                placeholder="Enter access code"
+                disabled={isLoading}
+                className="flex-1 min-w-0 bg-transparent px-3 py-4 text-base text-white tracking-wide placeholder:text-[#475569] focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+              />
+              <button
+                type="button"
+                onClick={() => setReveal((v) => !v)}
+                aria-label={reveal ? "Hide access code" : "Show access code"}
+                aria-pressed={reveal}
+                className="mr-2.5 p-1.5 rounded-lg text-[#475569] hover:text-[#94a3b8] transition-colors focus:outline-none focus-visible:text-[#94a3b8]"
+              >
+                {reveal ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div
+                id="access-error"
+                role="alert"
+                className="mt-4 flex items-center gap-2 py-2.5 px-3.5 rounded-xl bg-destructive/[0.08] border border-destructive/20"
+              >
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" strokeWidth={2} />
+                <p className="text-sm text-red-400 font-medium">{error}</p>
+              </div>
             )}
-          </button>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-xl text-sm font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
+              style={{
+                background: canSubmit
+                  ? "linear-gradient(135deg, #6366F1 0%, #4F46E5 50%, #38BDF8 100%)"
+                  : "rgba(30,41,59,0.4)",
+                boxShadow: canSubmit
+                  ? "0 8px 32px rgba(99,102,241,0.3), 0 2px 8px rgba(56,189,248,0.15)"
+                  : "none",
+              }}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Verifying…
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
         </div>
 
         {/* Footer */}
         <p className="text-center text-[11px] text-[#334155] mt-8 font-medium tracking-wide">
-          Internal pilot access only · Womo v1.0
+          Internal pilot access only · WOMO v1.0
         </p>
       </div>
     </div>
