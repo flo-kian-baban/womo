@@ -2840,6 +2840,17 @@ export async function researchCreator(
       transcriptCount: mergedTranscripts.length,
       transcriptExcerpts: mergedExcerpts,
       evidenceSummary: `${tiktok.evidenceSummary}\n\n--- YOUTUBE EVIDENCE ---\n${youtube.evidenceSummary}`,
+      // Preserve fields that were previously dropped in the Multi merge. TikTok is
+      // primary; fall back to YouTube. Field-merge only — no scoring/extraction change.
+      followingCount: tiktok.followingCount ?? youtube.followingCount,
+      decodedSymbols: tiktok.decodedSymbols ?? youtube.decodedSymbols,
+      longitudinalSample: tiktok.longitudinalSample ?? youtube.longitudinalSample,
+      culturalVelocity: tiktok.culturalVelocity ?? youtube.culturalVelocity,
+      dataConfidenceLevel: tiktok.dataConfidenceLevel ?? youtube.dataConfidenceLevel,
+      discoveredVideoPool: [
+        ...(tiktok.discoveredVideoPool ?? []),
+        ...(youtube.discoveredVideoPool ?? []),
+      ],
     };
     return merged;
   }
