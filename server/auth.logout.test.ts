@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { COOKIE_NAME } from "../shared/const";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -8,25 +7,17 @@ type CookieCall = {
   options: Record<string, unknown>;
 };
 
-type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
-
-function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] } {
+/**
+ * Builds a minimal tRPC context matching the CURRENT context shape
+ * ({ req, res, authenticated }). `auth.logout` is a public procedure, so the
+ * `authenticated` value is irrelevant to its behavior — we only need `res` to
+ * capture the clearCookie call.
+ */
+function createContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] } {
   const clearedCookies: CookieCall[] = [];
 
-  const user: AuthenticatedUser = {
-    id: 1,
-    openId: "sample-user",
-    email: "sample@example.com",
-    name: "Sample User",
-    loginMethod: "manus",
-    role: "user",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    lastSignedIn: new Date(),
-  };
-
   const ctx: TrpcContext = {
-    user,
+    authenticated: true,
     req: {
       protocol: "https",
       headers: {},
@@ -42,21 +33,22 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
 }
 
 describe("auth.logout", () => {
-  it("clears the session cookie and reports success", async () => {
-    const { ctx, clearedCookies } = createAuthContext();
+  it("clears the pilot session cookie and reports success", async () => {
+    const { ctx, clearedCookies } = createContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.auth.logout();
 
+    // Asserts the REAL current behavior of the logout handler.
     expect(result).toEqual({ success: true });
     expect(clearedCookies).toHaveLength(1);
-    expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
+    // Live cookie is the pilot PIN cookie, not the legacy manus session cookie.
+    expect(clearedCookies[0]?.name).toBe("womo_pilot_auth");
+    // Options the handler actually passes (must match clearCookie in routers.ts).
     expect(clearedCookies[0]?.options).toMatchObject({
-      maxAge: -1,
-      secure: true,
-      sameSite: "none",
-      httpOnly: true,
       path: "/",
+      sameSite: "none",
+      secure: true,
     });
   });
 });

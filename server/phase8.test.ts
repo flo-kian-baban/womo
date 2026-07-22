@@ -4,10 +4,13 @@ import {
   calculateCommunityQualitySignal,
   calculateBrandTrustSignal,
 } from "./performanceSignals";
-import type { CreatorProfile, BrandProfile } from "../drizzle/schema";
 
+// NOTE: performanceSignals accepts loose `Record<string, any> & {…}` profile
+// shapes (see performanceSignals.ts), NOT the drizzle schema row types. These
+// fixtures are therefore plain literals that only need to carry the fields the
+// signal functions actually read.
 describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => {
-  const mockCreator: CreatorProfile = {
+  const mockCreator = {
     id: "creator-1",
     platform: "YouTube",
     handle: "@testcreator",
@@ -37,9 +40,9 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     goffmanStageConsistency: "Consistent",
     driftSignal: "Zero Change",
     culturalCapital: "Produce",
-    parasocialBondStrength: 8,
+    parasocialBondStrength: 4.5,
     audienceTribe: "Intellectuals",
-    audienceRelationshipType: "Mentorship",
+    audienceRelationshipType: "Mentor",
     lifecyclePhase: "Maturity",
     niche: "Education",
     primaryRegion: "North America",
@@ -50,7 +53,7 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     tiktokMetadata: null,
   };
 
-  const mockBrand: BrandProfile = {
+  const mockBrand = {
     id: "brand-1",
     brandName: "Test Brand",
     website: "https://testbrand.com",
@@ -61,6 +64,7 @@ describe("Phase 8: Enhanced Brand Data Extraction & Performance Signals", () => 
     visualLanguage: "Warm colors",
     audienceTribe: "Everyday people",
     tiktokAudienceSize: 50000,
+    tiktokEngagementRate: null,
     overallRating: 4.5,
     totalReviews: 200,
     brandRawKeywords: ["affordable", "accessible", "practical"],

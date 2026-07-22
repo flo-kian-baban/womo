@@ -49,12 +49,12 @@ describe("webResearch evidence summary", () => {
     const filePath = path.resolve(__dirname, "webResearch.ts");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Verify the transcript-first pipeline functions exist
-    expect(source).toContain("fetchTikTokVideoTranscript");
+    // Verify the transcript-first pipeline functions exist (current identifiers)
+    expect(source).toContain("fetchVideoTranscriptMultiPath");
     expect(source).toContain("fetchTikTokTranscripts");
     expect(source).toContain("WEBVTT");
-    // Verify TikTok search is used to collect video IDs
-    expect(source).toContain("TikTok/search_tiktok_video_general");
+    // Verify the first-party TikTok search scraper is used to collect video IDs
+    expect(source).toContain("searchTikTokVideos");
     // Verify YouTube pipeline is separate (no YouTube fallback in TikTok flow)
     expect(source).toContain("fetchYouTubeTranscripts");
   });
