@@ -4,7 +4,7 @@ import { trpc } from "@/lib/trpc";
 
 const FEATURE_CARDS = [
   {
-    href: "/analyze/influencer",
+    href: "/analyze/creator",
     icon: Users,
     label: "Analyze Creator",
     description: "Extract a complete cultural profile from any TikTok or YouTube handle using AI and the F.I.T. framework.",
