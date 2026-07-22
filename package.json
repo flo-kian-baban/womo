@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "db:push": "echo 'BLOCKED: this DB is Supabase-migration-managed. Do NOT run drizzle-kit against it (there is no __drizzle_migrations ledger, so drizzle would try to recreate every object). Make schema changes via a Supabase migration (apply_migration), then mirror them into drizzle/schema.ts for types. See docs/STORAGE_MODEL.md. To override knowingly against a NON-production database: pnpm run db:push:UNSAFE' && exit 1",
+    "db:push:UNSAFE": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",

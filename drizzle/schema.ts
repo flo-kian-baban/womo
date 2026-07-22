@@ -1,4 +1,12 @@
 /**
+ * ⚠️  TYPES ONLY — this DB is Supabase-migration-managed. Do NOT run drizzle-kit
+ *     (migrate / push / generate) against production; there is no
+ *     __drizzle_migrations ledger, so drizzle would try to recreate every object.
+ *     Make schema changes via a Supabase migration (apply_migration), then mirror
+ *     them here for types. See docs/STORAGE_MODEL.md.
+ */
+
+/**
  * WOMO Schema V2 — PostgreSQL / Drizzle ORM
  *
  * 20-table normalized schema replacing the previous 4-table MySQL schema.
