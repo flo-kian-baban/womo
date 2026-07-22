@@ -1,227 +1,193 @@
 /**
- * Phase 6 Tests: Audience-Mention Intelligence & Cultural Exchange Report
+ * Phase 6 regression baseline — exercises the REAL fitEngine, not local copies.
  *
- * Tests cover:
- * 1. Music overlap detection logic
- * 2. Negative sentiment radar warning trigger
- * 3. Mention sentiment classification
- * 4. Temporal weighting logic
- * 5. Cultural borrowing summary generation (mocked)
+ * This suite locks in CURRENT behavior (a regression baseline), asserting only
+ * invariants / tier boundaries / directions as the code defines them — never
+ * specific magic score numbers. fitEngine is frozen; if a change moves any of
+ * these, that is a deliberate behavior change to review, not a test to "fix".
+ *
+ * Covers the three real Phase 6 behaviors that the previous suite tested via
+ * diverging inline copies:
+ *   1. Music overlap tiers        → runFullFITCalculation().musicOverlap
+ *   2. Mention sentiment modifier → runFullFITCalculation().mentionSentimentPenalty
+ *   3. Negative-sentiment warning → evaluateRadarWarnings()
+ *
+ * Note: the previous suite also had 3 "temporal weighting" tests. fitEngine has
+ * NO temporal-weighting code path (grep-verified: temporal weighting lives only
+ * in brandTikTokAnalysis.ts, a separate scraping-time module). Those tests
+ * asserted logic fitEngine does not contain and have been removed.
  */
 
 import { describe, it, expect } from "vitest";
+import { runFullFITCalculation, evaluateRadarWarnings } from "./fitEngine";
+import type { FullFITCalculationInput, RadarWarningInputs } from "./fitEngine";
 
-// ─── Helpers extracted from fitEngine / brandTikTokAnalysis ──────────────────
-
-/**
- * Compute music overlap between creator and brand mention music signals.
- * Mirrors the logic in fitEngine.ts runFullFITCalculation.
- */
-function computeMusicOverlap(
-  creatorTitles: string[],
-  creatorArtists: string[],
-  brandTitles: string[],
-  brandArtists: string[]
-): { sharedTitles: string[]; sharedArtists: string[]; overlapStrength: "strong" | "moderate" | "none" } {
-  const normalize = (s: string) => s.toLowerCase().trim();
-  const creatorTitleSet = new Set(creatorTitles.map(normalize));
-  const creatorArtistSet = new Set(creatorArtists.map(normalize));
-  const sharedTitles = brandTitles.filter(t => creatorTitleSet.has(normalize(t)));
-  const sharedArtists = brandArtists.filter(a => creatorArtistSet.has(normalize(a)));
-  const overlapStrength: "strong" | "moderate" | "none" =
-    sharedArtists.length >= 2 || sharedTitles.length >= 3
-      ? "strong"
-      : sharedArtists.length >= 1 || sharedTitles.length >= 1
-      ? "moderate"
-      : "none";
-  return { sharedTitles, sharedArtists, overlapStrength };
+// Minimal valid input; the fields under test are added per-case. Values are
+// neutral, valid enum members chosen so the base case triggers no unrelated
+// behavior. Music/sentiment logic is independent of archetype/weights.
+function baseInput(): FullFITCalculationInput {
+  return {
+    creatorArchetype: "The Sage",
+    goffmanStageConsistency: "Consistent",
+    driftSignal: "Zero Change",
+    stuartHallDecoding: "Dominant",
+    rogersAdopterStage: "Early Majority",
+    turnerLiminalPhase: "Liminal",
+    creatorNichePosition: "Consistent",
+    brandArchetype: "The Sage",
+    brandType: "Community",
+    mythAlignmentScore: 5,
+    tribMatchScore: 5,
+  };
 }
 
-/**
- * Determine if Negative Audience Sentiment radar warning should be triggered.
- * Mirrors logic in fitEngine.ts.
- */
-function shouldTriggerNegativeSentimentWarning(
-  mentionSentiment: string | null | undefined,
-  mentionTotalCount: number
-): boolean {
-  return (
-    mentionSentiment === "negative" &&
-    mentionTotalCount >= 5
-  );
+function baseRadar(): RadarWarningInputs {
+  return {
+    // alignment > 6 and pulse > 4 so those warnings don't fire; identical
+    // archetypes don't clash; stable drift/goffman/niche — isolates sentiment.
+    alignmentRaw: 8,
+    pulseRaw: 8,
+    brandArchetype: "The Sage",
+    creatorArchetype: "The Sage",
+    stuartHallDecoding: "Dominant",
+    driftSignal: "Zero Change",
+    goffmanStageConsistency: "Consistent",
+    creatorNichePosition: "Consistent",
+  };
 }
 
-/**
- * Apply mention sentiment stability modifier.
- * Mirrors logic in fitEngine.ts.
- */
-function applyMentionSentimentModifier(
-  stabilityScore: number,
-  mentionSentiment: string | null | undefined,
-  mentionTotalCount: number
-): number {
-  if (!mentionSentiment || mentionSentiment === "insufficient_data") return stabilityScore;
-  if (mentionTotalCount < 3) return stabilityScore;
-
-  let modifier = 0;
-  if (mentionSentiment === "positive") modifier = 0.3;
-  else if (mentionSentiment === "mixed") modifier = -1.0;
-  else if (mentionSentiment === "negative") modifier = -2.5;
-
-  // Cap: never drop more than 3 points or raise more than 1 point
-  const adjusted = stabilityScore + modifier;
-  return Math.max(stabilityScore - 3, Math.min(stabilityScore + 1, adjusted));
-}
-
-/**
- * Temporal weight for a mention based on age in days.
- * Recent (< 90 days) = 1.5x, medium (90-180 days) = 1.0x, older = 0.6x
- */
-function getTemporalWeight(createTimeSeconds: number): number {
-  const nowSeconds = Date.now() / 1000;
-  const ageInDays = (nowSeconds - createTimeSeconds) / 86400;
-  if (ageInDays < 90) return 1.5;
-  if (ageInDays < 180) return 1.0;
-  return 0.6;
-}
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
-describe("Phase 6: Music Overlap Detection", () => {
-  it("returns 'none' when there is no shared music", () => {
-    const result = computeMusicOverlap(
-      ["original sound", "trending audio"],
-      ["Drake", "Taylor Swift"],
-      ["background music", "viral sound"],
-      ["Rihanna", "Beyoncé"]
-    );
-    expect(result.overlapStrength).toBe("none");
-    expect(result.sharedTitles).toHaveLength(0);
-    expect(result.sharedArtists).toHaveLength(0);
+// ─── 1. Music overlap tiers (totalOverlap = sharedTitles + sharedArtists) ──────
+describe("Phase 6 (real fitEngine): music overlap tiers", () => {
+  it("is 'none' when creator and brand share no music", () => {
+    const r = runFullFITCalculation({
+      ...baseInput(),
+      creatorMusicTitles: ["original sound"],
+      creatorMusicArtists: ["Drake"],
+      brandMentionMusicTitles: ["viral audio"],
+      brandMentionMusicArtists: ["Beyoncé"],
+    });
+    expect(r.musicOverlap.overlapStrength).toBe("none");
+    expect(r.musicOverlap.sharedTitles).toHaveLength(0);
+    expect(r.musicOverlap.sharedArtists).toHaveLength(0);
   });
 
-  it("returns 'moderate' when one artist is shared", () => {
-    const result = computeMusicOverlap(
-      ["original sound"],
-      ["Drake", "Taylor Swift"],
-      ["viral audio"],
-      ["Drake", "Rihanna"]
-    );
-    expect(result.overlapStrength).toBe("moderate");
-    expect(result.sharedArtists).toContain("Drake");
+  it("is 'moderate' with exactly one shared signal (totalOverlap = 1)", () => {
+    const r = runFullFITCalculation({
+      ...baseInput(),
+      creatorMusicArtists: ["Drake", "Taylor Swift"],
+      brandMentionMusicArtists: ["Drake", "Rihanna"],
+    });
+    expect(r.musicOverlap.overlapStrength).toBe("moderate");
+    expect(r.musicOverlap.sharedArtists).toContain("drake");
   });
 
-  it("returns 'strong' when two or more artists are shared", () => {
-    const result = computeMusicOverlap(
-      ["original sound"],
-      ["Drake", "Taylor Swift", "Rihanna"],
-      ["viral audio"],
-      ["Drake", "Taylor Swift", "Beyoncé"]
-    );
-    expect(result.overlapStrength).toBe("strong");
-    expect(result.sharedArtists).toHaveLength(2);
+  it("stays 'moderate' at the tier boundary (totalOverlap = 2, below the strong cutoff of 3)", () => {
+    const r = runFullFITCalculation({
+      ...baseInput(),
+      creatorMusicArtists: ["Drake", "Taylor Swift"],
+      brandMentionMusicArtists: ["Drake", "Taylor Swift"],
+    });
+    expect(r.musicOverlap.sharedArtists).toHaveLength(2);
+    expect(r.musicOverlap.overlapStrength).toBe("moderate");
   });
 
-  it("returns 'strong' when three or more titles are shared", () => {
-    const result = computeMusicOverlap(
-      ["song a", "song b", "song c", "song d"],
-      [],
-      ["song a", "song b", "song c"],
-      []
-    );
-    expect(result.overlapStrength).toBe("strong");
-    expect(result.sharedTitles).toHaveLength(3);
+  it("is 'strong' when totalOverlap reaches 3 (titles + artists combined)", () => {
+    const r = runFullFITCalculation({
+      ...baseInput(),
+      creatorMusicTitles: ["song a", "song b"],
+      creatorMusicArtists: ["Drake"],
+      brandMentionMusicTitles: ["song a", "song b"],
+      brandMentionMusicArtists: ["Drake"],
+    });
+    expect(r.musicOverlap.overlapStrength).toBe("strong");
   });
 
-  it("is case-insensitive for matching", () => {
-    const result = computeMusicOverlap(
-      [],
-      ["DRAKE"],
-      [],
-      ["drake"]
-    );
-    expect(result.overlapStrength).toBe("moderate");
-    expect(result.sharedArtists).toHaveLength(1);
+  it("matches case-insensitively", () => {
+    const r = runFullFITCalculation({
+      ...baseInput(),
+      creatorMusicArtists: ["DRAKE"],
+      brandMentionMusicArtists: ["drake"],
+    });
+    expect(r.musicOverlap.overlapStrength).toBe("moderate");
+    expect(r.musicOverlap.sharedArtists).toHaveLength(1);
   });
 });
 
-describe("Phase 6: Negative Sentiment Radar Warning", () => {
-  it("triggers when sentiment is negative and count >= 5", () => {
-    expect(shouldTriggerNegativeSentimentWarning("negative", 10)).toBe(true);
-    expect(shouldTriggerNegativeSentimentWarning("negative", 5)).toBe(true);
+// ─── 2. Mention sentiment stability modifier (direction + confidence scaling) ──
+describe("Phase 6 (real fitEngine): mention sentiment stability modifier", () => {
+  const penaltyFor = (sentiment: string, confidence: string) =>
+    runFullFITCalculation({
+      ...baseInput(),
+      brandMentionSentiment: sentiment,
+      brandMentionSentimentConfidence: confidence,
+    }).mentionSentimentPenalty;
+
+  it("applies a negative modifier for negative sentiment", () => {
+    expect(penaltyFor("negative", "high")).toBeLessThan(0);
   });
 
-  it("does not trigger when count is below threshold", () => {
-    expect(shouldTriggerNegativeSentimentWarning("negative", 4)).toBe(false);
-    expect(shouldTriggerNegativeSentimentWarning("negative", 0)).toBe(false);
+  it("applies a positive modifier for positive sentiment", () => {
+    expect(penaltyFor("positive", "high")).toBeGreaterThan(0);
   });
 
-  it("does not trigger for positive or mixed sentiment", () => {
-    expect(shouldTriggerNegativeSentimentWarning("positive", 20)).toBe(false);
-    expect(shouldTriggerNegativeSentimentWarning("mixed", 20)).toBe(false);
+  it("applies a negative modifier for mixed sentiment", () => {
+    expect(penaltyFor("mixed", "high")).toBeLessThan(0);
   });
 
-  it("does not trigger for null or insufficient_data sentiment", () => {
-    expect(shouldTriggerNegativeSentimentWarning(null, 20)).toBe(false);
-    expect(shouldTriggerNegativeSentimentWarning("insufficient_data", 20)).toBe(false);
-  });
-});
-
-describe("Phase 6: Mention Sentiment Stability Modifier", () => {
-  it("adds a small bonus for positive sentiment", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, "positive", 10);
-    expect(adjusted).toBeGreaterThan(7.0);
-    expect(adjusted).toBeLessThanOrEqual(8.0); // capped at +1
+  it("applies no modifier for insufficient_data or absent sentiment", () => {
+    expect(penaltyFor("insufficient_data", "high")).toBe(0);
+    expect(runFullFITCalculation(baseInput()).mentionSentimentPenalty).toBe(0);
   });
 
-  it("applies a moderate penalty for mixed sentiment", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, "mixed", 10);
-    expect(adjusted).toBeLessThan(7.0);
-    expect(adjusted).toBeGreaterThanOrEqual(4.0); // capped at -3
+  it("scales the modifier magnitude by confidence (high > medium > low)", () => {
+    const high = penaltyFor("negative", "high");
+    const medium = penaltyFor("negative", "medium");
+    const low = penaltyFor("negative", "low");
+    // More confidence ⇒ a more negative penalty.
+    expect(high).toBeLessThan(medium);
+    expect(medium).toBeLessThan(low);
+    expect(low).toBeLessThan(0);
   });
 
-  it("applies a larger penalty for negative sentiment", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, "negative", 10);
-    expect(adjusted).toBeLessThan(7.0);
-    expect(adjusted).toBeGreaterThanOrEqual(4.0); // capped at -3
-  });
-
-  it("does not apply modifier when count is below 3", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, "negative", 2);
-    expect(adjusted).toBe(7.0);
-  });
-
-  it("does not apply modifier for insufficient_data", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, "insufficient_data", 20);
-    expect(adjusted).toBe(7.0);
-  });
-
-  it("does not apply modifier for null sentiment", () => {
-    const adjusted = applyMentionSentimentModifier(7.0, null, 20);
-    expect(adjusted).toBe(7.0);
-  });
-
-  it("never drops more than 3 points regardless of sentiment severity", () => {
-    // Even with very low base score, cap applies
-    const adjusted = applyMentionSentimentModifier(3.0, "negative", 100);
-    expect(adjusted).toBeGreaterThanOrEqual(0); // min 0
-    expect(adjusted).toBeGreaterThanOrEqual(3.0 - 3); // cap at -3
+  it("negative sentiment yields lower final stability than positive sentiment", () => {
+    const neg = runFullFITCalculation({
+      ...baseInput(),
+      brandMentionSentiment: "negative",
+      brandMentionSentimentConfidence: "high",
+    }).stabilityScoreRaw;
+    const pos = runFullFITCalculation({
+      ...baseInput(),
+      brandMentionSentiment: "positive",
+      brandMentionSentimentConfidence: "high",
+    }).stabilityScoreRaw;
+    expect(neg).toBeLessThan(pos);
   });
 });
 
-describe("Phase 6: Temporal Weighting", () => {
-  it("gives 1.5x weight to mentions from the last 90 days", () => {
-    const recentTimestamp = (Date.now() / 1000) - (30 * 86400); // 30 days ago
-    expect(getTemporalWeight(recentTimestamp)).toBe(1.5);
+// ─── 3. Negative Audience Sentiment radar warning ─────────────────────────────
+describe("Phase 6 (real fitEngine): negative audience sentiment warning", () => {
+  const warnings = (sentiment?: string, confidence?: string) =>
+    evaluateRadarWarnings({
+      ...baseRadar(),
+      brandMentionSentiment: sentiment,
+      brandMentionSentimentConfidence: confidence,
+    });
+
+  it("fires for negative sentiment at high or medium confidence", () => {
+    expect(warnings("negative", "high")).toContain("Negative Audience Sentiment");
+    expect(warnings("negative", "medium")).toContain("Negative Audience Sentiment");
   });
 
-  it("gives 1.0x weight to mentions from 90-180 days ago", () => {
-    const mediumTimestamp = (Date.now() / 1000) - (120 * 86400); // 120 days ago
-    expect(getTemporalWeight(mediumTimestamp)).toBe(1.0);
+  it("does NOT fire for negative sentiment at low confidence", () => {
+    expect(warnings("negative", "low")).not.toContain("Negative Audience Sentiment");
   });
 
-  it("gives 0.6x weight to older mentions", () => {
-    const oldTimestamp = (Date.now() / 1000) - (200 * 86400); // 200 days ago
-    expect(getTemporalWeight(oldTimestamp)).toBe(0.6);
+  it("does NOT fire for positive or mixed sentiment", () => {
+    expect(warnings("positive", "high")).not.toContain("Negative Audience Sentiment");
+    expect(warnings("mixed", "high")).not.toContain("Negative Audience Sentiment");
+  });
+
+  it("does NOT fire when sentiment/confidence are absent", () => {
+    expect(warnings()).not.toContain("Negative Audience Sentiment");
   });
 });
