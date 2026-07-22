@@ -35,6 +35,12 @@ export async function getDb() {
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 5_000,
       });
+      // An error on an idle client is emitted on the Pool itself; without a
+      // handler Node treats it as unhandled and crashes the process. Log and
+      // let pg reclaim the client so a transient DB blip can't take down the app.
+      pool.on("error", (err) => {
+        console.error("[Database] Idle client / pool error:", err.message);
+      });
       _db = drizzle(pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);

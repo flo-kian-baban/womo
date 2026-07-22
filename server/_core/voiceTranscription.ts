@@ -34,6 +34,26 @@
  */
 import { ENV } from "./env";
 
+/**
+ * fetch() with an AbortController timeout so a stalled download or transcription
+ * request can't hang the reel batch forever. Default 60s. On timeout the abort
+ * surfaces as a rejected fetch, which the callers already catch and map to a
+ * TranscriptionError.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 60_000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type TranscribeOptions = {
   audioUrl: string; // URL to the audio file (e.g., S3 URL)
   language?: string; // Optional: specify language code (e.g., "en", "es", "zh")
@@ -101,7 +121,7 @@ export async function transcribeAudio(
     let audioBuffer: Buffer;
     let mimeType: string;
     try {
-      const response = await fetch(options.audioUrl);
+      const response = await fetchWithTimeout(options.audioUrl);
       if (!response.ok) {
         return {
           error: "Failed to download audio file",
@@ -152,7 +172,7 @@ export async function transcribeAudio(
     // Step 4: Call the OpenAI Whisper API directly
     const fullUrl = "https://api.openai.com/v1/audio/transcriptions";
 
-    const response = await fetch(fullUrl, {
+    const response = await fetchWithTimeout(fullUrl, {
       method: "POST",
       headers: {
         authorization: `Bearer ${ENV.openaiApiKey}`,
@@ -299,8 +319,8 @@ async function transcribeWithGemini(
       mimeType = options.mimeType || "video/mp4";
       const sizeMB = audioBuffer.length / (1024 * 1024);
       console.log(`[voiceTranscription] Gemini: using pre-downloaded buffer (${sizeMB.toFixed(1)}MB, ${mimeType})`);
-      if (sizeMB > 50) {
-        return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 50MB limit` };
+      if (sizeMB > 15) {
+        return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 15MB limit` };
       }
       if (sizeMB < 0.001) {
         return { error: "Audio file empty", code: "INVALID_FORMAT", details: "Downloaded file is empty" };
@@ -308,7 +328,7 @@ async function transcribeWithGemini(
     } else {
       try {
         console.log(`[voiceTranscription] Gemini: downloading audio from ${options.audioUrl.slice(0, 100)}...`);
-        const response = await fetch(options.audioUrl, {
+        const response = await fetchWithTimeout(options.audioUrl, {
           headers: {
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15",
             "Accept": "*/*",
@@ -325,8 +345,8 @@ async function transcribeWithGemini(
         if (mimeType.includes("octet-stream")) mimeType = "video/mp4";
         const sizeMB = audioBuffer.length / (1024 * 1024);
         console.log(`[voiceTranscription] Gemini: downloaded ${sizeMB.toFixed(1)}MB, mimeType=${mimeType}`);
-        if (sizeMB > 50) {
-          return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 50MB limit` };
+        if (sizeMB > 15) {
+          return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 15MB limit` };
         }
         if (sizeMB < 0.001) {
           return { error: "Audio file empty", code: "INVALID_FORMAT", details: "Downloaded file is empty" };
@@ -363,7 +383,7 @@ async function transcribeWithGemini(
       }
     };
 
-    const response = await fetch(geminiUrl, {
+    const response = await fetchWithTimeout(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

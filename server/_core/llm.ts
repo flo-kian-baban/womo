@@ -74,6 +74,8 @@ export type InvokeParams = {
   subjectId?: string;
   /** Observation UUID if available at call site */
   observationId?: string;
+  /** Abort the request after this many ms (default 60_000). Prevents a hung call from blocking forever. */
+  timeoutMs?: number;
 };
 
 export type ToolCall = {
@@ -308,7 +310,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768;
+  // Respect the caller's requested max output tokens; fall back to 32768.
+  payload.max_tokens = params.maxTokens ?? params.max_tokens ?? 32768;
   if (temperature !== undefined) {
     payload.temperature = temperature;
   }
@@ -328,19 +331,36 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   // Gemini rate-limit responses (429) are retried with exponential backoff.
   // All other non-OK responses are thrown immediately.
   const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+  const timeoutMs = params.timeoutMs ?? 60_000;
   let response: Response | null = null;
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    response = await fetch(resolveApiUrl(), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${ENV.geminiApiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    // Per-attempt AbortController so a hung Gemini socket can't block forever.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      response = await fetch(resolveApiUrl(), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${ENV.geminiApiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          `Gemini API request timed out after ${timeoutMs}ms` +
+          (purpose ? ` (purpose: ${purpose})` : "")
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
-    if (response.status === 429) {
+    if (response!.status === 429) {
       if (attempt < RETRY_DELAYS_MS.length) {
         const delayMs = RETRY_DELAYS_MS[attempt]!;
         console.warn(

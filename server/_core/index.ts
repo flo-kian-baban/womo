@@ -7,6 +7,19 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { ENV } from "./env";
 
+// ─── Process-level safety net ────────────────────────────────────────────────
+// A single unhandled rejection or uncaught exception must not silently wedge or
+// crash the instance without a trace. Log both; for uncaughtException the process
+// is in an undefined state, so exit and let the process manager (Railway) restart
+// a clean instance.
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[process] Uncaught exception:", err);
+  process.exit(1);
+});
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
