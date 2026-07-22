@@ -241,7 +241,8 @@ export const nicheTaxonomy = pgTable("niche_taxonomy", {
   level: integer("level").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
-  slugIdx: uniqueIndex("nt_slug_idx").on(t.slug),
+  // nt_slug_idx removed — redundant with the column-level unique constraint
+  // (niche_taxonomy_slug_unique). Dropped in the womo_0004_db_hardening migration.
   parentIdx: index("nt_parent_idx").on(t.parentId),
   levelIdx: index("nt_level_idx").on(t.level),
 }));
@@ -521,14 +522,15 @@ export const audienceMentions = pgTable("audience_mentions", {
 // TABLE 12: LLM_INVOCATIONS — Full provenance for every LLM call
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Forward-declare matchScores for the FK reference
-// (llmInvocations references matchScores, but matchScores is defined later)
-// We use a deferred reference pattern: the FK is added via a custom migration.
+// llmInvocations references matchScores (defined later in this file). Drizzle's
+// deferred reference thunk `() => matchScores.id` resolves the forward reference
+// lazily, so no separate declaration is needed. The DB-level FK is created by the
+// womo_0004_db_hardening migration.
 
 export const llmInvocations = pgTable("llm_invocations", {
   id: uuid("id").defaultRandom().primaryKey(),
   observationId: uuid("observation_id").references(() => observations.id, { onDelete: "set null" }),
-  matchScoreId: uuid("match_score_id"),  // FK added after matchScores definition
+  matchScoreId: uuid("match_score_id").references(() => matchScores.id, { onDelete: "set null" }),
   subjectId: uuid("subject_id").references(() => subjects.id, { onDelete: "set null" }),
 
   purpose: varchar("purpose", { length: 64 }).notNull(),
