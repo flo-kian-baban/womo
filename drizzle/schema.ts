@@ -17,6 +17,7 @@
  * storage layer only. Application code migration is a separate phase.
  */
 
+import { sql } from "drizzle-orm";
 import {
   pgTable, pgEnum, uuid, text, varchar, integer, bigint, real, boolean,
   timestamp, jsonb, index, uniqueIndex, serial,
@@ -225,6 +226,13 @@ export const observations = pgTable("observations", {
   // Shared confidence
   dataConfidenceLevel: confidenceLevelEnum("data_confidence_level"),
   transcriptCount: integer("transcript_count").default(0),
+
+  // Per-component enrichment persistence outcomes for this observation run
+  // (womo_0005): { component: { status, reason, at } }. Status vocabulary:
+  // success | failed | skipped_no_data (subject genuinely has no such data)
+  // | skipped_not_attempted (write not attempted — config/feature gap).
+  // NULL = row predates persistence tracking.
+  persistenceStatus: jsonb("persistence_status"),
 
   // Timestamps
   observedAt: timestamp("observed_at", { withTimezone: true }).defaultNow().notNull(),
@@ -551,11 +559,17 @@ export const llmInvocations = pgTable("llm_invocations", {
   responseJson: jsonb("response_json"),
   durationMs: integer("duration_ms"),
 
+  // Failure provenance (womo_0005): 'success' | 'failed' (varchar + CHECK in DB).
+  // Failed invocations record error_message and duration_ms.
+  status: varchar("status", { length: 16 }).default("success").notNull(),
+  errorMessage: text("error_message"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   observationIdx: index("llm_observation_idx").on(t.observationId),
   purposeIdx: index("llm_purpose_idx").on(t.purpose),
   modelIdx: index("llm_model_idx").on(t.model),
+  statusFailedIdx: index("llm_status_failed_idx").on(t.status).where(sql`${t.status} = 'failed'`),
 }));
 
 

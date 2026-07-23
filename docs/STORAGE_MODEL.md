@@ -111,7 +111,7 @@
 | discovered_at | timestamptz | no | now() | |
 Unique: `(platform, handle)`.
 
-### 3. `observations` (11 cols) — `schema.ts:206`
+### 3. `observations` (12 cols) — `schema.ts:206`
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
@@ -123,8 +123,26 @@ Unique: `(platform, handle)`.
 | bio | text | yes | — | |
 | data_confidence_level | enum `confidence_level` | yes | — | high/medium/low |
 | transcript_count | integer | yes | 0 | # transcripts fetched |
+| persistence_status | jsonb | yes | — | per-component enrichment outcomes *(added by `womo_0005`; see [§3a](#3a-persistence_status-vocabulary))* |
 | observed_at | timestamptz | no | now() | |
 | created_at | timestamptz | no | now() | |
+
+#### 3a. `persistence_status` vocabulary
+
+Written once per analysis run by the persistence layer (`routers.ts` persist helpers).
+Shape: `{ "<component>": { "status": <status>, "reason": <text|null>, "at": <ISO-8601 UTC> } }`.
+CHECK constraint enforces the value is a JSON object (or NULL).
+
+| Status | Meaning |
+|---|---|
+| `success` | the component's write completed |
+| `failed` | the write was attempted and errored — `reason` carries the error |
+| `skipped_no_data` | the pipeline legitimately had no data for this subject — a **fact about the subject** (e.g. no reviews exist) |
+| `skipped_not_attempted` | the write was never attempted because of our setup — a **gap in configuration** (e.g. missing API key, feature disabled) |
+
+The two skip statuses are deliberately distinct: `skipped_no_data` is a data-legitimacy
+signal about the subject; `skipped_not_attempted` marks incomplete collection on our side.
+`NULL` (whole column) = the row predates womo_0005 tracking.
 
 ### 4. `creator_observations` (33 cols) — `schema.ts:255`
 | Column | Type | Null | Default | Meaning |
@@ -306,7 +324,7 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | engagement_delta | real | yes | — | |
 | detected_at | timestamptz | no | now() | |
 
-### 12. `llm_invocations` (13 cols) — `schema.ts:530` — see [§8 Provenance](#8-provenance--cost-tables-detail)
+### 12. `llm_invocations` (15 cols) — `schema.ts:530` — see [§8 Provenance](#8-provenance--cost-tables-detail)
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
@@ -317,10 +335,12 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | model | varchar(128) | **no** | — | e.g. `gemini-2.5-flash` |
 | prompt_version | varchar(32) | yes | — | written as `"1.0"` |
 | temperature | real | yes | — | **never written** (always null) |
-| input_tokens | integer | yes | — | |
-| output_tokens | integer | yes | — | |
+| input_tokens | integer | yes | — | null on failed invocations (no usage returned) |
+| output_tokens | integer | yes | — | null on failed invocations |
 | response_json | jsonb | yes | — | **never written** (always null) |
-| duration_ms | integer | yes | — | |
+| duration_ms | integer | yes | — | populated on success **and** failure (distinguishes timeout-after-60s from instant rejection) |
+| status | varchar(16) + CHECK | **no** | 'success' | `success` \| `failed` *(added by `womo_0005`; partial index `llm_status_failed_idx` on failed rows)* |
+| error_message | text | yes | — | error text for failed invocations *(added by `womo_0005`)* |
 | created_at | timestamptz | no | now() | |
 
 ### 13. `scrape_events` (12 cols) — `schema.ts:558` — see [§8 Provenance](#8-provenance--cost-tables-detail)
@@ -545,8 +565,9 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | 20260619164022 | womo_0002_brand_audit_columns |
 | 20260619164032 | womo_0003_schema_audit_fixes |
 | 20260722070910 | **womo_0004_db_hardening** (RLS on all tables, `llm_invocations.match_score_id` FK, drop duplicate `nt_slug_idx`) |
+| 20260723 (see ledger) | **womo_0005_persistence_completeness** (`observations.persistence_status` jsonb + vocabulary [§3a](#3a-persistence_status-vocabulary); `llm_invocations.status`/`error_message` + partial index `llm_status_failed_idx`; `scrape_events` unchanged — failure columns already existed) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **8** — `womo_0004_db_hardening` was applied in a prior session. This doc reflects the live state.
+> *Note:* the original work order referenced "7 migrations"; there are now **9** — `womo_0004_db_hardening` and `womo_0005_persistence_completeness` were applied in later sessions. This doc reflects the live state.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).

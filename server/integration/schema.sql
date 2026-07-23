@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict GLfBSbQWFL0FlmgCTf5KkMjqX2ty5a82Bve4Y8qwaqanyXflHbfw0Ms3fcVFJoi
+\restrict ELInol8LTAYOaG3ZuCHHMvqUdP4VmKBxHxlwPKAHGRfsGtiHf6T0CjXDTHpADk8
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.10 (Homebrew)
@@ -546,7 +546,10 @@ CREATE TABLE public.llm_invocations (
     output_tokens integer,
     response_json jsonb,
     duration_ms integer,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    status character varying(16) DEFAULT 'success'::character varying NOT NULL,
+    error_message text,
+    CONSTRAINT llm_invocations_status_check CHECK (((status)::text = ANY ((ARRAY['success'::character varying, 'failed'::character varying])::text[])))
 );
 
 
@@ -697,8 +700,17 @@ CREATE TABLE public.observations (
     data_confidence_level public.confidence_level,
     transcript_count integer DEFAULT 0,
     observed_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    persistence_status jsonb,
+    CONSTRAINT observations_persistence_status_check CHECK (((persistence_status IS NULL) OR (jsonb_typeof(persistence_status) = 'object'::text)))
 );
+
+
+--
+-- Name: COLUMN observations.persistence_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.observations.persistence_status IS 'Per-component enrichment persistence outcomes for this observation run: {component: {status, reason, at}}. Status vocabulary: success | failed | skipped_no_data (subject genuinely has no such data) | skipped_not_attempted (write not attempted — config/feature gap). NULL = row predates womo_0005 tracking.';
 
 
 --
@@ -1243,6 +1255,13 @@ CREATE INDEX llm_observation_idx ON public.llm_invocations USING btree (observat
 --
 
 CREATE INDEX llm_purpose_idx ON public.llm_invocations USING btree (purpose);
+
+
+--
+-- Name: llm_status_failed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX llm_status_failed_idx ON public.llm_invocations USING btree (status) WHERE ((status)::text = 'failed'::text);
 
 
 --
@@ -1861,5 +1880,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict GLfBSbQWFL0FlmgCTf5KkMjqX2ty5a82Bve4Y8qwaqanyXflHbfw0Ms3fcVFJoi
+\unrestrict ELInol8LTAYOaG3ZuCHHMvqUdP4VmKBxHxlwPKAHGRfsGtiHf6T0CjXDTHpADk8
 
