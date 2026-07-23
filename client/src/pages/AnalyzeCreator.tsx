@@ -3,7 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Users, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, Clock } from "lucide-react";
+import { Users, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, Clock, Clock3 } from "lucide-react";
+import { ReviewGatePanel } from "@/components/ReviewGate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -333,12 +334,30 @@ export default function AnalyzeCreator() {
         {/* ─── Result ──────────────────────────────────────────────────────── */}
         <div>
           {result ? (
-            <div className="fit-card rounded-xl p-6 animate-fade-in-up">
-              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-border">
-                <CheckCircle2 className="w-4 h-4 text-green-400" />
-                <span className="text-sm font-semibold text-green-400">Profile Extracted & Saved</span>
+            <div className="space-y-4 animate-fade-in-up">
+              <div className="fit-card rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-6 pb-4 border-b border-border">
+                  {result.profile.reviewStatus === "pending" ? (
+                    <>
+                      <Clock3 className="w-4 h-4 text-amber-300" />
+                      <span className="text-sm font-semibold text-amber-300">Profile Extracted — Awaiting Analyst Review</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                      <span className="text-sm font-semibold text-green-400">Profile Extracted & Saved</span>
+                    </>
+                  )}
+                </div>
+                <CreatorProfileCard profile={result.profile} pipelineMetrics={result.pipelineMetrics} />
               </div>
-              <CreatorProfileCard profile={result.profile} pipelineMetrics={result.pipelineMetrics} />
+              {/* Review gate: diagnostics + accept/decline for the fresh run */}
+              {result.profile.observationId && (
+                <ReviewGatePanel
+                  observationId={result.profile.observationId}
+                  reviewStatus={result.profile.reviewStatus}
+                />
+              )}
             </div>
           ) : !analyzeMutation.isPending ? (
             <div className="fit-card rounded-xl p-10 flex flex-col items-center justify-center text-center h-full min-h-64">

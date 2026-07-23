@@ -6,6 +6,7 @@ import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import { useState } from "react";
 import { MODEL_PRICING } from "@shared/llmPricing";
+import { PendingReviewBanner, ReviewStatusBadge } from "./ReviewGate";
 
 // Flattened creator profile as returned by getCreatorProfileById in db.ts.
 // Uses Record<string, any> base so field access with `as` casts works
@@ -836,6 +837,16 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
 
   return (
     <div className="space-y-6">
+      {/* ── Review gate (womo_0006): pending must be unmistakable wherever a
+             profile renders ─────────────────────────────────────────────── */}
+      {profile.reviewStatus === "pending" && <PendingReviewBanner />}
+      {profile.reviewStatus === "declined" && (
+        <div className="flex items-center gap-3 rounded-lg border-2 border-red-400/50 bg-red-400/10 px-4 py-3">
+          <span className="text-[13px] font-bold text-red-300 uppercase tracking-wide">Archived (declined)</span>
+          <span className="text-[11px] text-red-200/70">This run was declined by an analyst — retained for failure analysis, excluded from the corpus.</span>
+        </div>
+      )}
+
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4 flex-1 min-w-0">
@@ -845,7 +856,10 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-lg text-foreground truncate">{profile.displayName ?? profile.handle}</h3>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h3 className="font-semibold text-lg text-foreground truncate">{profile.displayName ?? profile.handle}</h3>
+              <ReviewStatusBadge status={profile.reviewStatus} />
+            </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-sm text-muted-foreground">@{profile.handle}</span>
               <span className="text-muted-foreground/30">·</span>

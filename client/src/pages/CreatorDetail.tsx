@@ -5,6 +5,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import CreatorProfileCard from "@/components/CreatorProfileCard";
+import { PendingRerunNotice, ReviewGatePanel } from "@/components/ReviewGate";
 import { Button } from "@/components/ui/button";
 
 export default function CreatorDetail() {
@@ -59,7 +60,33 @@ export default function CreatorDetail() {
       )}
 
       {data && (
-        <CreatorProfileCard profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
+        <div className="space-y-6">
+          {/* Review gate (womo_0006): when a pending rerun exists, the profile
+              below is the previously accepted run — say so, and offer the
+              pending run's diagnostics + accept/decline. */}
+          {data.pendingObservation && (
+            <>
+              <PendingRerunNotice pendingObservedAt={data.pendingObservation.observedAt} />
+              <ReviewGatePanel
+                observationId={data.pendingObservation.id}
+                reviewStatus="pending"
+                onReviewed={() => refetch()}
+              />
+            </>
+          )}
+
+          <CreatorProfileCard profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
+
+          {/* Diagnostics for the displayed run (with accept/decline when it is
+              itself pending — i.e. a first analysis awaiting review). */}
+          <ReviewGatePanel
+            observationId={data.observationId}
+            reviewStatus={data.reviewStatus}
+            reviewedAt={data.reviewedAt}
+            reviewedBy={data.reviewedBy}
+            onReviewed={() => refetch()}
+          />
+        </div>
       )}
     </div>
   );

@@ -218,9 +218,16 @@ function CreatorRow({ creator, onDelete, onExport }: {
   const platform = creator.platform?.toLowerCase() ?? "";
   const platColor = PLATFORM_COLORS[platform] ?? "text-muted-foreground bg-muted/30 border-border/40";
   const platLabel = PLATFORM_LABELS[platform] ?? creator.platform ?? "—";
+  // Review gate (womo_0006): pending must be unmistakable — amber left stripe
+  // + bold badge, not a subtle hint.
+  const isPending = creator.reviewStatus === "pending";
 
   return (
-    <div className="fit-card rounded-xl hover:border-primary/20 transition-all duration-150 group">
+    <div className={`fit-card rounded-xl transition-all duration-150 group ${
+      isPending
+        ? "border-l-4 border-l-amber-400 border-amber-400/40 bg-amber-400/[0.04] hover:border-amber-400/60"
+        : "hover:border-primary/20"
+    }`}>
       <div className="px-5 py-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
 
         {/* ──── TIER 1: Identity + Metrics ──────────────────────────────────── */}
@@ -233,6 +240,12 @@ function CreatorRow({ creator, onDelete, onExport }: {
           <div className="min-w-0 w-[200px] flex-shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-medium text-foreground truncate">{creator.displayName ?? creator.handle}</span>
+              {isPending && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-400/60 bg-amber-400/15 text-amber-300 text-[9px] font-bold uppercase tracking-wider flex-shrink-0">
+                  <Clock className="w-2.5 h-2.5" />
+                  Pending Review
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <PlatformIcon platform={creator.platform} />
