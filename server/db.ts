@@ -1003,7 +1003,14 @@ export async function updateContentItemTranscript(
 
   try {
     const normalizedPlatform = normalizePlatform(platform);
-    const result = await db.update(contentItems)
+    // Session 8: RETURN whether a row was actually matched. This previously
+    // returned `true` unconditionally, so the caller's transcriptSuccessCount
+    // incremented even when the WHERE matched zero content_items rows — inflating
+    // observations.transcript_count and, through it, data_confidence_level.
+    // `.returning()` reports the rows genuinely updated. (Caption handling is
+    // unchanged: a caption-sourced transcript that matches a row still counts,
+    // exactly as before — only phantom updates stop counting.)
+    const updatedRows = await db.update(contentItems)
       .set({
         transcriptText,
         transcriptSource,
@@ -1014,8 +1021,9 @@ export async function updateContentItemTranscript(
         eq(contentItems.subjectId, subjectId),
         eq(contentItems.platform, normalizedPlatform),
         eq(contentItems.platformVideoId, platformVideoId),
-      ));
-    return true;
+      ))
+      .returning({ id: contentItems.id });
+    return updatedRows.length > 0;
   } catch (err) {
     console.warn("[Database] Failed to update content item transcript:", err);
     return false;
