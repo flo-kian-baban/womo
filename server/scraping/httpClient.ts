@@ -237,7 +237,7 @@ export async function fetchHtml(
         continue;
       }
 
-      logScrapeSuccess(url, body.length, Date.now() - fetchStartTime);
+      logScrapeSuccess(url, body, Date.now() - fetchStartTime);
       return body;
     } catch (err) {
       if (err instanceof HttpClientError) {
@@ -345,20 +345,32 @@ function inferScrapeContext(url: string): { platform: string; scrapeMethod: stri
   return null; // Not a social media URL — don't log
 }
 
-/** Fire-and-forget: log a successful fetch as a scrape event */
-function logScrapeSuccess(url: string, bodyLength: number, durationMs: number): void {
+/**
+ * Fire-and-forget: log a successful fetch as a scrape event.
+ *
+ * Session 8 fix: the silent-failure check MUST see the real response body. It
+ * previously passed "" (only the length was in scope), which made
+ * detectSilentFailure("tiktok", "", url) hit its "body too small / no
+ * rehydration" branch and stamp silent_failure_detected=true on EVERY
+ * auto-logged TikTok HTTP success. The body is now threaded through so the
+ * check reflects the actual response. If a caller ever cannot supply the body,
+ * pass undefined and the check is skipped (recorded false) rather than
+ * defaulting to a false positive.
+ */
+function logScrapeSuccess(url: string, body: string | undefined, durationMs: number): void {
   const ctx = inferScrapeContext(url);
   if (!ctx) return;
   try {
-    const silentFail = ctx.platform === "tiktok" || ctx.platform === "instagram"
-      ? detectSilentFailure(ctx.platform as "tiktok" | "instagram", "", url)
+    const canCheck = body !== undefined && (ctx.platform === "tiktok" || ctx.platform === "instagram");
+    const silentFail = canCheck
+      ? detectSilentFailure(ctx.platform as "tiktok" | "instagram", body!, url)
       : { isFailed: false, reason: "" };
     logScrapeEventSafe({
       platform: ctx.platform,
       scrapeMethod: ctx.scrapeMethod,
       urlRequested: url.slice(0, 1000),
       httpStatus: 200,
-      responseSizeBytes: bodyLength,
+      responseSizeBytes: body?.length,
       silentFailureDetected: silentFail.isFailed,
       failureReason: silentFail.isFailed ? silentFail.reason : undefined,
       durationMs,
