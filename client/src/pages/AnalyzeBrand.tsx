@@ -161,9 +161,19 @@ export default function AnalyzeBrand() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      // Persistence outcome is reported explicitly by the API — never show
+      // plain success (or silently show nothing) when the save failed.
+      if (data.persistence.saved === "none") {
+        toast.error(`Analysis completed but could NOT be saved: ${data.persistence.error ?? "database error"}`);
+        return;
+      }
       if (data.profile) {
         setResult({ profile: data.profile });
-        toast.success("Brand profile extracted successfully");
+        if (data.persistence.saved === "partial") {
+          toast.warning(`Profile saved with incomplete data — failed: ${data.persistence.failedComponents.join(", ")}`);
+        } else {
+          toast.success("Brand profile extracted successfully");
+        }
       }
     },
     onError: () => {

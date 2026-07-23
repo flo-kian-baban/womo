@@ -85,6 +85,15 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`[server] Listening on port ${port}`);
 
+    // Eager DB connectivity probe (select 1) — the pg Pool constructor never
+    // connects, so without this a dead database only surfaces at first query.
+    // Fatal in production (exit 1 → platform restarts), warning in dev.
+    import("../db").then(({ probeDatabaseConnectivity }) =>
+      probeDatabaseConnectivity().catch(err =>
+        console.error("[startup] DB connectivity probe threw unexpectedly:", err),
+      )
+    );
+
     // Pre-flight browser check — runs in background AFTER the server is
     // already listening so health checks are never blocked by Playwright init.
     import("../scraping/browserClient").then(({ ensureBrowser }) =>

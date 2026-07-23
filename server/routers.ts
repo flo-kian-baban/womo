@@ -104,6 +104,36 @@ type PersistSuccess = { subjectId: string; observationId: string; persistence: P
 type PersistFailure = { error: string };
 type PersistResult = PersistSuccess | PersistFailure;
 
+/**
+ * API-facing persistence outcome. The analyze/reanalyze endpoints must never
+ * report plain success when persistence partially or wholly failed:
+ *  - saved "full"    — identity core + every attempted enrichment succeeded
+ *                      (skips are legitimate absences, not failures)
+ *  - saved "partial" — identity core saved, but ≥1 enrichment failed
+ *  - saved "none"    — identity core rolled back; nothing persisted
+ */
+export type PersistenceSummary = {
+  saved: "full" | "partial" | "none";
+  failedComponents: string[];
+  error: string | null;
+  components: PersistenceStatusMap | null;
+};
+
+function summarizePersistence(result: PersistResult): PersistenceSummary {
+  if ("error" in result) {
+    return { saved: "none", failedComponents: [], error: result.error, components: null };
+  }
+  const failedComponents = Object.entries(result.persistence)
+    .filter(([, o]) => o.status === "failed")
+    .map(([component]) => component);
+  return {
+    saved: failedComponents.length === 0 ? "full" : "partial",
+    failedComponents,
+    error: null,
+    components: result.persistence,
+  };
+}
+
 async function persistCreatorToV2(params: {
   handle: string;
   platform: string;
@@ -786,16 +816,19 @@ export const appRouter = router({
 
         const totalDurationMs = Date.now() - pipelineStart;
 
-        // Check for persistence failure (discriminated union)
-        if ("error" in persistResult) {
-          console.warn(`[V2 Pipeline] ⚠️ Persistence failed but analysis completed. Error: ${persistResult.error}`);
+        // Honest persistence outcome — never report plain success when
+        // persistence partially or wholly failed.
+        const persistence = summarizePersistence(persistResult);
+        if (persistence.saved !== "full") {
+          console.warn(`[V2 Pipeline] ⚠️ Creator persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
         }
         const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
 
-        // Return saved profile + pipeline metrics
+        // Return saved profile + persistence outcome + pipeline metrics
         const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
         return {
           profile: saved,
+          persistence,
           extracted,
           pipelineMetrics: {
             totalDurationMs,
@@ -902,7 +935,7 @@ export const appRouter = router({
         const extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
 
         // V2: reanalyze creates a new observation (append-only)
-        await persistCreatorToV2({
+        const reanalyzePersistResult = await persistCreatorToV2({
           handle: existing.handle,
           platform: existing.platform as string,
           profileUrl: researchedProfileUrl ?? existing.profileUrl ?? undefined,
@@ -911,9 +944,15 @@ export const appRouter = router({
           extracted,
           researchData,
         });
+        const persistence = summarizePersistence(reanalyzePersistResult);
+        if (persistence.saved !== "full") {
+          console.warn(`[V2 Pipeline] ⚠️ Creator reanalyze persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
+        }
 
+        // NOTE: on saved === "none" this returns the PREVIOUS profile — the
+        // persistence field is what tells the caller the rerun was not saved.
         const updated = await getCreatorProfileById(input.id);
-        return { profile: updated, extracted };
+        return { profile: updated, persistence, extracted };
       }),
 
     // ─── Supplemental Video Ingestion ─────────────────────────────────────────
@@ -1267,12 +1306,15 @@ export const appRouter = router({
           instagramRequested: Boolean(input.instagramHandle?.trim()),
         });
 
-        if ("error" in brandPersistResult) {
-          console.warn(`[V2 Pipeline] ⚠️ Brand persistence failed but analysis completed. Error: ${brandPersistResult.error}`);
+        // Honest persistence outcome — never report plain success when
+        // persistence partially or wholly failed.
+        const persistence = summarizePersistence(brandPersistResult);
+        if (persistence.saved !== "full") {
+          console.warn(`[V2 Pipeline] ⚠️ Brand persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
         }
         const brandSubjectId = "subjectId" in brandPersistResult ? brandPersistResult.subjectId : null;
         const saved = brandSubjectId ? await getBrandProfileById(brandSubjectId) : null;
-        return { profile: saved, extracted, weights };
+        return { profile: saved, persistence, extracted, weights };
       }),
 
     list: protectedProcedure
@@ -1429,7 +1471,7 @@ export const appRouter = router({
         const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
 
         // V2: reanalyze creates a new observation (append-only)
-        await persistBrandToV2({
+        const brandReanalyzePersistResult = await persistBrandToV2({
           brandName: existing.brandName,
           brandUrl: existing.brandUrl ?? undefined,
           category: extracted.category,
@@ -1446,9 +1488,15 @@ export const appRouter = router({
           tiktokRequested: Boolean(existing.tiktokChannelUrl),
           instagramRequested: Boolean(igHandleToUse),
         });
+        const persistence = summarizePersistence(brandReanalyzePersistResult);
+        if (persistence.saved !== "full") {
+          console.warn(`[V2 Pipeline] ⚠️ Brand reanalyze persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
+        }
 
+        // NOTE: on saved === "none" this returns the PREVIOUS profile — the
+        // persistence field is what tells the caller the rerun was not saved.
         const updated = await getBrandProfileById(input.id);
-        return { profile: updated, extracted, weights };
+        return { profile: updated, persistence, extracted, weights };
       }),
 
     weightTable: protectedProcedure.query(() => {

@@ -20,34 +20,87 @@ import { ENV } from './_core/env';
 // Re-export legacy types for routers.ts compilation
 export type { InsertUser } from "../drizzle/schema";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE-DOWN POLICY (uniform — Session 5)
+//
+// Every helper in this file — writes AND reads — THROWS "Database not available"
+// when there is no database handle (DATABASE_URL unset, or the pool could not be
+// created). Nothing silently no-ops, returns false, or returns empty data when
+// the database is down: silent fallbacks made a dead DB indistinguishable from
+// "subject has no data", which is exactly the lie this session removes.
+//
+//  - Write paths: throw. Callers that can tolerate a failed write (enrichments)
+//    catch at the call site and RECORD the failure (persistence_status /
+//    runEnrichment in routers.ts) — the failure is never invisible.
+//  - Read paths: throw the same error. Callers that have a legitimate fallback
+//    (e.g. token-metric displays) attach an explicit .catch at the call site,
+//    so the fallback decision is visible where it is made.
+//  - Row-level semantics are unchanged: e.g. updateContentItemTranscript still
+//    returns false when the UPDATE itself errors for one row (its callers count
+//    successes) — but a missing database throws.
+//
+// Connectivity is probed eagerly at startup via probeDatabaseConnectivity()
+// (called from server/_core/index.ts): the pg Pool constructor never opens a
+// connection, so without the probe a dead database only surfaced at the first
+// real query.
+// ═══════════════════════════════════════════════════════════════════════════════
+
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
-    try {
-      // Use a connection pool instead of a single connection string.
-      // max: 10 — supports concurrent analyses without queuing writes.
-      // idleTimeoutMillis: 30s — reclaim idle connections quickly.
-      // connectionTimeoutMillis: 5s — fail fast if the pool is saturated.
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        max: 10,
-        idleTimeoutMillis: 30_000,
-        connectionTimeoutMillis: 5_000,
-      });
-      // An error on an idle client is emitted on the Pool itself; without a
-      // handler Node treats it as unhandled and crashes the process. Log and
-      // let pg reclaim the client so a transient DB blip can't take down the app.
-      pool.on("error", (err) => {
-        console.error("[Database] Idle client / pool error:", err.message);
-      });
-      _db = drizzle(pool);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+    // Use a connection pool instead of a single connection string.
+    // max: 10 — supports concurrent analyses without queuing writes.
+    // idleTimeoutMillis: 30s — reclaim idle connections quickly.
+    // connectionTimeoutMillis: 5s — fail fast if the pool is saturated.
+    // NOTE: the Pool constructor never connects — connectivity is verified by
+    // probeDatabaseConnectivity() at startup, not here.
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 10,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
+    // An error on an idle client is emitted on the Pool itself; without a
+    // handler Node treats it as unhandled and crashes the process. Log and
+    // let pg reclaim the client so a transient DB blip can't take down the app.
+    pool.on("error", (err) => {
+      console.error("[Database] Idle client / pool error:", err.message);
+    });
+    _db = drizzle(pool);
   }
   return _db;
+}
+
+/**
+ * Eager connectivity probe — a lightweight `select 1` run once at server
+ * startup so a dead database surfaces immediately rather than at first query.
+ *
+ * Chosen failure policy:
+ *  - production: FATAL (exit 1) — the platform (Railway) surfaces and restarts
+ *    the dead deploy instead of serving an app whose every DB route 500s.
+ *  - development: non-fatal warning — local work without a database (UI work,
+ *    scraping experiments) stays possible; DB-touching routes throw per the
+ *    policy above.
+ */
+export async function probeDatabaseConnectivity(): Promise<boolean> {
+  if (!process.env.DATABASE_URL) {
+    console.warn("[Database] DATABASE_URL not set — running without a database; all DB routes will throw");
+    return false;
+  }
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.execute(sql`select 1`);
+    console.log("[Database] Startup connectivity probe OK");
+    return true;
+  } catch (err) {
+    console.error("[Database] Startup connectivity probe FAILED — database unreachable:", err instanceof Error ? err.message : err);
+    if (process.env.NODE_ENV === "production") {
+      process.exit(1);
+    }
+    return false;
+  }
 }
 
 // ─── Transaction plumbing ────────────────────────────────────────────────────
@@ -74,7 +127,7 @@ export async function withTransaction<T>(fn: (tx: DbTransaction) => Promise<T>):
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (!db) { console.warn("[Database] Cannot upsert user: database not available"); return; }
+  if (!db) throw new Error("Database not available");
   try {
     const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
@@ -102,7 +155,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
-  if (!db) return undefined;
+  if (!db) throw new Error("Database not available");
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
@@ -407,7 +460,7 @@ export async function updateObservationPersistenceStatus(
  */
 export async function getLatestObservationId(subjectId: string): Promise<string | null> {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) throw new Error("Database not available");
 
   const rows = await db.select({ id: observations.id })
     .from(observations)
@@ -508,7 +561,7 @@ export async function updateCreatorObservationAvgDuration(
   avgVideoDuration: number,
 ): Promise<void> {
   const db = await getDb();
-  if (!db) return;
+  if (!db) throw new Error("Database not available");
   await db.update(creatorObservations)
     .set({ avgVideoDuration })
     .where(eq(creatorObservations.observationId, observationId));
@@ -672,7 +725,7 @@ export async function updateContentItemTranscript(
   wordCount: number,
 ): Promise<boolean> {
   const db = await getDb();
-  if (!db) return false;
+  if (!db) throw new Error("Database not available");
 
   try {
     const normalizedPlatform = normalizePlatform(platform);
@@ -704,18 +757,16 @@ export async function updateObservationTranscriptCount(
   confidenceLevel: "high" | "medium" | "low",
 ): Promise<void> {
   const db = await getDb();
-  if (!db) return;
+  if (!db) throw new Error("Database not available");
 
-  try {
-    await db.update(observations)
-      .set({
-        transcriptCount,
-        dataConfidenceLevel: confidenceLevel,
-      })
-      .where(eq(observations.id, observationId));
-  } catch (err) {
-    console.warn("[Database] Failed to update observation transcript count:", err);
-  }
+  // Errors propagate: the caller (transcript_count enrichment in routers.ts)
+  // records the failure into persistence_status instead of it being swallowed.
+  await db.update(observations)
+    .set({
+      transcriptCount,
+      dataConfidenceLevel: confidenceLevel,
+    })
+    .where(eq(observations.id, observationId));
 }
 
 /**
@@ -795,7 +846,7 @@ export async function getLlmTokenUsageBySubject(subjectId: string): Promise<{
   inputTokens: number; outputTokens: number; totalTokens: number; llmCalls: number; model: string;
 }> {
   const db = await getDb();
-  if (!db) return { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" };
+  if (!db) throw new Error("Database not available");
 
   const rows = await db.select({
     inputTokens: llmInvocations.inputTokens,
@@ -822,7 +873,7 @@ export async function getLlmTokenUsageByTimeWindow(since: Date, until?: Date): P
   inputTokens: number; outputTokens: number; totalTokens: number; llmCalls: number; model: string;
 }> {
   const db = await getDb();
-  if (!db) return { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" };
+  if (!db) throw new Error("Database not available");
 
   const conditions = [sql`${llmInvocations.createdAt} >= ${since}`];
   if (until) conditions.push(sql`${llmInvocations.createdAt} <= ${until}`);
@@ -1949,7 +2000,7 @@ export async function getComparablePartnerships(input: {
   creatorNicheTopicNode?: string | null;
 }) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) throw new Error("Database not available");
 
   // I5: Rewritten as a JOIN query instead of N+1 (was 1200+ DB round-trips).
   // We only need a handful of fields for similarity scoring — no need for full profile loads.
