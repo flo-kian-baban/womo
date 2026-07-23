@@ -16,6 +16,7 @@ import {
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
+  getLlmTokenUsageByRunId, getLatestObservationRun,
   getLatestObservationId,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
@@ -32,6 +33,7 @@ import { researchCreator, researchBrand } from "./webResearch";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
+import { newRunId, withAnalysisRun } from "./_core/runContext";
 import type { DecodedSymbols } from "./symbolDecoder";
 import pLimit from "p-limit";
 
@@ -720,6 +722,11 @@ export const appRouter = router({
         platform: z.enum(["TikTok", "Instagram"]),
       }))
       .mutation(async ({ input }) => {
+        // womo_0006: one correlation id per analysis run — every scrape_event
+        // and llm_invocation below inherits it via AsyncLocalStorage (see
+        // _core/runContext.ts), and the observation is stamped with it.
+        const runId = newRunId();
+        return withAnalysisRun(runId, async () => {
         const pipelineStart = Date.now();
         const stepTimings: Array<{ step: string; durationMs: number }> = [];
 
@@ -826,9 +833,9 @@ export const appRouter = router({
         });
         stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
 
-        // ── Collect token metrics from llm_invocations (by time window, since LLM runs before subject exists) ──
-        const pipelineStartTime = new Date(pipelineStart);
-        const tokenMetrics = await getLlmTokenUsageByTimeWindow(pipelineStartTime)
+        // ── Collect token metrics — exact per-run lookup via run_id (womo_0006),
+        // replacing the old time-window inference.
+        const tokenMetrics = await getLlmTokenUsageByRunId(runId)
           .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
 
         const totalDurationMs = Date.now() - pipelineStart;
@@ -847,6 +854,7 @@ export const appRouter = router({
           profile: saved,
           persistence,
           extracted,
+          runId,
           pipelineMetrics: {
             totalDurationMs,
             steps: stepTimings,
@@ -855,6 +863,7 @@ export const appRouter = router({
             videosScraped: researchData?.discoveredVideoPoolJson?.length ?? 0,
           },
         };
+        });
       }),
 
     list: protectedProcedure
@@ -893,6 +902,14 @@ export const appRouter = router({
     getPipelineMetrics: protectedProcedure
       .input(z.object({ subjectId: z.string(), observedAt: z.string().optional() }))
       .query(async ({ input }) => {
+        // Exact per-run lookup when the observation carries a run_id (womo_0006);
+        // the by-subject / time-window paths remain only for pre-run_id rows.
+        const latestRun = await getLatestObservationRun(input.subjectId).catch(() => null);
+        if (latestRun?.runId) {
+          const exact = await getLlmTokenUsageByRunId(latestRun.runId).catch(() => null);
+          if (exact) return exact;
+        }
+
         // Try by subjectId first, fall back to time window around observedAt
         let metrics = await getLlmTokenUsageBySubject(input.subjectId).catch(() => null);
         if (metrics && metrics.llmCalls > 0) return metrics;
@@ -912,6 +929,9 @@ export const appRouter = router({
     reanalyze: protectedProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
+        // womo_0006: reanalyze is its own analysis run
+        const runId = newRunId();
+        return withAnalysisRun(runId, async () => {
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new Error("Creator profile not found");
 
@@ -969,7 +989,8 @@ export const appRouter = router({
         // NOTE: on saved === "none" this returns the PREVIOUS profile — the
         // persistence field is what tells the caller the rerun was not saved.
         const updated = await getCreatorProfileById(input.id);
-        return { profile: updated, persistence, extracted };
+        return { profile: updated, persistence, extracted, runId };
+        });
       }),
 
     // ─── Supplemental Video Ingestion ─────────────────────────────────────────
@@ -1074,10 +1095,12 @@ export const appRouter = router({
           for (let i = 0; i < input.handles.length; i++) {
             try {
               const handle = input.handles[i];
+              // womo_0006: each bulk handle is its own analysis run
+              await withAnalysisRun(newRunId(), async () => {
               // Call the regular analyze endpoint
               const research = await researchCreator(handle, input.platform);
               const extracted = await extractCreatorProfile(handle, input.platform, research.evidenceSummary);
-              
+
               const bulkPersistResult = await persistCreatorToV2({
                 handle,
                 platform: input.platform,
@@ -1114,6 +1137,7 @@ export const appRouter = router({
               // Use loop index i + 1 as completed count — job.progress is a stale
               // snapshot from job creation time and does not reflect live progress.
               updateJobProgress(job.jobId, { completed: i + 1 });
+              });
             } catch (err) {
               recordJobError(job.jobId, i, input.handles[i], String(err));
             }

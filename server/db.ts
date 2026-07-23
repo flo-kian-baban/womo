@@ -16,6 +16,7 @@ import {
   type InsertMatchScore, type InsertAudienceMention,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { currentRunId } from './_core/runContext';
 
 // Re-export legacy types for routers.ts compilation
 export type { InsertUser } from "../drizzle/schema";
@@ -405,6 +406,10 @@ export async function insertObservation(
     bio?: string | null;
     dataConfidenceLevel?: string | null;
     transcriptCount?: number | null;
+    /** Analysis-run correlation id; defaults to the ambient run context. */
+    runId?: string | null;
+    /** Review gate (womo_0006); defaults to 'pending'. */
+    reviewStatus?: "pending" | "accepted" | "declined";
   },
   executor?: DbExecutor,
 ): Promise<string> {
@@ -429,6 +434,10 @@ export async function insertObservation(
       bio: data.bio ?? null,
       dataConfidenceLevel: validateEnum(data.dataConfidenceLevel, VALID_CONFIDENCE_LEVELS, "dataConfidenceLevel"),
       transcriptCount: data.transcriptCount ?? 0,
+      runId: data.runId ?? currentRunId(),
+      // Default 'accepted' preserves pre-gate behavior for ungated paths (brand
+      // until Session 7); the gated creator path passes 'pending' explicitly.
+      reviewStatus: data.reviewStatus ?? "accepted",
     }).returning({ id: observations.id });
 
     return obs;
@@ -451,6 +460,24 @@ export async function updateObservationPersistenceStatus(
   await db.update(observations)
     .set({ persistenceStatus: statusMap })
     .where(eq(observations.id, observationId));
+}
+
+/**
+ * Get the authoritative (is_latest) observation's id + run id for a subject.
+ * Used to resolve exact per-run metrics/diagnostics (womo_0006).
+ */
+export async function getLatestObservationRun(
+  subjectId: string,
+): Promise<{ observationId: string; runId: string | null } | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select({ id: observations.id, runId: observations.runId })
+    .from(observations)
+    .where(and(eq(observations.subjectId, subjectId), eq(observations.isLatest, true)))
+    .limit(1);
+
+  return rows[0] ? { observationId: rows[0].id, runId: rows[0].runId } : null;
 }
 
 /**
@@ -798,6 +825,7 @@ export async function insertScrapeEvent(data: {
     silentFailureDetected: data.silentFailureDetected ?? false,
     failureReason: data.failureReason ?? null,
     durationMs: data.durationMs ?? null,
+    runId: currentRunId(),
   }).returning({ id: scrapeEvents.id });
 
   return result[0].id;
@@ -839,6 +867,7 @@ export async function insertLlmInvocation(data: {
     durationMs: data.durationMs ?? null,
     status: data.status ?? "success",
     errorMessage: data.errorMessage ?? null,
+    runId: currentRunId(),
   }).returning({ id: llmInvocations.id });
 
   return result[0].id;
@@ -871,8 +900,36 @@ export async function getLlmTokenUsageBySubject(subjectId: string): Promise<{
 }
 
 /**
+ * Get aggregated LLM token usage for one analysis run — exact, via run_id
+ * (womo_0006). Replaces time-window inference for run-tagged data.
+ */
+export async function getLlmTokenUsageByRunId(runId: string): Promise<{
+  inputTokens: number; outputTokens: number; totalTokens: number; llmCalls: number; model: string;
+}> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select({
+    inputTokens: llmInvocations.inputTokens,
+    outputTokens: llmInvocations.outputTokens,
+    model: llmInvocations.model,
+  }).from(llmInvocations).where(eq(llmInvocations.runId, runId));
+
+  let inputTokens = 0, outputTokens = 0, llmCalls = 0;
+  let model = "unknown";
+  for (const r of rows) {
+    inputTokens += r.inputTokens ?? 0;
+    outputTokens += r.outputTokens ?? 0;
+    if (r.model) model = r.model;
+    llmCalls++;
+  }
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, llmCalls, model };
+}
+
+/**
  * Get aggregated LLM token usage for invocations since a given timestamp.
- * Used when subjectId isn't available yet (LLM runs before persistence).
+ * Kept ONLY as the fallback for observations that predate run_id tracking
+ * (womo_0006) — run-tagged data uses getLlmTokenUsageByRunId instead.
  */
 export async function getLlmTokenUsageByTimeWindow(since: Date, until?: Date): Promise<{
   inputTokens: number; outputTokens: number; totalTokens: number; llmCalls: number; model: string;
