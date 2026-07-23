@@ -234,6 +234,17 @@ export const observations = pgTable("observations", {
   // NULL = row predates persistence tracking.
   persistenceStatus: jsonb("persistence_status"),
 
+  // Analyst review gate (womo_0006): pending | accepted | declined
+  // (varchar + CHECK in DB). Declined = archived, never hard-deleted.
+  // Pre-womo_0006 rows were backfilled to 'accepted' (they predate the gate).
+  reviewStatus: varchar("review_status", { length: 16 }).default("pending").notNull(),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewedBy: varchar("reviewed_by", { length: 64 }),
+
+  // Analysis-run correlation id (womo_0006): joins scrape_events.run_id and
+  // llm_invocations.run_id for exact per-run diagnostics. NULL = predates it.
+  runId: uuid("run_id"),
+
   // Timestamps
   observedAt: timestamp("observed_at", { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -241,6 +252,8 @@ export const observations = pgTable("observations", {
   subjectIdx: index("obs_subject_idx").on(t.subjectId),
   latestIdx: index("obs_latest_idx").on(t.subjectId, t.isLatest),
   timeIdx: index("obs_time_idx").on(t.subjectId, t.observedAt),
+  reviewIdx: index("obs_review_idx").on(t.reviewStatus),
+  runIdx: index("obs_run_idx").on(t.runId),
 }));
 
 
@@ -564,12 +577,16 @@ export const llmInvocations = pgTable("llm_invocations", {
   status: varchar("status", { length: 16 }).default("success").notNull(),
   errorMessage: text("error_message"),
 
+  // Analysis-run correlation id (womo_0006). NULL = predates run tracking.
+  runId: uuid("run_id"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   observationIdx: index("llm_observation_idx").on(t.observationId),
   purposeIdx: index("llm_purpose_idx").on(t.purpose),
   modelIdx: index("llm_model_idx").on(t.model),
   statusFailedIdx: index("llm_status_failed_idx").on(t.status).where(sql`${t.status} = 'failed'`),
+  runIdx: index("llm_run_idx").on(t.runId),
 }));
 
 
@@ -591,11 +608,15 @@ export const scrapeEvents = pgTable("scrape_events", {
   failureReason: text("failure_reason"),
   durationMs: integer("duration_ms"),
 
+  // Analysis-run correlation id (womo_0006). NULL = predates run tracking.
+  runId: uuid("run_id"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   observationIdx: index("se_observation_idx").on(t.observationId),
   methodIdx: index("se_method_idx").on(t.scrapeMethod),
   failureIdx: index("se_failure_idx").on(t.silentFailureDetected),
+  runIdx: index("se_run_idx").on(t.runId),
 }));
 
 

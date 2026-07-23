@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ELInol8LTAYOaG3ZuCHHMvqUdP4VmKBxHxlwPKAHGRfsGtiHf6T0CjXDTHpADk8
+\restrict h2Z30PzQjP5cv8HDUKyrENPscVzySjJqUmJ90qACE9ntTychGUZbMb7QlqQe6k1
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.10 (Homebrew)
@@ -549,6 +549,7 @@ CREATE TABLE public.llm_invocations (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     status character varying(16) DEFAULT 'success'::character varying NOT NULL,
     error_message text,
+    run_id uuid,
     CONSTRAINT llm_invocations_status_check CHECK (((status)::text = ANY ((ARRAY['success'::character varying, 'failed'::character varying])::text[])))
 );
 
@@ -702,7 +703,12 @@ CREATE TABLE public.observations (
     observed_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     persistence_status jsonb,
-    CONSTRAINT observations_persistence_status_check CHECK (((persistence_status IS NULL) OR (jsonb_typeof(persistence_status) = 'object'::text)))
+    review_status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    reviewed_at timestamp with time zone,
+    reviewed_by character varying(64),
+    run_id uuid,
+    CONSTRAINT observations_persistence_status_check CHECK (((persistence_status IS NULL) OR (jsonb_typeof(persistence_status) = 'object'::text))),
+    CONSTRAINT observations_review_status_check CHECK (((review_status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'declined'::character varying])::text[])))
 );
 
 
@@ -711,6 +717,27 @@ CREATE TABLE public.observations (
 --
 
 COMMENT ON COLUMN public.observations.persistence_status IS 'Per-component enrichment persistence outcomes for this observation run: {component: {status, reason, at}}. Status vocabulary: success | failed | skipped_no_data (subject genuinely has no such data) | skipped_not_attempted (write not attempted — config/feature gap). NULL = row predates womo_0005 tracking.';
+
+
+--
+-- Name: COLUMN observations.review_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.observations.review_status IS 'Analyst review gate (womo_0006): pending (awaiting review) | accepted (in corpus, matchable) | declined (archived — hidden from library/matching but retained with full provenance; never hard-deleted). Rows created before womo_0006 were backfilled to accepted (they predate the gate).';
+
+
+--
+-- Name: COLUMN observations.reviewed_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.observations.reviewed_by IS 'Free-text analyst name (two analysts, PIN auth carries no identity — no user system).';
+
+
+--
+-- Name: COLUMN observations.run_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.observations.run_id IS 'Correlation id for the analysis run that produced this observation (womo_0006). Joins scrape_events.run_id and llm_invocations.run_id for exact per-run diagnostics. NULL = row predates run tracking.';
 
 
 --
@@ -762,7 +789,8 @@ CREATE TABLE public.scrape_events (
     silent_failure_detected boolean DEFAULT false,
     failure_reason text,
     duration_ms integer,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    run_id uuid
 );
 
 
@@ -1258,6 +1286,13 @@ CREATE INDEX llm_purpose_idx ON public.llm_invocations USING btree (purpose);
 
 
 --
+-- Name: llm_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX llm_run_idx ON public.llm_invocations USING btree (run_id);
+
+
+--
 -- Name: llm_status_failed_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1370,6 +1405,20 @@ CREATE INDEX obs_latest_idx ON public.observations USING btree (subject_id, is_l
 
 
 --
+-- Name: obs_review_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX obs_review_idx ON public.observations USING btree (review_status);
+
+
+--
+-- Name: obs_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX obs_run_idx ON public.observations USING btree (run_id);
+
+
+--
 -- Name: obs_subject_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1430,6 +1479,13 @@ CREATE INDEX se_method_idx ON public.scrape_events USING btree (scrape_method);
 --
 
 CREATE INDEX se_observation_idx ON public.scrape_events USING btree (observation_id);
+
+
+--
+-- Name: se_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX se_run_idx ON public.scrape_events USING btree (run_id);
 
 
 --
@@ -1880,5 +1936,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ELInol8LTAYOaG3ZuCHHMvqUdP4VmKBxHxlwPKAHGRfsGtiHf6T0CjXDTHpADk8
+\unrestrict h2Z30PzQjP5cv8HDUKyrENPscVzySjJqUmJ90qACE9ntTychGUZbMb7QlqQe6k1
 

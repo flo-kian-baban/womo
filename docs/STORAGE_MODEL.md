@@ -111,12 +111,12 @@
 | discovered_at | timestamptz | no | now() | |
 Unique: `(platform, handle)`.
 
-### 3. `observations` (12 cols) — `schema.ts:206`
+### 3. `observations` (16 cols) — `schema.ts:206`
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
 | subject_id | uuid | **no** | — | FK→subjects (cascade) |
-| is_latest | boolean | **no** | true | marks current snapshot |
+| is_latest | boolean | **no** | true | marks the **authoritative** snapshot (see [§3b](#3b-review-gate-womo_0006)) |
 | follower_count | **bigint** | yes | — | follower count |
 | following_count | **bigint** | yes | — | following count |
 | engagement_rate | real | yes | — | percentage (0–100) |
@@ -124,6 +124,10 @@ Unique: `(platform, handle)`.
 | data_confidence_level | enum `confidence_level` | yes | — | high/medium/low |
 | transcript_count | integer | yes | 0 | # transcripts fetched |
 | persistence_status | jsonb | yes | — | per-component enrichment outcomes *(added by `womo_0005`; see [§3a](#3a-persistence_status-vocabulary))* |
+| review_status | varchar(16) + CHECK | **no** | 'pending' | `pending` \| `accepted` \| `declined` *(added by `womo_0006`; see [§3b](#3b-review-gate-womo_0006); pre-gate rows backfilled to accepted)* |
+| reviewed_at | timestamptz | yes | — | when the analyst reviewed *(womo_0006)* |
+| reviewed_by | varchar(64) | yes | — | free-text analyst name — no user system *(womo_0006)* |
+| run_id | uuid | yes | — | analysis-run correlation id, joins scrape_events/llm_invocations *(womo_0006; NULL = predates it)* |
 | observed_at | timestamptz | no | now() | |
 | created_at | timestamptz | no | now() | |
 
@@ -143,6 +147,32 @@ CHECK constraint enforces the value is a JSON object (or NULL).
 The two skip statuses are deliberately distinct: `skipped_no_data` is a data-legitimacy
 signal about the subject; `skipped_not_attempted` marks incomplete collection on our side.
 `NULL` (whole column) = the row predates womo_0005 tracking.
+
+#### 3b. Review gate (womo_0006)
+
+Every analysis run produces an observation with `review_status = 'pending'`. An
+analyst reviews it against the diagnostic breakdown and **accepts** (enters the
+corpus, becomes matchable) or **declines** (archived — hidden from
+library/matching/reports but retained with full provenance for scraper-failure
+analysis; **never hard-deleted**). Rows created before womo_0006 were backfilled
+to `accepted` (they predate the gate).
+
+**Reconciliation with `is_latest`** — `is_latest` marks the *authoritative*
+observation for display and matching, not merely the newest:
+- a new pending run only takes `is_latest` when the subject has **no accepted
+  observation** (first-ever analysis — profile visible, clearly marked pending);
+- if an accepted observation exists it keeps `is_latest`; the pending run waits;
+- **accept** transfers `is_latest` to the accepted run;
+- **decline** relinquishes it (newest accepted is promoted if one exists; a
+  declined-only subject holds no `is_latest` row and disappears from default
+  views, reachable via the archived view).
+
+**Run id** — `observations.run_id = scrape_events.run_id = llm_invocations.run_id`
+for the run that produced them (app-generated correlation UUID, no runs table).
+Scrape/LLM rows are written *before* the observation exists, so `run_id` is the
+only reliable key joining a full run; diagnostics are exact, not
+time-window-inferred. Session 6 gates the **creator** path only; brand
+observations still persist as accepted until Session 7.
 
 ### 4. `creator_observations` (33 cols) — `schema.ts:255`
 | Column | Type | Null | Default | Meaning |
@@ -324,7 +354,7 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | engagement_delta | real | yes | — | |
 | detected_at | timestamptz | no | now() | |
 
-### 12. `llm_invocations` (15 cols) — `schema.ts:530` — see [§8 Provenance](#8-provenance--cost-tables-detail)
+### 12. `llm_invocations` (16 cols) — `schema.ts:530` — see [§8 Provenance](#8-provenance--cost-tables-detail)
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
@@ -341,9 +371,10 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | duration_ms | integer | yes | — | populated on success **and** failure (distinguishes timeout-after-60s from instant rejection) |
 | status | varchar(16) + CHECK | **no** | 'success' | `success` \| `failed` *(added by `womo_0005`; partial index `llm_status_failed_idx` on failed rows)* |
 | error_message | text | yes | — | error text for failed invocations *(added by `womo_0005`)* |
+| run_id | uuid | yes | — | analysis-run correlation id *(womo_0006; indexed `llm_run_idx`)* |
 | created_at | timestamptz | no | now() | |
 
-### 13. `scrape_events` (12 cols) — `schema.ts:558` — see [§8 Provenance](#8-provenance--cost-tables-detail)
+### 13. `scrape_events` (13 cols) — `schema.ts:558` — see [§8 Provenance](#8-provenance--cost-tables-detail)
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
@@ -357,6 +388,7 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | silent_failure_detected | boolean | yes | false | soft-block heuristic — **written+indexed, never aggregated/alerted** |
 | failure_reason | text | yes | — | |
 | duration_ms | integer | yes | — | |
+| run_id | uuid | yes | — | analysis-run correlation id *(womo_0006; indexed `se_run_idx`)* |
 | created_at | timestamptz | no | now() | |
 
 ### 14. `match_scores` (52 cols) — `schema.ts:584`
@@ -566,8 +598,9 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | 20260619164032 | womo_0003_schema_audit_fixes |
 | 20260722070910 | **womo_0004_db_hardening** (RLS on all tables, `llm_invocations.match_score_id` FK, drop duplicate `nt_slug_idx`) |
 | 20260723 (see ledger) | **womo_0005_persistence_completeness** (`observations.persistence_status` jsonb + vocabulary [§3a](#3a-persistence_status-vocabulary); `llm_invocations.status`/`error_message` + partial index `llm_status_failed_idx`; `scrape_events` unchanged — failure columns already existed) |
+| 20260723 (see ledger) | **womo_0006_review_gate_and_run_id** (`observations.review_status`/`reviewed_at`/`reviewed_by` + backfill to accepted; `run_id` on observations/scrape_events/llm_invocations; 4 indexes — see [§3b](#3b-review-gate-womo_0006)) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **9** — `womo_0004_db_hardening` and `womo_0005_persistence_completeness` were applied in later sessions. This doc reflects the live state.
+> *Note:* the original work order referenced "7 migrations"; there are now **10** — `womo_0004_db_hardening`, `womo_0005_persistence_completeness`, and `womo_0006_review_gate_and_run_id` were applied in later sessions. This doc reflects the live state.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).
