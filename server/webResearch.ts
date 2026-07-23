@@ -668,6 +668,8 @@ async function fetchTikTokVideosFromAPI(
   shares: number;
   createTime: number;
   musicOriginal: boolean;
+  musicTitle: string;
+  musicArtist: string;
   duetEnabled: boolean;
   stitchEnabled: boolean;
   isAd: boolean;
@@ -683,6 +685,8 @@ async function fetchTikTokVideosFromAPI(
     shares: number;
     createTime: number;
     musicOriginal: boolean;
+    musicTitle: string;
+    musicArtist: string;
     duetEnabled: boolean;
     stitchEnabled: boolean;
     isAd: boolean;
@@ -721,6 +725,8 @@ async function fetchTikTokVideosFromAPI(
         shares: Number(item.stats?.shareCount ?? 0),
         createTime: Number(item.createTime ?? 0),
         musicOriginal: Boolean(item.music?.original ?? false),
+        musicTitle: String(item.music?.title ?? ""),
+        musicArtist: String(item.music?.authorName ?? ""),
         duetEnabled: Boolean(item.duetEnabled ?? false),
         stitchEnabled: Boolean(item.stitchEnabled ?? false),
         isAd: Boolean(item.isAd ?? false),
@@ -776,6 +782,8 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     shares: number;
     createTime: number;      // Unix timestamp (seconds)
     musicOriginal: boolean;  // true = creator made original audio
+    musicTitle: string;      // Session 7: carried through to content_items (J-4)
+    musicArtist: string;
     duetEnabled: boolean;
     stitchEnabled: boolean;
     isAd: boolean;
@@ -886,7 +894,8 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
 
           videoItems.push({
             id: videoId, caption: desc, views, likes, comments, saves, shares,
-            createTime, musicOriginal, duetEnabled, stitchEnabled, isAd, durationMs,
+            createTime, musicOriginal, musicTitle, musicArtist: musicAuthor,
+            duetEnabled, stitchEnabled, isAd, durationMs,
           });
         }
       } catch (err) {
@@ -1025,7 +1034,9 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
       const collaborations = (item.caption.match(/@[a-zA-Z0-9_.]+/g) ?? []).map(m => m.slice(1));
       try {
         return await fetchVideoTranscriptMultiPath(handle, item.id, item.caption, bucket, item.createTime, {
-          musicTitle: (item as any).musicTitle,
+          // Session 7: musicTitle is now a real VideoItem field (was an
+          // undefined any-cast) — transcript entries get musicMetadata.soundName
+          musicTitle: item.musicTitle || undefined,
           musicOriginal: item.musicOriginal,
           duetEnabled: item.duetEnabled,
           stitchEnabled: item.stitchEnabled,
@@ -1169,8 +1180,11 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
       saves: v.saves,
       shares: v.shares,
       musicOriginal: v.musicOriginal,
-      musicTitle: "",
-      musicArtist: "",
+      // Session 7 (J-4 creator side): carry the REAL scraped music metadata —
+      // these previously wrote hardcoded empty strings, permanently erasing
+      // music data before persistence.
+      musicTitle: v.musicTitle || undefined,
+      musicArtist: v.musicArtist || undefined,
       durationSec: Math.round(v.durationMs / 1000),
       alreadySampled: sampledIds.has(v.id),
     }));

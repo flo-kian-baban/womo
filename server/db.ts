@@ -1325,6 +1325,20 @@ export async function getCreatorProfileById(subjectId: string) {
     // From content_items
     discoveredVideoPoolJson: discoveredPool.length > 0 ? discoveredPool : null,
     transcriptExcerpts: transcriptsArray.length > 0 ? transcriptsArray : null,
+    // Session 7 (J-4 creator side): the shape fit.calculate reads for music
+    // overlap — transcripts[].musicMetadata.soundName. Built from the
+    // transcript-bearing content_items rows, mirroring the fresh-analysis
+    // TranscriptEntry semantics (music of sampled/transcribed videos).
+    transcripts: contentItemRows
+      .filter(ci => ci.transcriptText)
+      .map(ci => ({
+        videoId: ci.platformVideoId ?? "",
+        transcript: ci.transcriptText!,
+        wordCount: ci.transcriptWordCount ?? 0,
+        musicMetadata: ci.musicTitle
+          ? { soundName: ci.musicTitle, isOriginal: ci.isOriginalAudio ?? undefined }
+          : undefined,
+      })),
     recentVideoTitles: videoTitles.length > 0 ? videoTitles : null,
     // V1 compat
     location: row.creator_observations.primaryRegion ?? null,
