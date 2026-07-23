@@ -3,12 +3,14 @@
 Integration tests that exercise the real `server/db.ts` helpers against a
 **disposable local Docker Postgres** — never production.
 
-## Status: ⏳ pending activation
+## Status: ✅ active
 
-The harness (schema, seed chain, round-trip + cascade-delete assertions, config,
-scripts) is complete and type-checks. It was **not executed end-to-end** in the
-authoring session because the Docker daemon was not running there. Start Docker,
-then run the three commands below to activate.
+Runs end-to-end against Docker Postgres (first executed in Session 5, 2026-07-23).
+Two latent harness bugs were fixed at activation: pg_dump emits psql
+meta-commands (`\restrict`/`\unrestrict`) and its own `CREATE SCHEMA public;`,
+neither of which the `pg` driver can execute after the harness's own
+`CREATE SCHEMA` — both are filtered out when `schema.sql` is loaded, so future
+`pg_dump` regenerations need no hand-editing.
 
 ## Run
 
@@ -40,7 +42,18 @@ no extensions needed — UUID PKs use core `gen_random_uuid()`).
 **Regenerate `schema.sql`** with the `pg_dump` command above whenever a Supabase migration changes
 the schema, so the integration structure stays in sync.
 
-## What the example test covers
+## What the tests cover
+
+`persistence.integration.ts` (Session 5 — persistence integrity, hybrid model):
+1. **Atomic core rollback** (creator + brand): a constraint violation at a known
+   mid-core step (varchar overflow / bad real cast) rolls back the whole
+   subject → handle → observation → subtype chain — no orphans.
+2. **Enrichment failure isolation**: a poisoned `signal_values` write fails and
+   is recorded (`failed` + root-cause reason) while the core and sibling
+   enrichments (decoded_signals) still save.
+3. **`persistence_status` truth**: returned map == stored JSONB == actual row
+   counts, including the `skipped_no_data` vs `skipped_not_attempted` distinction
+   on the brand path.
 
 `db.integration.ts`:
 1. Seeds `subject → observation → creator_observation` via the real helpers and asserts

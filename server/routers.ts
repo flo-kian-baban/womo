@@ -74,6 +74,20 @@ function recordOutcome(
 }
 
 /**
+ * Extract the root-cause message for provenance. Drizzle wraps driver errors
+ * ("Failed query: insert into ... params: ...") with the real Postgres error
+ * on `cause` — the cause is the signal, the wrapper is mostly noise.
+ */
+function describeError(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : "";
+    return (causeMsg || err.message).slice(0, 500);
+  }
+  return String(err).slice(0, 500);
+}
+
+/**
  * Run one enrichment write. A thrown error is recorded as `failed` and does NOT
  * propagate — a broken enrichment must never prevent the others from saving.
  */
@@ -90,9 +104,8 @@ async function runEnrichment(
     await action();
     recordOutcome(map, component, "success");
   } catch (err) {
-    const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500);
     console.error(`[persist] Enrichment '${component}' failed (continuing with others):`, err);
-    recordOutcome(map, component, "failed", reason);
+    recordOutcome(map, component, "failed", describeError(err));
   }
 }
 
@@ -134,7 +147,9 @@ function summarizePersistence(result: PersistResult): PersistenceSummary {
   };
 }
 
-async function persistCreatorToV2(params: {
+// Exported for the Docker Postgres integration suite (server/integration/) —
+// not part of the public API surface.
+export async function persistCreatorToV2(params: {
   handle: string;
   platform: string;
   profileUrl?: string;
@@ -327,14 +342,16 @@ async function persistCreatorToV2(params: {
     return { subjectId, observationId, persistence };
   } catch (err) {
     console.error("[V2 Pipeline] Creator persist failed:", err);
-    return { error: err instanceof Error ? err.message : "Unknown error" };
+    return { error: describeError(err) };
   }
 }
 
 /**
  * Persist a full brand analysis result to the V2 schema.
  */
-async function persistBrandToV2(params: {
+// Exported for the Docker Postgres integration suite (server/integration/) —
+// not part of the public API surface.
+export async function persistBrandToV2(params: {
   brandName: string;
   brandUrl?: string;
   category?: string;
@@ -633,7 +650,7 @@ async function persistBrandToV2(params: {
     return { subjectId, observationId, persistence };
   } catch (err) {
     console.error("[V2 Pipeline] Brand persist failed (non-fatal):", err);
-    return { error: err instanceof Error ? err.message : "Unknown error" };
+    return { error: describeError(err) };
   }
 }
 

@@ -39,7 +39,13 @@ suite("db.ts integration (ephemeral Postgres)", () => {
     const admin = new Client({ connectionString: TEST_URL });
     await admin.connect();
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
-    const ddl = readFileSync(path.join(here, "schema.sql"), "utf8");
+    // pg_dump output needs two adjustments to run through the pg driver:
+    //  - psql meta-commands (\restrict, \unrestrict) are not SQL — strip them;
+    //  - the dump's own CREATE SCHEMA public collides with the one above.
+    const ddl = readFileSync(path.join(here, "schema.sql"), "utf8")
+      .split("\n")
+      .filter(line => !line.startsWith("\\") && line.trim() !== "CREATE SCHEMA public;")
+      .join("\n");
     await admin.query(ddl);
     await admin.end();
   });
