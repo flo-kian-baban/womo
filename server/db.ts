@@ -50,6 +50,23 @@ export async function getDb() {
   return _db;
 }
 
+// ─── Transaction plumbing ────────────────────────────────────────────────────
+// Write helpers for the identity core accept an optional `executor` so the
+// subject → observation → subtype-row chain can run inside ONE transaction
+// (see persistCreatorToV2/persistBrandToV2 in routers.ts). When no executor is
+// passed, each helper runs standalone against the pool exactly as before.
+
+export type DbHandle = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+export type DbTransaction = Parameters<Parameters<DbHandle["transaction"]>[0]>[0];
+export type DbExecutor = DbHandle | DbTransaction;
+
+/** Run `fn` inside a single database transaction; rolls back on any throw. */
+export async function withTransaction<T>(fn: (tx: DbTransaction) => Promise<T>): Promise<T> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(fn);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // USERS (auth layer — migrated from V1)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -190,8 +207,8 @@ export async function upsertSubject(data: {
   brandCategory?: string;
   campaignType?: string;
   engagementTier?: string;
-}): Promise<string> {
-  const db = await getDb();
+}, executor?: DbExecutor): Promise<string> {
+  const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   const platform = data.primaryPlatform ? normalizePlatform(data.primaryPlatform) : undefined;
@@ -294,8 +311,9 @@ export async function upsertPlatformHandle(
   platform: string,
   handle: string,
   profileUrl?: string,
+  executor?: DbExecutor,
 ): Promise<string> {
-  const db = await getDb();
+  const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   const normalizedPlatform = normalizePlatform(platform);
@@ -335,12 +353,14 @@ export async function insertObservation(
     dataConfidenceLevel?: string | null;
     transcriptCount?: number | null;
   },
+  executor?: DbExecutor,
 ): Promise<string> {
-  const db = await getDb();
+  const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   // FIX 2.6: Wrap in transaction so isLatest update + insert are atomic.
   // Previously, a failed insert after the update left zero 'latest' observations.
+  // When called with a transaction executor this nests as a savepoint.
   const result = await db.transaction(async (tx) => {
     // Set all previous observations for this subject to isLatest=false
     await tx.update(observations)
@@ -421,8 +441,9 @@ export async function insertCreatorObservation(
     symbolicSummary?: string | null;
     aiSummary?: string | null;
   },
+  executor?: DbExecutor,
 ): Promise<string> {
-  const db = await getDb();
+  const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   const result = await db.insert(creatorObservations).values({
@@ -1199,8 +1220,9 @@ export async function insertBrandObservation(
     semanticWordCount?: number | null;
     crawledPagesCount?: number | null;
   },
+  executor?: DbExecutor,
 ): Promise<string> {
-  const db = await getDb();
+  const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   const result = await db.insert(brandObservations).values({

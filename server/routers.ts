@@ -6,6 +6,8 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { analysisRateLimitedProcedure, fitRateLimitedProcedure, bulkRateLimitedProcedure, loginRateLimitedProcedure } from "./_core/rateLimit";
 import { TRPCError } from "@trpc/server";
 import {
+  // Transaction plumbing (atomic identity core)
+  withTransaction,
   // V2 write functions
   upsertSubject, upsertPlatformHandle, insertObservation, insertCreatorObservation,
   insertSignalValues, insertDecodedSignals, insertContentItems,
@@ -62,61 +64,72 @@ async function persistCreatorToV2(params: {
   try {
     const { handle, platform, profileUrl, displayName, pronouns, extracted, researchData } = params;
 
-    // 1. upsertSubject
-    const subjectId = await upsertSubject({
-      subjectType: "creator",
-      primaryHandle: handle,
-      primaryPlatform: platform,
-      displayName,
-      profileUrl,
-      pronouns,
-      latestArchetype: extracted.archetype,
-      engagementTier: computeEngagementTierLocal(researchData.followerCount),
-    });
+    // ── ATOMIC IDENTITY CORE ──
+    // subject → platform handle → observation → creator_observation commit as
+    // ONE transaction: either the whole identity chain persists or none of it
+    // does (no orphaned observations / handles). The platform handle is part of
+    // the core because it FK-references the subject created in the same
+    // transaction. Enrichments (signals, content items, transcripts) are
+    // written independently below.
+    const { subjectId, observationId } = await withTransaction(async (tx) => {
+      // 1. upsertSubject
+      const subjectId = await upsertSubject({
+        subjectType: "creator",
+        primaryHandle: handle,
+        primaryPlatform: platform,
+        displayName,
+        profileUrl,
+        pronouns,
+        latestArchetype: extracted.archetype,
+        engagementTier: computeEngagementTierLocal(researchData.followerCount),
+      }, tx);
 
-    // 2. upsertPlatformHandle
-    await upsertPlatformHandle(subjectId, platform, handle, profileUrl);
+      // 2. upsertPlatformHandle
+      await upsertPlatformHandle(subjectId, platform, handle, profileUrl, tx);
 
-    // 3. insertObservation
-    const observationId = await insertObservation(subjectId, {
-      followerCount: researchData.followerCount ?? null,
-      followingCount: researchData.followingCount ?? null,
-      engagementRate: researchData.engagementRate ?? null,
-      bio: researchData.bio ?? null,
-      dataConfidenceLevel: researchData.dataConfidenceLevel ?? null,
-      transcriptCount: researchData.transcriptCount ?? 0,
-    });
+      // 3. insertObservation
+      const observationId = await insertObservation(subjectId, {
+        followerCount: researchData.followerCount ?? null,
+        followingCount: researchData.followingCount ?? null,
+        engagementRate: researchData.engagementRate ?? null,
+        bio: researchData.bio ?? null,
+        dataConfidenceLevel: researchData.dataConfidenceLevel ?? null,
+        transcriptCount: researchData.transcriptCount ?? 0,
+      }, tx);
 
-    // 4. insertCreatorObservation
-    await insertCreatorObservation(observationId, {
-      totalLikes: researchData.totalLikes ?? null,
-      videoCount: researchData.videoCount ?? null,
-      totalViews: researchData.totalViews ?? null,
-      avgViews: researchData.avgViews ?? null,
-      avgVideoDuration: null, // I2: computed after contentItems insertion below
-      primaryRegion: researchData.location ?? null,
-      archetype: extracted.archetype,
-      toneRegister: extracted.toneRegister,
-      parasocialBondStrength: extracted.parasocialBondStrength,
-      audienceRelationshipType: extracted.audienceRelationshipType,
-      barthesMyth: extracted.barthesMyth,
-      culturalCapital: extracted.culturalCapital,
-      goffmanStageConsistency: extracted.goffmanStageConsistency,
-      driftSignal: extracted.driftSignal,
-      stuartHallDecoding: extracted.stuartHallDecoding,
-      nicheTopicNode: extracted.nicheTopicNode,
-      undergroundDensity: extracted.undergroundDensity,
-      mainstreamBleed: extracted.mainstreamBleed,
-      remixRate: extracted.remixRate,
-      brandSaturation: extracted.brandSaturation,
-      rogersAdopterStage: extracted.rogersAdopterStage,
-      creatorNichePosition: extracted.creatorNichePosition,
-      lifecyclePhase: extracted.lifecyclePhase,
-      barthesNicheMeaning: extracted.barthesNicheMeaning,
-      turnerLiminalPhase: extracted.turnerLiminalPhase,
-      culturalVelocity: researchData.culturalVelocity ?? null,
-      symbolicSummary: (researchData.decodedSymbols as any)?.symbolicSummary ?? null,
-      aiSummary: extracted.aiSummary,
+      // 4. insertCreatorObservation
+      await insertCreatorObservation(observationId, {
+        totalLikes: researchData.totalLikes ?? null,
+        videoCount: researchData.videoCount ?? null,
+        totalViews: researchData.totalViews ?? null,
+        avgViews: researchData.avgViews ?? null,
+        avgVideoDuration: null, // I2: computed after contentItems insertion below
+        primaryRegion: researchData.location ?? null,
+        archetype: extracted.archetype,
+        toneRegister: extracted.toneRegister,
+        parasocialBondStrength: extracted.parasocialBondStrength,
+        audienceRelationshipType: extracted.audienceRelationshipType,
+        barthesMyth: extracted.barthesMyth,
+        culturalCapital: extracted.culturalCapital,
+        goffmanStageConsistency: extracted.goffmanStageConsistency,
+        driftSignal: extracted.driftSignal,
+        stuartHallDecoding: extracted.stuartHallDecoding,
+        nicheTopicNode: extracted.nicheTopicNode,
+        undergroundDensity: extracted.undergroundDensity,
+        mainstreamBleed: extracted.mainstreamBleed,
+        remixRate: extracted.remixRate,
+        brandSaturation: extracted.brandSaturation,
+        rogersAdopterStage: extracted.rogersAdopterStage,
+        creatorNichePosition: extracted.creatorNichePosition,
+        lifecyclePhase: extracted.lifecyclePhase,
+        barthesNicheMeaning: extracted.barthesNicheMeaning,
+        turnerLiminalPhase: extracted.turnerLiminalPhase,
+        culturalVelocity: researchData.culturalVelocity ?? null,
+        symbolicSummary: (researchData.decodedSymbols as any)?.symbolicSummary ?? null,
+        aiSummary: extracted.aiSummary,
+      }, tx);
+
+      return { subjectId, observationId };
     });
 
     // 5. insertSignalValues
@@ -230,73 +243,83 @@ async function persistBrandToV2(params: {
   try {
     const { brandName, brandUrl, category, extracted, weights, reviewFields, tiktokMetadata, instagramMetadata, mentionFields, symbolFields } = params;
 
-    // 1. upsertSubject
-    const subjectId = await upsertSubject({
-      subjectType: "brand",
-      displayName: brandName,
-      websiteUrl: brandUrl,
-      brandCategory: category ?? extracted.category,
-      latestArchetype: extracted.archetype,
-      latestBrandArchetype: extracted.brandArchetypeClassification,
-      brandType: extracted.brandType,
-      campaignType: extracted.campaignType,
-    });
-
-    // 2. insertObservation
+    // ── ATOMIC IDENTITY CORE ──
+    // subject → observation → brand_observation commit as ONE transaction:
+    // either the whole identity chain persists or none of it does. Enrichments
+    // (signals, mentions, content items, IG handle) are written independently
+    // below.
+    const tiktokHandle = tiktokMetadata?.channelHandle ?? null;
     // Use the higher follower count between TikTok and Instagram
     const bestFollowerCount = Math.max(
       tiktokMetadata?.followerCount ?? 0,
       instagramMetadata?.followerCount ?? 0,
     ) || null;
-    const observationId = await insertObservation(subjectId, {
-      followerCount: bestFollowerCount,
-      engagementRate: tiktokMetadata?.engagementRate ?? instagramMetadata?.engagementRate ?? null,
-      dataConfidenceLevel: params.dataConfidenceLevel ?? null,
-    });
 
-    // 3. insertBrandObservation
-    const tiktokHandle = tiktokMetadata?.channelHandle ?? null;
-    await insertBrandObservation(observationId, {
-      brandArchetypeClassification: extracted.brandArchetypeClassification,
-      archetype: extracted.archetype,
-      emotionalPromise: extracted.emotionalPromise,
-      audienceTribe: extracted.audienceTribe,
-      culturalTension: extracted.culturalTension,
-      brandTone: extracted.brandTone,
-      barthesMyth: extracted.barthesMyth,
-      brandCulturalCapital: extracted.brandCulturalCapital,
-      brandGoffmanConsistency: extracted.brandGoffmanStageConsistency,
-      brandDriftSignal: extracted.brandDriftSignal,
-      brandHallDecoding: extracted.brandStuartHallDecoding,
-      brandRogersStage: extracted.brandRogersAdopterStage,
-      brandLiminalPhase: extracted.brandTurnerLiminalPhase,
-      brandLifecyclePhase: extracted.brandLifecyclePhase,
-      brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
-      brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
-      weightAlpha: weights.alpha,
-      weightBeta: weights.beta,
-      weightGamma: weights.gamma,
-      weightPriority: weights.priority,
-      googleRating: reviewFields.googleRating ?? null,
-      googleReviewCount: reviewFields.googleReviewCount ?? null,
-      googleReviewExcerpts: reviewFields.googleReviewExcerpts ?? null,
-      yelpRating: reviewFields.yelpRating ?? null,
-      yelpReviewCount: reviewFields.yelpReviewCount ?? null,
-      overallRating: reviewFields.overallRating ?? null,
-      totalReviews: reviewFields.totalReviews ?? null,
-      tiktokHandle,
-      tiktokFollowerCount: tiktokMetadata?.followerCount ?? null,
-      tiktokEngagementRate: tiktokMetadata?.engagementRate ?? null,
-      mentionTotalCount: mentionFields.mentionTotalCount ?? null,
-      mentionUniqueAuthors: mentionFields.mentionUniqueAuthors ?? null,
-      mentionSentiment: mentionFields.mentionSentiment ?? null,
-      mentionSentimentConfidence: mentionFields.mentionSentimentConfidence ?? null,
-      mentionAudienceSummary: mentionFields.mentionAudienceSummary ?? null,
-      symbolicSummary: symbolFields.brandDecodedSymbols?.symbolicSummary ?? null,
-      aiSummary: extracted.aiSummary,
-      yelpReviewExcerpts: reviewFields.yelpReviewExcerpts ?? null,
-      semanticWordCount: params.semanticWordCount ?? null,
-      crawledPagesCount: params.crawledPagesCount ?? null,
+    const { subjectId, observationId } = await withTransaction(async (tx) => {
+      // 1. upsertSubject
+      const subjectId = await upsertSubject({
+        subjectType: "brand",
+        displayName: brandName,
+        websiteUrl: brandUrl,
+        brandCategory: category ?? extracted.category,
+        latestArchetype: extracted.archetype,
+        latestBrandArchetype: extracted.brandArchetypeClassification,
+        brandType: extracted.brandType,
+        campaignType: extracted.campaignType,
+      }, tx);
+
+      // 2. insertObservation
+      const observationId = await insertObservation(subjectId, {
+        followerCount: bestFollowerCount,
+        engagementRate: tiktokMetadata?.engagementRate ?? instagramMetadata?.engagementRate ?? null,
+        dataConfidenceLevel: params.dataConfidenceLevel ?? null,
+      }, tx);
+
+      // 3. insertBrandObservation
+      await insertBrandObservation(observationId, {
+        brandArchetypeClassification: extracted.brandArchetypeClassification,
+        archetype: extracted.archetype,
+        emotionalPromise: extracted.emotionalPromise,
+        audienceTribe: extracted.audienceTribe,
+        culturalTension: extracted.culturalTension,
+        brandTone: extracted.brandTone,
+        barthesMyth: extracted.barthesMyth,
+        brandCulturalCapital: extracted.brandCulturalCapital,
+        brandGoffmanConsistency: extracted.brandGoffmanStageConsistency,
+        brandDriftSignal: extracted.brandDriftSignal,
+        brandHallDecoding: extracted.brandStuartHallDecoding,
+        brandRogersStage: extracted.brandRogersAdopterStage,
+        brandLiminalPhase: extracted.brandTurnerLiminalPhase,
+        brandLifecyclePhase: extracted.brandLifecyclePhase,
+        brandBarthesNicheMeaning: extracted.brandBarthesNicheMeaning,
+        brandAudienceDecodingSplit: extracted.brandAudienceDecodingSplit,
+        weightAlpha: weights.alpha,
+        weightBeta: weights.beta,
+        weightGamma: weights.gamma,
+        weightPriority: weights.priority,
+        googleRating: reviewFields.googleRating ?? null,
+        googleReviewCount: reviewFields.googleReviewCount ?? null,
+        googleReviewExcerpts: reviewFields.googleReviewExcerpts ?? null,
+        yelpRating: reviewFields.yelpRating ?? null,
+        yelpReviewCount: reviewFields.yelpReviewCount ?? null,
+        overallRating: reviewFields.overallRating ?? null,
+        totalReviews: reviewFields.totalReviews ?? null,
+        tiktokHandle,
+        tiktokFollowerCount: tiktokMetadata?.followerCount ?? null,
+        tiktokEngagementRate: tiktokMetadata?.engagementRate ?? null,
+        mentionTotalCount: mentionFields.mentionTotalCount ?? null,
+        mentionUniqueAuthors: mentionFields.mentionUniqueAuthors ?? null,
+        mentionSentiment: mentionFields.mentionSentiment ?? null,
+        mentionSentimentConfidence: mentionFields.mentionSentimentConfidence ?? null,
+        mentionAudienceSummary: mentionFields.mentionAudienceSummary ?? null,
+        symbolicSummary: symbolFields.brandDecodedSymbols?.symbolicSummary ?? null,
+        aiSummary: extracted.aiSummary,
+        yelpReviewExcerpts: reviewFields.yelpReviewExcerpts ?? null,
+        semanticWordCount: params.semanticWordCount ?? null,
+        crawledPagesCount: params.crawledPagesCount ?? null,
+      }, tx);
+
+      return { subjectId, observationId };
     });
 
     // 4. insertSignalValues (brand keywords, themes, visual language, symbolic vocab, mention signals)
