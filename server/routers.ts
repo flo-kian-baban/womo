@@ -418,8 +418,21 @@ export async function persistCreatorToV2(params: {
 
     // Record the outcome map on the observation row. Best-effort: a failure to
     // record status must not turn an otherwise-successful persist into an error.
+    // Session 8: attach a reserved, non-component `_meta` key marking whether the
+    // sociological fields (parasocialBondStrength / audienceRelationshipType /
+    // culturalCapital / remixRate) were data-computed (TikTok engagement signals)
+    // or LLM-estimated (Instagram / YouTube). The VALUES are unchanged — only
+    // their provenance is recorded. getRunDiagnostics skips reserved keys in its
+    // component loop and surfaces this as sociologicalFieldsProvenance. The clean
+    // component map is still what is returned to the API caller below.
+    const persistenceWithMeta = {
+      ...persistence,
+      _meta: {
+        sociologicalFieldsProvenance: researchData.sociologicalFieldsComputed ? "computed" : "estimated",
+      },
+    };
     try {
-      await updateObservationPersistenceStatus(observationId, persistence);
+      await updateObservationPersistenceStatus(observationId, persistenceWithMeta);
     } catch (err) {
       console.error("[persist] Failed to write persistence_status (creator):", err);
     }
@@ -913,6 +926,7 @@ export const appRouter = router({
           decodedSymbols?: Record<string, unknown>;
           culturalVelocity?: string;
           dataConfidenceLevel?: string;
+          sociologicalFieldsComputed?: boolean;
           longitudinalSampleJson?: Record<string, unknown>;
           discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
           transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
@@ -940,6 +954,7 @@ export const appRouter = router({
           decodedSymbols: research.decodedSymbols ?? undefined,
           culturalVelocity: research.culturalVelocity ?? undefined,
           dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+          sociologicalFieldsComputed: research.sociologicalFieldsComputed,
           longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
           discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
           transcripts: research.transcripts?.length ? research.transcripts : undefined,
@@ -1140,6 +1155,7 @@ export const appRouter = router({
             decodedSymbols: research.decodedSymbols ?? undefined,
             culturalVelocity: research.culturalVelocity ?? undefined,
             dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+            sociologicalFieldsComputed: research.sociologicalFieldsComputed,
             longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
             discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
             transcripts: research.transcripts?.length ? research.transcripts : undefined,
@@ -1343,6 +1359,7 @@ export const appRouter = router({
                   decodedSymbols: research.decodedSymbols ?? undefined,
                   culturalVelocity: research.culturalVelocity ?? undefined,
                   dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+                  sociologicalFieldsComputed: research.sociologicalFieldsComputed,
                   longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
                   discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
                   transcripts: research.transcripts?.length ? research.transcripts : undefined,

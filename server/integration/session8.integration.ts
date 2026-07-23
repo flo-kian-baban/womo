@@ -262,4 +262,34 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
     expect(diag?.fields.present).toContain("longitudinalSample");
     expect(diag?.fields.counts.temporalBuckets).toBeGreaterThan(0);
   });
+
+  // ── Commit 5: mark computed vs estimated sociological fields ─────────────────
+  it("records sociological-field provenance: computed (TikTok) vs estimated (IG)", async () => {
+    // TikTok run WITH a computed engagement-signal block → "computed".
+    const tk = await persistCreatorToV2({
+      handle: "prov_tiktok", platform: "TikTok", displayName: "Prov TikTok",
+      extracted: { archetype: "The Sage" },
+      researchData: { followerCount: 1000, sociologicalFieldsComputed: true },
+    });
+    if ("error" in tk) throw new Error(tk.error);
+    const tkDiag = await db.getRunDiagnostics(tk.observationId);
+    expect(tkDiag?.sociologicalFieldsProvenance).toBe("computed");
+    // The reserved _meta key is NOT treated as an enrichment component.
+    expect(tkDiag?.enrichments.succeeded).not.toContain("_meta");
+    expect(Object.keys(tkDiag?.enrichments.raw ?? {})).not.toContain("_meta");
+
+    // Instagram run (no computed engagement signals) → "estimated".
+    const ig = await persistCreatorToV2({
+      handle: "prov_ig", platform: "Instagram", displayName: "Prov IG",
+      extracted: { archetype: "The Lover" },
+      researchData: { followerCount: 2000, sociologicalFieldsComputed: false },
+    });
+    if ("error" in ig) throw new Error(ig.error);
+    const igDiag = await db.getRunDiagnostics(ig.observationId);
+    expect(igDiag?.sociologicalFieldsProvenance).toBe("estimated");
+
+    // Stored under the reserved persistence_status._meta key (raw jsonb).
+    const rows = await q("select persistence_status from observations where id=$1", [ig.observationId]);
+    expect((rows[0].persistence_status as Record<string, any>)._meta.sociologicalFieldsProvenance).toBe("estimated");
+  });
 });

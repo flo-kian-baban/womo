@@ -189,8 +189,12 @@ suite("persistence integrity (ephemeral Postgres)", () => {
     );
     expect(obs.transcript_count).toBe(0);
     expect(obs.data_confidence_level).toBe("low");
-    // The stored JSONB is the same map the API returned.
-    expect(obs.persistence_status).toEqual(p);
+    // The stored JSONB carries the same component outcomes the API returned,
+    // plus a reserved `_meta` key (Session 8: sociological-field provenance)
+    // that is NOT part of the component map. Compare components, then the marker.
+    const { _meta, ...components } = obs.persistence_status as Record<string, unknown>;
+    expect(components).toEqual(p);
+    expect((_meta as Record<string, unknown>)?.sociologicalFieldsProvenance).toBe("estimated");
   });
 
   it("brand: distinguishes skipped_not_attempted (channel not requested) from skipped_no_data", async () => {

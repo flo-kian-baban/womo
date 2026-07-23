@@ -669,7 +669,11 @@ export async function getLongitudinalSampleSnapshot(observationId: string): Prom
  */
 export async function updateObservationPersistenceStatus(
   observationId: string,
-  statusMap: Record<string, { status: string; reason: string | null; at: string }>,
+  // Component entries are { status, reason, at }. Session 8: the map may also
+  // carry reserved, underscore-prefixed metadata keys (e.g. `_meta`) that are
+  // NOT enrichment components — hence Record<string, unknown>. getRunDiagnostics
+  // skips reserved keys in its component loop and surfaces known ones.
+  statusMap: Record<string, unknown>,
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1589,6 +1593,14 @@ export type RunDiagnostics = {
   exactRunLinkage: boolean;
   reviewStatus: string;
   observedAt: Date;
+  /**
+   * Session 8: provenance of the sociological fields (parasocialBondStrength,
+   * audienceRelationshipType, culturalCapital, remixRate). "computed" = derived
+   * from TikTok engagement signals and copied by the model; "estimated" = LLM
+   * rubric guess (Instagram / YouTube, or a TikTok run with no engagement data).
+   * null = run predates the marker. Read from persistence_status._meta.
+   */
+  sociologicalFieldsProvenance: "computed" | "estimated" | null;
   scrapes: {
     total: number;
     failed: number;
@@ -1729,17 +1741,31 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   }
 
   // ── Enrichment persistence outcomes ──
-  const raw = obs.persistenceStatus as RunDiagnostics["enrichments"]["raw"];
+  // persistence_status may carry reserved, underscore-prefixed metadata keys
+  // (Session 8: `_meta`) that are NOT enrichment components. Skip them in the
+  // component loop and surface known ones (sociologicalFieldsProvenance) below.
+  const rawStatus = obs.persistenceStatus as Record<string, unknown> | null;
+  const raw: RunDiagnostics["enrichments"]["raw"] = rawStatus ? {} : null;
   const succeeded: string[] = [];
   const failedComponents: Array<{ component: string; reason: string | null }> = [];
   const skippedNoData: Array<{ component: string; reason: string | null }> = [];
   const skippedNotAttempted: Array<{ component: string; reason: string | null }> = [];
-  if (raw) {
-    for (const [component, outcome] of Object.entries(raw)) {
-      if (outcome.status === "success") succeeded.push(component);
-      else if (outcome.status === "failed") failedComponents.push({ component, reason: outcome.reason });
-      else if (outcome.status === "skipped_no_data") skippedNoData.push({ component, reason: outcome.reason });
-      else if (outcome.status === "skipped_not_attempted") skippedNotAttempted.push({ component, reason: outcome.reason });
+  let sociologicalFieldsProvenance: RunDiagnostics["sociologicalFieldsProvenance"] = null;
+  if (rawStatus) {
+    for (const [key, value] of Object.entries(rawStatus)) {
+      if (key.startsWith("_")) {
+        if (key === "_meta") {
+          const p = (value as Record<string, unknown> | null)?.sociologicalFieldsProvenance;
+          if (p === "computed" || p === "estimated") sociologicalFieldsProvenance = p;
+        }
+        continue; // reserved run metadata, not an enrichment component
+      }
+      const outcome = value as { status: string; reason: string | null; at: string };
+      (raw as NonNullable<typeof raw>)[key] = outcome;
+      if (outcome.status === "success") succeeded.push(key);
+      else if (outcome.status === "failed") failedComponents.push({ component: key, reason: outcome.reason });
+      else if (outcome.status === "skipped_no_data") skippedNoData.push({ component: key, reason: outcome.reason });
+      else if (outcome.status === "skipped_not_attempted") skippedNotAttempted.push({ component: key, reason: outcome.reason });
     }
   }
 
@@ -1807,6 +1833,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     exactRunLinkage: runId != null,
     reviewStatus: obs.reviewStatus,
     observedAt: obs.observedAt,
+    sociologicalFieldsProvenance,
     scrapes: { total: scrapeRows.length, failed: scrapesFailed, byPlatform },
     videos: {
       total: contentRows.length,

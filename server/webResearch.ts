@@ -101,6 +101,12 @@ export interface CreatorResearchResult {
   longitudinalSample?: LongitudinalSample; // 6-3-3 stratified sample
   culturalVelocity?: "Focusing" | "Drifting" | "Insufficient Data";
   dataConfidenceLevel?: "high" | "medium" | "low";
+  // Session 8: true iff the COMPUTED ENGAGEMENT SIGNALS block was present in the
+  // evidence (TikTok path with sampled videos) — i.e. parasocialBondStrength /
+  // audienceRelationshipType / culturalCapital / remixRate were data-derived and
+  // copied by the model. false = the model estimated them from its rubric
+  // (Instagram / YouTube, or a TikTok run with no engagement data).
+  sociologicalFieldsComputed?: boolean;
   // Supplemental video pool — all discovered video URLs with engagement stats
   discoveredVideoPool?: Array<{
     id: string; url: string; caption: string; createTime: number;
@@ -1893,6 +1899,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     longitudinalSample,
     culturalVelocity: longitudinalSample?.culturalVelocity,
     dataConfidenceLevel,
+    // Session 8: computed iff the engagement-signals block was built (sampled videos).
+    sociologicalFieldsComputed: engagementSignals.totalSampled > 0,
     discoveredVideoPool,
   };
 }
@@ -2187,6 +2195,9 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
     decodedSymbols: decodedSymbols as Record<string, unknown> | null,
     evidenceSummary,
     dataConfidenceLevel,
+    // Session 8: Instagram has no computed engagement-signal block → the
+    // sociological fields are LLM rubric estimates.
+    sociologicalFieldsComputed: false,
     discoveredVideoPool,
   };
 }
@@ -2273,6 +2284,8 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     transcripts, transcriptCount: transcripts.length, transcriptExcerpts,
     decodedSymbols: ytDecodedSymbols as Record<string, unknown> | null,
     evidenceSummary,
+    // Session 8: YouTube has no computed engagement-signal block → estimated.
+    sociologicalFieldsComputed: false,
   };
 }
 
@@ -2905,6 +2918,7 @@ export async function researchCreator(
       longitudinalSample: tiktok.longitudinalSample ?? youtube.longitudinalSample,
       culturalVelocity: tiktok.culturalVelocity ?? youtube.culturalVelocity,
       dataConfidenceLevel: tiktok.dataConfidenceLevel ?? youtube.dataConfidenceLevel,
+      sociologicalFieldsComputed: tiktok.sociologicalFieldsComputed ?? youtube.sociologicalFieldsComputed,
       discoveredVideoPool: [
         ...(tiktok.discoveredVideoPool ?? []),
         ...(youtube.discoveredVideoPool ?? []),
