@@ -17,6 +17,7 @@ import {
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
+  setObservationReviewStatus,
   getLatestObservationId,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
@@ -186,7 +187,8 @@ export async function persistCreatorToV2(params: {
       // 2. upsertPlatformHandle
       await upsertPlatformHandle(subjectId, platform, handle, profileUrl, tx);
 
-      // 3. insertObservation
+      // 3. insertObservation — review gate (womo_0006): creator runs persist as
+      // 'pending' and await analyst acceptance before entering the corpus.
       const observationId = await insertObservation(subjectId, {
         followerCount: researchData.followerCount ?? null,
         followingCount: researchData.followingCount ?? null,
@@ -194,6 +196,7 @@ export async function persistCreatorToV2(params: {
         bio: researchData.bio ?? null,
         dataConfidenceLevel: researchData.dataConfidenceLevel ?? null,
         transcriptCount: researchData.transcriptCount ?? 0,
+        reviewStatus: "pending",
       }, tx);
 
       // 4. insertCreatorObservation
@@ -891,6 +894,31 @@ export const appRouter = router({
       .input(z.object({ subjectId: z.string() }))
       .query(async ({ input }) => {
         return getContentItemsBySubject(input.subjectId);
+      }),
+
+    // ─── Review gate (womo_0006) ────────────────────────────────────────────
+    // Accept: the run enters the corpus and becomes the authoritative
+    // observation (is_latest transfers to it).
+    // Decline: status change ONLY — the run is archived with full provenance,
+    // never deleted.
+    // Plain protectedProcedure (like list/get/delete): review actions are
+    // cheap DB updates; rate limits here guard expensive analysis/LLM paths.
+    acceptObservation: protectedProcedure
+      .input(z.object({
+        observationId: z.string().uuid(),
+        reviewedBy: z.string().min(1).max(64),
+      }))
+      .mutation(async ({ input }) => {
+        return setObservationReviewStatus(input.observationId, "accepted", input.reviewedBy);
+      }),
+
+    declineObservation: protectedProcedure
+      .input(z.object({
+        observationId: z.string().uuid(),
+        reviewedBy: z.string().min(1).max(64),
+      }))
+      .mutation(async ({ input }) => {
+        return setObservationReviewStatus(input.observationId, "declined", input.reviewedBy);
       }),
 
     getProvenance: protectedProcedure

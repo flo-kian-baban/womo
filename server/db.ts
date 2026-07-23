@@ -1,4 +1,4 @@
-import { eq, desc, like, or, ne, and, sql } from "drizzle-orm";
+import { eq, desc, like, or, ne, and, sql, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { createHash } from "crypto";
@@ -416,18 +416,42 @@ export async function insertObservation(
   const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
+  // Default 'accepted' preserves pre-gate behavior for ungated paths (brand
+  // until Session 7); the gated creator path passes 'pending' explicitly.
+  const reviewStatus = data.reviewStatus ?? "accepted";
+
   // FIX 2.6: Wrap in transaction so isLatest update + insert are atomic.
   // Previously, a failed insert after the update left zero 'latest' observations.
   // When called with a transaction executor this nests as a savepoint.
   const result = await db.transaction(async (tx) => {
-    // Set all previous observations for this subject to isLatest=false
-    await tx.update(observations)
-      .set({ isLatest: false })
-      .where(and(eq(observations.subjectId, subjectId), eq(observations.isLatest, true)));
+    // Review-gate reconciliation (womo_0006): is_latest marks the AUTHORITATIVE
+    // observation, not merely the newest. A pending observation only takes
+    // is_latest when the subject has no accepted observation (first-ever
+    // analysis — profile visible, marked pending). If an accepted observation
+    // exists it keeps is_latest until the analyst accepts the new run
+    // (setObservationReviewStatus transfers it).
+    let takeLatest = true;
+    if (reviewStatus === "pending") {
+      const accepted = await tx.select({ id: observations.id })
+        .from(observations)
+        .where(and(
+          eq(observations.subjectId, subjectId),
+          eq(observations.reviewStatus, "accepted"),
+        ))
+        .limit(1);
+      takeLatest = accepted.length === 0;
+    }
+
+    if (takeLatest) {
+      // Set all previous observations for this subject to isLatest=false
+      await tx.update(observations)
+        .set({ isLatest: false })
+        .where(and(eq(observations.subjectId, subjectId), eq(observations.isLatest, true)));
+    }
 
     const [obs] = await tx.insert(observations).values({
       subjectId,
-      isLatest: true,
+      isLatest: takeLatest,
       followerCount: data.followerCount ?? null,
       followingCount: data.followingCount ?? null,
       engagementRate: data.engagementRate ?? null,
@@ -435,15 +459,87 @@ export async function insertObservation(
       dataConfidenceLevel: validateEnum(data.dataConfidenceLevel, VALID_CONFIDENCE_LEVELS, "dataConfidenceLevel"),
       transcriptCount: data.transcriptCount ?? 0,
       runId: data.runId ?? currentRunId(),
-      // Default 'accepted' preserves pre-gate behavior for ungated paths (brand
-      // until Session 7); the gated creator path passes 'pending' explicitly.
-      reviewStatus: data.reviewStatus ?? "accepted",
+      reviewStatus,
     }).returning({ id: observations.id });
 
     return obs;
   });
 
   return result.id;
+}
+
+/**
+ * Analyst review action (womo_0006): accept or decline an observation.
+ * NEVER deletes — decline is a status change only; the run's data and full
+ * provenance are retained for scraper-failure analysis.
+ *
+ * is_latest reconciliation:
+ *  - accept: this observation becomes the authoritative one (is_latest
+ *    transfers to it from whichever row held it).
+ *  - decline: relinquishes is_latest if held; the newest remaining accepted
+ *    observation (by observed_at) is promoted. A declined-only subject ends
+ *    with no is_latest row and disappears from default views.
+ * Transitions from any prior state are allowed (accepted→declined corrects a
+ * bad acceptance; declined→accepted un-archives).
+ */
+export async function setObservationReviewStatus(
+  observationId: string,
+  status: "accepted" | "declined",
+  reviewedBy?: string,
+): Promise<{ observationId: string; subjectId: string; reviewStatus: string }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.transaction(async (tx) => {
+    const [obs] = await tx.select({
+      id: observations.id,
+      subjectId: observations.subjectId,
+      isLatest: observations.isLatest,
+    })
+      .from(observations)
+      .where(eq(observations.id, observationId))
+      .limit(1);
+    if (!obs) throw new Error("Observation not found");
+
+    await tx.update(observations)
+      .set({
+        reviewStatus: status,
+        reviewedAt: new Date(),
+        reviewedBy: reviewedBy?.slice(0, 64) ?? null,
+      })
+      .where(eq(observations.id, observationId));
+
+    if (status === "accepted") {
+      // Transfer is_latest to the accepted observation.
+      await tx.update(observations)
+        .set({ isLatest: false })
+        .where(and(eq(observations.subjectId, obs.subjectId), eq(observations.isLatest, true)));
+      await tx.update(observations)
+        .set({ isLatest: true })
+        .where(eq(observations.id, observationId));
+    } else if (obs.isLatest) {
+      // Declining the current authoritative observation: relinquish is_latest
+      // and promote the newest remaining accepted one, if any.
+      await tx.update(observations)
+        .set({ isLatest: false })
+        .where(eq(observations.id, observationId));
+      const [promote] = await tx.select({ id: observations.id })
+        .from(observations)
+        .where(and(
+          eq(observations.subjectId, obs.subjectId),
+          eq(observations.reviewStatus, "accepted"),
+        ))
+        .orderBy(desc(observations.observedAt))
+        .limit(1);
+      if (promote) {
+        await tx.update(observations)
+          .set({ isLatest: true })
+          .where(eq(observations.id, promote.id));
+      }
+    }
+
+    return { observationId, subjectId: obs.subjectId, reviewStatus: status };
+  });
 }
 
 /**
@@ -982,6 +1078,20 @@ export async function getCreatorProfileById(subjectId: string) {
   const row = rows[0];
   const observationId = row.observations.id;
 
+  // Review-gate visibility (womo_0006): list-shaped data (signals, decoded
+  // symbols, content items) accumulates across observations by subject_id —
+  // rows belonging to a PENDING rerun or a DECLINED run must not bleed into
+  // the authoritative profile. Visible rows = those tied to accepted
+  // observations, to the current authoritative observation (covers a
+  // first-run pending profile being reviewed), or legacy rows with no
+  // observation link (content_items only — its FK is SET NULL).
+  const visibleObservationIds = db.select({ id: observations.id })
+    .from(observations)
+    .where(and(
+      eq(observations.subjectId, subjectId),
+      or(eq(observations.reviewStatus, "accepted"), eq(observations.id, observationId)),
+    ));
+
   // ── Parallel subqueries for signal_values, decoded_signals, content_items ──
   const [
     contentThemeRows,
@@ -993,19 +1103,19 @@ export async function getCreatorProfileById(subjectId: string) {
   ] = await Promise.all([
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "content_theme")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "content_theme"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "keyword")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "keyword"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "hashtag")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "hashtag"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "theme")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "theme"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({
       category: decodedSignals.category,
@@ -1014,12 +1124,27 @@ export async function getCreatorProfileById(subjectId: string) {
       informsFields: decodedSignals.informsFields,
     })
       .from(decodedSignals)
-      .where(eq(decodedSignals.subjectId, subjectId)),
+      .where(and(eq(decodedSignals.subjectId, subjectId), inArray(decodedSignals.observationId, visibleObservationIds))),
     db.select()
       .from(contentItems)
-      .where(eq(contentItems.subjectId, subjectId))
+      .where(and(
+        eq(contentItems.subjectId, subjectId),
+        or(isNull(contentItems.observationId), inArray(contentItems.observationId, visibleObservationIds)),
+      ))
       .orderBy(desc(contentItems.viewCount)),
   ]);
+
+  // Newest pending observation for this subject (if any) — lets the UI state
+  // that a pending rerun exists while the accepted profile stays displayed.
+  const [newestPending] = await db.select({
+    id: observations.id,
+    runId: observations.runId,
+    observedAt: observations.observedAt,
+  })
+    .from(observations)
+    .where(and(eq(observations.subjectId, subjectId), eq(observations.reviewStatus, "pending")))
+    .orderBy(desc(observations.observedAt))
+    .limit(1);
 
   // ── Assemble decoded symbols into the shape TranscriptPanel expects ──
   const decodedSymbolsObj: {
@@ -1145,6 +1270,16 @@ export async function getCreatorProfileById(subjectId: string) {
     recentVideoTitles: videoTitles.length > 0 ? videoTitles : null,
     // V1 compat
     location: row.creator_observations.primaryRegion ?? null,
+    // Review gate (womo_0006)
+    reviewStatus: row.observations.reviewStatus,
+    reviewedAt: row.observations.reviewedAt,
+    reviewedBy: row.observations.reviewedBy,
+    runId: row.observations.runId,
+    // Newest pending run for this subject, if any. When it differs from the
+    // displayed observation, the profile shown is the previously accepted run.
+    pendingObservation: newestPending && newestPending.id !== observationId
+      ? { id: newestPending.id, runId: newestPending.runId, observedAt: newestPending.observedAt }
+      : null,
     // Timestamps
     createdAt: row.observations.createdAt,
     observedAt: row.observations.observedAt,
@@ -1159,9 +1294,22 @@ export async function getContentItemsBySubject(subjectId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  // Same review-gate visibility rule as the profile getters (womo_0006):
+  // exclude rows tied to pending reruns / declined runs, keep accepted +
+  // current authoritative + legacy (null observation) rows.
+  const visibleObservationIds = db.select({ id: observations.id })
+    .from(observations)
+    .where(and(
+      eq(observations.subjectId, subjectId),
+      or(eq(observations.reviewStatus, "accepted"), eq(observations.isLatest, true)),
+    ));
+
   const rows = await db.select()
     .from(contentItems)
-    .where(eq(contentItems.subjectId, subjectId))
+    .where(and(
+      eq(contentItems.subjectId, subjectId),
+      or(isNull(contentItems.observationId), inArray(contentItems.observationId, visibleObservationIds)),
+    ))
     .orderBy(desc(contentItems.viewCount));
 
   return rows.map(ci => ({
@@ -1268,6 +1416,10 @@ export async function listCreatorProfiles(userId?: number, search?: string) {
     archetype: row.creator_observations?.archetype ?? row.subjects.latestArchetype,
     engagementTier: row.subjects.engagementTier,
     createdAt: row.subjects.createdAt,
+    // Review gate (womo_0006) — library must mark pending unmistakably
+    reviewStatus: row.observations?.reviewStatus ?? null,
+    observationId: row.observations?.id ?? null,
+    runId: row.observations?.runId ?? null,
     // Fields accessed by Library.tsx rows
     nicheTopicNode: row.creator_observations?.nicheTopicNode ?? null,
     goffmanStageConsistency: row.creator_observations?.goffmanStageConsistency ?? null,
@@ -1466,6 +1618,16 @@ export async function getBrandProfileById(subjectId: string) {
   if (rows.length === 0) return null;
   const row = rows[0];
 
+  // Review-gate visibility (womo_0006) — same rule as getCreatorProfileById.
+  // All brand observations are 'accepted' until Session 7 gates the brand
+  // path, so this is currently a no-op; it keeps the visibility rule uniform.
+  const visibleObservationIds = db.select({ id: observations.id })
+    .from(observations)
+    .where(and(
+      eq(observations.subjectId, subjectId),
+      or(eq(observations.reviewStatus, "accepted"), eq(observations.id, row.observations.id)),
+    ));
+
   // ── Parallel subqueries for signal_values + decoded_signals (mirrors getCreatorProfileById) ──
   const [
     brandKeywordRows,
@@ -1483,36 +1645,36 @@ export async function getBrandProfileById(subjectId: string) {
     // Brand signal values
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "keyword")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "keyword"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "content_theme")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "content_theme"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "symbolic_vocabulary")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "symbolic_vocabulary"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "visual_language")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "visual_language"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     // Mention signal values
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "hashtag")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "hashtag"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "identity_claim")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "identity_claim"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "music_title")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "music_title"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     db.select({ key: signalValues.signalKey })
       .from(signalValues)
-      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "music_artist")))
+      .where(and(eq(signalValues.subjectId, subjectId), eq(signalValues.domain, "music_artist"), inArray(signalValues.observationId, visibleObservationIds)))
       .orderBy(signalValues.rank),
     // Decoded signals
     db.select({
@@ -1522,11 +1684,14 @@ export async function getBrandProfileById(subjectId: string) {
       informsFields: decodedSignals.informsFields,
     })
       .from(decodedSignals)
-      .where(eq(decodedSignals.subjectId, subjectId)),
+      .where(and(eq(decodedSignals.subjectId, subjectId), inArray(decodedSignals.observationId, visibleObservationIds))),
     // Content items (brand videos)
     db.select()
       .from(contentItems)
-      .where(eq(contentItems.subjectId, subjectId))
+      .where(and(
+        eq(contentItems.subjectId, subjectId),
+        or(isNull(contentItems.observationId), inArray(contentItems.observationId, visibleObservationIds)),
+      ))
       .orderBy(desc(contentItems.viewCount)),
     // Instagram platform handle
     db.select({ handle: platformHandles.handle, profileUrl: platformHandles.profileUrl })
