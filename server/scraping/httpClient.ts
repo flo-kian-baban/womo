@@ -266,6 +266,37 @@ export async function fetchHtml(
 
 // ─── Scrape Event Logging ─────────────────────────────────────────────────────
 
+// Telemetry-drop accounting (Session 5): every scrape_events write that cannot
+// be recorded — whether the insert rejected or the logging path itself threw —
+// funnels through recordTelemetryDrop(), so dropped telemetry is counted and
+// visible in logs instead of vanishing in nested empty catches.
+let _droppedScrapeEvents = 0;
+
+/** Number of scrape_events telemetry writes dropped since process start. */
+export function getDroppedScrapeEventCount(): number {
+  return _droppedScrapeEvents;
+}
+
+function recordTelemetryDrop(context: string, err: unknown): void {
+  _droppedScrapeEvents++;
+  console.warn(
+    `[httpClient] scrape_events telemetry write dropped (total ${_droppedScrapeEvents}, ${context}): ` +
+    (err instanceof Error ? err.message : String(err)),
+  );
+}
+
+/** Single fire-and-forget path for scrape_events telemetry writes. */
+function logScrapeEventSafe(
+  event: Parameters<typeof insertScrapeEvent>[0],
+  context: string,
+): void {
+  try {
+    insertScrapeEvent(event).catch(err => recordTelemetryDrop(context, err));
+  } catch (err) {
+    recordTelemetryDrop(`${context} (sync)`, err);
+  }
+}
+
 /** Infer platform + scrape method from a URL. Returns null for non-loggable URLs. */
 function inferScrapeContext(url: string): { platform: string; scrapeMethod: string } | null {
   const lower = url.toLowerCase();
@@ -299,7 +330,7 @@ function logScrapeSuccess(url: string, bodyLength: number, durationMs: number): 
     const silentFail = ctx.platform === "tiktok" || ctx.platform === "instagram"
       ? detectSilentFailure(ctx.platform as "tiktok" | "instagram", "", url)
       : { isFailed: false, reason: "" };
-    insertScrapeEvent({
+    logScrapeEventSafe({
       platform: ctx.platform,
       scrapeMethod: ctx.scrapeMethod,
       urlRequested: url.slice(0, 1000),
@@ -308,8 +339,10 @@ function logScrapeSuccess(url: string, bodyLength: number, durationMs: number): 
       silentFailureDetected: silentFail.isFailed,
       failureReason: silentFail.isFailed ? silentFail.reason : undefined,
       durationMs,
-    }).catch(() => {}); // swallow
-  } catch { /* swallow */ }
+    }, "fetch-success");
+  } catch (err) {
+    recordTelemetryDrop("fetch-success (event build)", err);
+  }
 }
 
 /** Fire-and-forget: log a failed fetch as a scrape event */
@@ -318,7 +351,7 @@ function logScrapeFailure(url: string, durationMs: number, error: Error): void {
   if (!ctx) return;
   try {
     const statusCode = error instanceof HttpClientError ? error.statusCode : undefined;
-    insertScrapeEvent({
+    logScrapeEventSafe({
       platform: ctx.platform,
       scrapeMethod: ctx.scrapeMethod,
       urlRequested: url.slice(0, 1000),
@@ -326,8 +359,10 @@ function logScrapeFailure(url: string, durationMs: number, error: Error): void {
       silentFailureDetected: false,
       failureReason: error.message.slice(0, 500),
       durationMs,
-    }).catch(() => {}); // swallow
-  } catch { /* swallow */ }
+    }, "fetch-failure");
+  } catch (err) {
+    recordTelemetryDrop("fetch-failure (event build)", err);
+  }
 }
 
 /**

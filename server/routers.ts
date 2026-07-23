@@ -1527,6 +1527,10 @@ export const appRouter = router({
         let mythAlignmentScore: number | null = null;
         let tribMatchScore: number | null = null;
         let mythLlmFailed = false;
+        // Degradation markers (Session 5): scoring behavior is FROZEN — these
+        // only record when a result rests on fallbacks instead of real
+        // computation, so a degraded score is distinguishable from a real one.
+        const scoreDegradationReasons: string[] = [];
 
         if (creator.barthesMyth && brand.barthesMyth) {
           try {
@@ -1546,7 +1550,12 @@ export const appRouter = router({
                 if (metadata.mentionHashtags) {
                   brandMentionKeywords = metadata.mentionHashtags.slice(0, 10);
                 }
-              } catch {}
+              } catch (err) {
+                // Previously an empty catch — the LLM then scored on reduced
+                // context with no trace. Keep the fallback (FROZEN) but record it.
+                console.warn("[fit.calculate] brand tiktokMetadata unparseable — mention keywords omitted from myth-scoring context:", err);
+                scoreDegradationReasons.push("brand mention metadata unparseable — myth/tribe scoring ran on reduced context");
+              }
             }
             
             // Build semantic context for the LLM
@@ -1620,7 +1629,10 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
             mythAlignmentScore = null;
             tribMatchScore = null;
             mythLlmFailed = true;
+            scoreDegradationReasons.push("myth/tribe LLM failed — mythAlignmentScore and tribMatchScore are fallback defaults (3.0), not computed");
           }
+        } else {
+          scoreDegradationReasons.push("barthesMyth missing on creator and/or brand — mythAlignmentScore and tribMatchScore are fallback defaults (3.0), not computed");
         }
 
         // Extract symbolic vocabulary arrays for overlap calculation
@@ -1969,6 +1981,13 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           result,
           narrative,
           performanceSignals,
+          // Session 5: marks results that rest on fallback values instead of a
+          // real computation. Score VALUES are unchanged (scoring is frozen) —
+          // this only stops a degraded result from masquerading as a real one.
+          scoreDegradation: {
+            degraded: mythAlignmentScore === null || tribMatchScore === null,
+            reasons: scoreDegradationReasons,
+          },
         };
       }),
 

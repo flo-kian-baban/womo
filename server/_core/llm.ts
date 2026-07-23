@@ -293,118 +293,147 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const modelName = "gemini-2.5-flash";
-  const payload: Record<string, unknown> = {
-    model: modelName,
-    messages: messages.map(normalizeMessage),
+
+  // Single fire-and-forget provenance path for success AND failure (womo_0005):
+  // failed invocations record purpose, error, and duration — a failure that
+  // took ~timeoutMs was a hang; one that took milliseconds was a bad request.
+  const logInvocation = (outcome: {
+    status: "success" | "failed";
+    inputTokens?: number;
+    outputTokens?: number;
+    errorMessage?: string;
+  }): void => {
+    try {
+      insertLlmInvocation({
+        purpose: purpose ?? "unknown",
+        model: modelName,
+        promptVersion: "1.0",
+        inputTokens: outcome.inputTokens,
+        outputTokens: outcome.outputTokens,
+        durationMs: Date.now() - startTime,
+        subjectId: subjectId ?? undefined,
+        observationId: observationId ?? undefined,
+        status: outcome.status,
+        errorMessage: outcome.errorMessage,
+      }).catch(err => console.warn("[LLM] Invocation logging failed:", err));
+    } catch (err) {
+      console.warn("[LLM] Invocation logging failed:", err);
+    }
   };
 
-  if (tools && tools.length > 0) {
-    payload.tools = tools;
+  try {
+    return await invokeLLMInner();
+  } catch (err) {
+    logInvocation({
+      status: "failed",
+      errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+    });
+    throw err;
   }
 
-  const normalizedToolChoice = normalizeToolChoice(
-    toolChoice || tool_choice,
-    tools
-  );
-  if (normalizedToolChoice) {
-    payload.tool_choice = normalizedToolChoice;
-  }
+  async function invokeLLMInner(): Promise<InvokeResult> {
+    const payload: Record<string, unknown> = {
+      model: modelName,
+      messages: messages.map(normalizeMessage),
+    };
 
-  // Respect the caller's requested max output tokens; fall back to 32768.
-  payload.max_tokens = params.maxTokens ?? params.max_tokens ?? 32768;
-  if (temperature !== undefined) {
-    payload.temperature = temperature;
-  }
-
-  const normalizedResponseFormat = normalizeResponseFormat({
-    responseFormat,
-    response_format,
-    outputSchema,
-    output_schema,
-  });
-
-  if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
-  }
-
-  // ─── Request with 429 retry ─────────────────────────────────────────────────
-  // Gemini rate-limit responses (429) are retried with exponential backoff.
-  // All other non-OK responses are thrown immediately.
-  const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
-  const timeoutMs = params.timeoutMs ?? 60_000;
-  let response: Response | null = null;
-
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    // Per-attempt AbortController so a hung Gemini socket can't block forever.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      response = await fetch(resolveApiUrl(), {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${ENV.geminiApiKey}`,
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (controller.signal.aborted) {
-        throw new Error(
-          `Gemini API request timed out after ${timeoutMs}ms` +
-          (purpose ? ` (purpose: ${purpose})` : "")
-        );
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
+    if (tools && tools.length > 0) {
+      payload.tools = tools;
     }
 
-    if (response!.status === 429) {
-      if (attempt < RETRY_DELAYS_MS.length) {
-        const delayMs = RETRY_DELAYS_MS[attempt]!;
-        console.warn(
-          `[llm] Rate limited (429) — retry ${attempt + 1}/${RETRY_DELAYS_MS.length} in ${delayMs / 1000}s` +
-          (purpose ? ` (purpose: ${purpose})` : "")
-        );
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        continue;
+    const normalizedToolChoice = normalizeToolChoice(
+      toolChoice || tool_choice,
+      tools
+    );
+    if (normalizedToolChoice) {
+      payload.tool_choice = normalizedToolChoice;
+    }
+
+    // Respect the caller's requested max output tokens; fall back to 32768.
+    payload.max_tokens = params.maxTokens ?? params.max_tokens ?? 32768;
+    if (temperature !== undefined) {
+      payload.temperature = temperature;
+    }
+
+    const normalizedResponseFormat = normalizeResponseFormat({
+      responseFormat,
+      response_format,
+      outputSchema,
+      output_schema,
+    });
+
+    if (normalizedResponseFormat) {
+      payload.response_format = normalizedResponseFormat;
+    }
+
+    // ─── Request with 429 retry ─────────────────────────────────────────────────
+    // Gemini rate-limit responses (429) are retried with exponential backoff.
+    // All other non-OK responses are thrown immediately.
+    const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+    const timeoutMs = params.timeoutMs ?? 60_000;
+    let response: Response | null = null;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      // Per-attempt AbortController so a hung Gemini socket can't block forever.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        response = await fetch(resolveApiUrl(), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${ENV.geminiApiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (controller.signal.aborted) {
+          throw new Error(
+            `Gemini API request timed out after ${timeoutMs}ms` +
+            (purpose ? ` (purpose: ${purpose})` : "")
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
       }
-      // All retries exhausted
+
+      if (response!.status === 429) {
+        if (attempt < RETRY_DELAYS_MS.length) {
+          const delayMs = RETRY_DELAYS_MS[attempt]!;
+          console.warn(
+            `[llm] Rate limited (429) — retry ${attempt + 1}/${RETRY_DELAYS_MS.length} in ${delayMs / 1000}s` +
+            (purpose ? ` (purpose: ${purpose})` : "")
+          );
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+        // All retries exhausted
+        throw new Error(
+          "Gemini API rate limit exceeded. Please try again in a few minutes."
+        );
+      }
+
+      // Not a 429 — break the retry loop (success or other error)
+      break;
+    }
+
+    if (!response!.ok) {
+      const errorText = await response!.text();
       throw new Error(
-        "Gemini API rate limit exceeded. Please try again in a few minutes."
+        `LLM invoke failed: ${response!.status} ${response!.statusText} – ${errorText}`
       );
     }
 
-    // Not a 429 — break the retry loop (success or other error)
-    break;
-  }
+    const result = (await response!.json()) as InvokeResult;
 
-  if (!response!.ok) {
-    const errorText = await response!.text();
-    throw new Error(
-      `LLM invoke failed: ${response!.status} ${response!.statusText} – ${errorText}`
-    );
-  }
-
-  const result = (await response!.json()) as InvokeResult;
-  const durationMs = Date.now() - startTime;
-
-  // Fire-and-forget LLM invocation logging
-  try {
-    insertLlmInvocation({
-      purpose: purpose ?? "unknown",
-      model: modelName,
-      promptVersion: "1.0",
+    logInvocation({
+      status: "success",
       inputTokens: result.usage?.prompt_tokens,
       outputTokens: result.usage?.completion_tokens,
-      durationMs,
-      subjectId: subjectId ?? undefined,
-      observationId: observationId ?? undefined,
-    }).catch(err => console.warn("[LLM] Invocation logging failed:", err));
-  } catch (err) {
-    console.warn("[LLM] Invocation logging failed:", err);
-  }
+    });
 
-  return result;
+    return result;
+  }
 }

@@ -818,6 +818,9 @@ export async function insertLlmInvocation(data: {
   outputTokens?: number;
   responseJson?: Record<string, unknown>;
   durationMs?: number;
+  /** womo_0005: 'success' (default) | 'failed'. Failed calls leave a trace too. */
+  status?: "success" | "failed";
+  errorMessage?: string;
 }): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -834,6 +837,8 @@ export async function insertLlmInvocation(data: {
     outputTokens: data.outputTokens ?? null,
     responseJson: data.responseJson ?? null,
     durationMs: data.durationMs ?? null,
+    status: data.status ?? "success",
+    errorMessage: data.errorMessage ?? null,
   }).returning({ id: llmInvocations.id });
 
   return result[0].id;
