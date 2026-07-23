@@ -12,7 +12,7 @@ import {
   upsertSubject, upsertPlatformHandle, insertObservation, insertCreatorObservation,
   insertSignalValues, insertDecodedSignals, insertContentItems,
   updateContentItemTranscript, updateObservationTranscriptCount,
-  updateCreatorObservationAvgDuration,
+  updateCreatorObservationAvgDuration, updateObservationPersistenceStatus,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
@@ -44,11 +44,63 @@ const analysisConcurrencyLimit = pLimit(2);
 
 // ─── V2 Pipeline Helpers ─────────────────────────────────────────────────────
 
+// ─── Persistence-outcome tracking (womo_0005 hybrid model) ───────────────────
+// The identity core (subject → observation → subtype row) commits atomically.
+// Every enrichment write runs independently, records its own outcome into the
+// map below, and never aborts sibling enrichments. The map is stored on
+// observations.persistence_status and returned to the API caller.
+
+export type EnrichmentOutcomeStatus =
+  | "success"                // the component's write completed
+  | "failed"                 // write attempted and errored (reason = error)
+  | "skipped_no_data"        // subject genuinely has no such data (fact about subject)
+  | "skipped_not_attempted"; // never attempted — config/feature gap or upstream failure
+
+export type PersistenceStatusMap = Record<string, {
+  status: EnrichmentOutcomeStatus;
+  reason: string | null;
+  at: string; // ISO-8601 UTC
+}>;
+
+type EnrichmentSkip = { skip: "skipped_no_data" | "skipped_not_attempted"; reason: string };
+
+function recordOutcome(
+  map: PersistenceStatusMap,
+  component: string,
+  status: EnrichmentOutcomeStatus,
+  reason: string | null = null,
+): void {
+  map[component] = { status, reason, at: new Date().toISOString() };
+}
+
+/**
+ * Run one enrichment write. A thrown error is recorded as `failed` and does NOT
+ * propagate — a broken enrichment must never prevent the others from saving.
+ */
+async function runEnrichment(
+  map: PersistenceStatusMap,
+  component: string,
+  action: EnrichmentSkip | (() => Promise<void>),
+): Promise<void> {
+  if (typeof action !== "function") {
+    recordOutcome(map, component, action.skip, action.reason);
+    return;
+  }
+  try {
+    await action();
+    recordOutcome(map, component, "success");
+  } catch (err) {
+    const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    console.error(`[persist] Enrichment '${component}' failed (continuing with others):`, err);
+    recordOutcome(map, component, "failed", reason);
+  }
+}
+
 /**
  * Persist a full creator analysis result to the V2 schema.
- * Wraps all writes in try/catch — DB failures must not break the analysis.
+ * Identity core is atomic; enrichments are independent and status-tracked.
  */
-type PersistSuccess = { subjectId: string };
+type PersistSuccess = { subjectId: string; observationId: string; persistence: PersistenceStatusMap };
 type PersistFailure = { error: string };
 type PersistResult = PersistSuccess | PersistFailure;
 
@@ -132,6 +184,10 @@ async function persistCreatorToV2(params: {
       return { subjectId, observationId };
     });
 
+    // ── INDEPENDENT ENRICHMENTS — each records its own outcome, none aborts the others ──
+    const persistence: PersistenceStatusMap = {};
+    recordOutcome(persistence, "identity_core", "success");
+
     // 5. insertSignalValues
     const signals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
     (researchData.rawKeywords as string[] ?? []).forEach((k: string, i: number) =>
@@ -142,18 +198,24 @@ async function persistCreatorToV2(params: {
       signals.push({ domain: "hashtag", signalKey: h, rank: i + 1, source: "creator" }));
     (extracted.recurringThemes as string[] ?? []).forEach((t: string, i: number) =>
       signals.push({ domain: "theme", signalKey: t, rank: i + 1, source: "creator" }));
-    if (signals.length > 0) await insertSignalValues(subjectId, observationId, signals);
+    await runEnrichment(persistence, "signal_values",
+      signals.length === 0
+        ? { skip: "skipped_no_data", reason: "no keywords/themes/hashtags extracted for this creator" }
+        : () => insertSignalValues(subjectId, observationId, signals));
 
     // 6. insertDecodedSignals
     const ds = researchData.decodedSymbols as DecodedSymbols | null;
+    const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
     if (ds) {
-      const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
       (ds.identityClaims ?? []).forEach(s => decodedRows.push({ category: "identity_claim", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
       (ds.statusSignals ?? []).forEach(s => decodedRows.push({ category: "status_signal", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
       (ds.communityReferences ?? []).forEach(s => decodedRows.push({ category: "community_reference", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
       (ds.aspirationDrivers ?? []).forEach(s => decodedRows.push({ category: "aspiration_driver", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "creator" }));
-      if (decodedRows.length > 0) await insertDecodedSignals(subjectId, observationId, decodedRows);
     }
+    await runEnrichment(persistence, "decoded_signals",
+      decodedRows.length === 0
+        ? { skip: "skipped_no_data", reason: "symbol decoder produced no signals for this creator" }
+        : () => insertDecodedSignals(subjectId, observationId, decodedRows));
 
     // 7. insertContentItems (discoveredVideoPool with engagement stats)
     type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string };
@@ -179,43 +241,60 @@ async function persistCreatorToV2(params: {
       transcriptWordCount: v.transcriptWordCount,
       status: v.transcriptText ? "sampled" : "discovered",
     }));
-    if (contentRows.length > 0) {
-      await insertContentItems(subjectId, observationId, contentRows);
-      console.log(`[persist] insertContentItems: ${contentRows.length} rows written for subject ${subjectId}`);
+    await runEnrichment(persistence, "content_items",
+      contentRows.length === 0
+        ? { skip: "skipped_no_data", reason: "no videos in discovered pool" }
+        : async () => {
+            await insertContentItems(subjectId, observationId, contentRows);
+            console.log(`[persist] insertContentItems: ${contentRows.length} rows written for subject ${subjectId}`);
+          });
 
-      // I2: Compute avgVideoDuration from actual content_items data
-      const videosWithDuration = contentRows.filter(v => v.videoDuration && v.videoDuration > 0);
-      if (videosWithDuration.length > 0) {
-        const totalDuration = videosWithDuration.reduce((sum, v) => sum + (v.videoDuration ?? 0), 0);
-        const avgDuration = Math.round((totalDuration / videosWithDuration.length) * 10) / 10;
-        await updateCreatorObservationAvgDuration(observationId, avgDuration).catch((err) => {
-          console.warn(`[persist] Failed to update avgVideoDuration: ${err}`);
-        });
-      }
-    } else {
-      console.log(`[persist] insertContentItems: 0 rows — no videos in pool`);
-    }
+    // I2: Compute avgVideoDuration from actual content_items data
+    const videosWithDuration = contentRows.filter(v => v.videoDuration && v.videoDuration > 0);
+    await runEnrichment(persistence, "avg_video_duration",
+      videosWithDuration.length === 0
+        ? { skip: "skipped_no_data", reason: "no videos with duration data" }
+        : () => {
+            const totalDuration = videosWithDuration.reduce((sum, v) => sum + (v.videoDuration ?? 0), 0);
+            const avgDuration = Math.round((totalDuration / videosWithDuration.length) * 10) / 10;
+            return updateCreatorObservationAvgDuration(observationId, avgDuration);
+          });
 
     // 8. Wire transcripts into content_items rows
     const transcriptArray = researchData.transcripts as Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }> ?? [];
     let transcriptSuccessCount = 0;
-    for (const t of transcriptArray) {
-      if (t.videoId && t.transcript) {
-        const updated = await updateContentItemTranscript(
-          subjectId, t.videoId, platform,
-          t.transcript, t.transcriptSource ?? "captions", t.wordCount,
-        );
-        if (updated) transcriptSuccessCount++;
-      }
-    }
+    await runEnrichment(persistence, "transcripts",
+      transcriptArray.length === 0
+        ? { skip: "skipped_no_data", reason: "no transcripts fetched for this creator" }
+        : async () => {
+            for (const t of transcriptArray) {
+              if (t.videoId && t.transcript) {
+                const updated = await updateContentItemTranscript(
+                  subjectId, t.videoId, platform,
+                  t.transcript, t.transcriptSource ?? "captions", t.wordCount,
+                );
+                if (updated) transcriptSuccessCount++;
+              }
+            }
+          });
+
     // FIX 8.2: Always update observation with actual transcript count and derived confidence.
     // This is the single source of truth — overrides any preliminary value from webResearch.ts.
     const confidence: "high" | "medium" | "low" =
       transcriptSuccessCount >= 6 ? "high" :
       transcriptSuccessCount >= 3 ? "medium" : "low";
-    await updateObservationTranscriptCount(observationId, transcriptSuccessCount, confidence);
+    await runEnrichment(persistence, "transcript_count",
+      () => updateObservationTranscriptCount(observationId, transcriptSuccessCount, confidence));
 
-    return { subjectId };
+    // Record the outcome map on the observation row. Best-effort: a failure to
+    // record status must not turn an otherwise-successful persist into an error.
+    try {
+      await updateObservationPersistenceStatus(observationId, persistence);
+    } catch (err) {
+      console.error("[persist] Failed to write persistence_status (creator):", err);
+    }
+
+    return { subjectId, observationId, persistence };
   } catch (err) {
     console.error("[V2 Pipeline] Creator persist failed:", err);
     return { error: err instanceof Error ? err.message : "Unknown error" };
@@ -239,6 +318,10 @@ async function persistBrandToV2(params: {
   dataConfidenceLevel?: string;
   semanticWordCount?: number;
   crawledPagesCount?: number;
+  /** Whether a TikTok channel URL was supplied — distinguishes skipped_not_attempted from skipped_no_data */
+  tiktokRequested?: boolean;
+  /** Whether an Instagram handle was supplied — distinguishes skipped_not_attempted from skipped_no_data */
+  instagramRequested?: boolean;
 }): Promise<PersistResult> {
   try {
     const { brandName, brandUrl, category, extracted, weights, reviewFields, tiktokMetadata, instagramMetadata, mentionFields, symbolFields } = params;
@@ -322,6 +405,31 @@ async function persistBrandToV2(params: {
       return { subjectId, observationId };
     });
 
+    // ── INDEPENDENT ENRICHMENTS — each records its own outcome, none aborts the others ──
+    // Review data (google/yelp ratings + excerpts) is persisted as columns on
+    // the brand_observations row, i.e. inside the atomic identity core above —
+    // it has no separate component entry here.
+    const persistence: PersistenceStatusMap = {};
+    recordOutcome(persistence, "identity_core", "success");
+
+    const tiktokRequested = params.tiktokRequested ?? tiktokMetadata !== null;
+    const instagramRequested = params.instagramRequested ?? instagramMetadata != null;
+
+    // Shared gate for TikTok-channel-derived components
+    const tiktokGate: EnrichmentSkip | null =
+      !tiktokRequested
+        ? { skip: "skipped_not_attempted", reason: "no TikTok channel URL provided" }
+        : tiktokMetadata === null
+          ? { skip: "skipped_not_attempted", reason: "TikTok channel analysis failed upstream — no data reached persistence" }
+          : null;
+    // Shared gate for Instagram-derived components
+    const instagramGate: EnrichmentSkip | null =
+      !instagramRequested
+        ? { skip: "skipped_not_attempted", reason: "no Instagram handle provided" }
+        : instagramMetadata == null
+          ? { skip: "skipped_not_attempted", reason: "Instagram channel analysis failed upstream — no data reached persistence" }
+          : null;
+
     // 4. insertSignalValues (brand keywords, themes, visual language, symbolic vocab, mention signals)
     const signals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
     const bk = symbolFields.brandRawKeywords ?? tiktokMetadata?.rawKeywords ?? [];
@@ -336,131 +444,163 @@ async function persistBrandToV2(params: {
     (mentionFields.mentionRawKeywords as string[] ?? []).forEach((k: string, i: number) => signals.push({ domain: "identity_claim", signalKey: k, rank: i + 1, source: "audience" }));
     (mentionFields.mentionMusicSignals as string[] ?? []).forEach((m: string, i: number) => signals.push({ domain: "music_title", signalKey: m, rank: i + 1, source: "audience" }));
     (mentionFields.mentionMusicArtists as string[] ?? []).forEach((a: string, i: number) => signals.push({ domain: "music_artist", signalKey: a, rank: i + 1, source: "audience" }));
-    if (signals.length > 0) await insertSignalValues(subjectId, observationId, signals);
+    await runEnrichment(persistence, "signal_values",
+      signals.length === 0
+        ? { skip: "skipped_no_data", reason: "no brand/mention signals extracted" }
+        : () => insertSignalValues(subjectId, observationId, signals));
 
     // 5. insertDecodedSignals (brand decoded symbols — mirror creator pattern)
     const bds = symbolFields.brandDecodedSymbols as import("./brandSymbolDecoder").BrandDecodedSymbols | null;
     const tiktokDss = tiktokMetadata?.decodedSymbols as Array<{ phrase: string; meaning: string; category: string; source?: string }> | undefined;
+    const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
     if (bds) {
       // BrandDecodedSymbols is an object with nested arrays — destructure like creator pipeline
-      const decodedRows: Array<{ category: string; phrase: string; meaning: string; informsFields?: string[]; source?: string }> = [];
       (bds.identityClaims ?? []).forEach(s => decodedRows.push({ category: "identity_claim", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
       (bds.statusSignals ?? []).forEach(s => decodedRows.push({ category: "status_signal", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
       (bds.communityReferences ?? []).forEach(s => decodedRows.push({ category: "community_reference", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
       (bds.aspirationDrivers ?? []).forEach(s => decodedRows.push({ category: "aspiration_driver", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "brand" }));
       (bds.audienceLanguage ?? []).forEach(s => decodedRows.push({ category: "audience_language", phrase: s.phrase, meaning: s.meaning, informsFields: s.informs, source: "audience" }));
-      if (decodedRows.length > 0) await insertDecodedSignals(subjectId, observationId, decodedRows);
     } else if (tiktokDss && Array.isArray(tiktokDss)) {
       // Fallback: TikTok channel decoded symbols (flat array from Track A LLM)
-      const rows = tiktokDss.map(s => ({
+      tiktokDss.forEach(s => decodedRows.push({
         category: s.category, phrase: s.phrase, meaning: s.meaning, source: s.source ?? "brand",
       }));
-      if (rows.length > 0) await insertDecodedSignals(subjectId, observationId, rows);
     }
+    await runEnrichment(persistence, "decoded_signals",
+      decodedRows.length === 0
+        ? { skip: "skipped_no_data", reason: "symbol decoder produced no signals for this brand" }
+        : () => insertDecodedSignals(subjectId, observationId, decodedRows));
 
     // 6. insertAudienceMentions (raw mention videos)
     const rawMentions = (mentionFields.mentionDecodedSymbols as any)?.rawMentionVideos as MentionVideo[] ?? [];
-    if (rawMentions.length > 0) {
-      await insertAudienceMentions(subjectId, observationId, rawMentions.map((m: MentionVideo) => ({
-        platform: "TikTok",
-        mentionVideoId: m.videoId,
-        authorHandle: m.authorHandle,
-        caption: m.caption,
-        viewCount: m.plays,
-        likeCount: m.likes,
-        commentCount: m.comments,
-        shareCount: m.shares,
-        saveCount: m.saves,
-        musicTitle: m.musicTitle,
-        musicArtist: m.musicArtist,
-      })));
-    }
+    await runEnrichment(persistence, "audience_mentions",
+      rawMentions.length === 0
+        ? { skip: "skipped_no_data", reason: "no audience mention videos found" }
+        : () => insertAudienceMentions(subjectId, observationId, rawMentions.map((m: MentionVideo) => ({
+            platform: "TikTok",
+            mentionVideoId: m.videoId,
+            authorHandle: m.authorHandle,
+            caption: m.caption,
+            viewCount: m.plays,
+            likeCount: m.likes,
+            commentCount: m.comments,
+            shareCount: m.shares,
+            saveCount: m.saves,
+            musicTitle: m.musicTitle,
+            musicArtist: m.musicArtist,
+          }))));
 
     // 7. insertContentItems (brand TikTok channel videos)
     const brandVideos = tiktokMetadata?.videoTranscripts ?? [];
-    if (brandVideos.length > 0) {
-      const contentRows = brandVideos.map((v, i) => ({
-        platform: "TikTok" as const,
-        platformVideoId: v.videoId || `brand-video-${i}`,
-        caption: v.caption,
-        transcriptText: v.transcriptText ?? undefined,
-        transcriptWordCount: v.transcriptWordCount ?? undefined,
-        transcriptSource: v.transcriptSource ?? undefined,
-        createTime: v.postedDate ? Math.floor(new Date(v.postedDate).getTime() / 1000) : undefined,
-        status: v.transcriptText ? "sampled" : "discovered",
-      }));
-      await insertContentItems(subjectId, observationId, contentRows);
-      console.log(`[persist] Brand channel videos: ${contentRows.length} rows written`);
-    }
+    await runEnrichment(persistence, "channel_content_items",
+      tiktokGate ?? (brandVideos.length === 0
+        ? { skip: "skipped_no_data", reason: "TikTok channel has no analyzable videos" }
+        : async () => {
+            const contentRows = brandVideos.map((v, i) => ({
+              platform: "TikTok" as const,
+              platformVideoId: v.videoId || `brand-video-${i}`,
+              caption: v.caption,
+              transcriptText: v.transcriptText ?? undefined,
+              transcriptWordCount: v.transcriptWordCount ?? undefined,
+              transcriptSource: v.transcriptSource ?? undefined,
+              createTime: v.postedDate ? Math.floor(new Date(v.postedDate).getTime() / 1000) : undefined,
+              status: v.transcriptText ? "sampled" : "discovered",
+            }));
+            await insertContentItems(subjectId, observationId, contentRows);
+            console.log(`[persist] Brand channel videos: ${contentRows.length} rows written`);
+          }));
 
     // 8. insertContentItems (audience mention videos as 'mention' status)
-    if (rawMentions.length > 0) {
-      const mentionContentRows = rawMentions.slice(0, 50).map(m => ({
-        platform: "TikTok" as const,
-        platformVideoId: m.videoId,
-        caption: m.caption,
-        viewCount: m.plays,
-        likeCount: m.likes,
-        commentCount: m.comments,
-        shareCount: m.shares,
-        saveCount: m.saves,
-        musicTitle: m.musicTitle,
-        musicArtist: m.musicArtist,
-        createTime: m.createdAt || undefined,
-        status: "mention",
-      }));
-      await insertContentItems(subjectId, observationId, mentionContentRows);
-      console.log(`[persist] Audience mention videos: ${mentionContentRows.length} rows written`);
-    }
+    await runEnrichment(persistence, "mention_content_items",
+      rawMentions.length === 0
+        ? { skip: "skipped_no_data", reason: "no audience mention videos found" }
+        : async () => {
+            const mentionContentRows = rawMentions.slice(0, 50).map(m => ({
+              platform: "TikTok" as const,
+              platformVideoId: m.videoId,
+              caption: m.caption,
+              viewCount: m.plays,
+              likeCount: m.likes,
+              commentCount: m.comments,
+              shareCount: m.shares,
+              saveCount: m.saves,
+              musicTitle: m.musicTitle,
+              musicArtist: m.musicArtist,
+              createTime: m.createdAt || undefined,
+              status: "mention",
+            }));
+            await insertContentItems(subjectId, observationId, mentionContentRows);
+            console.log(`[persist] Audience mention videos: ${mentionContentRows.length} rows written`);
+          });
 
     // 9. Instagram platform handle
-    if (instagramMetadata?.channelHandle) {
-      await upsertPlatformHandle(
-        subjectId,
-        "instagram",
-        instagramMetadata.channelHandle,
-        `https://www.instagram.com/${instagramMetadata.channelHandle}/`,
-      );
-      console.log(`[persist] Instagram handle @${instagramMetadata.channelHandle} saved`);
-    }
+    await runEnrichment(persistence, "instagram_handle",
+      instagramGate ?? (!instagramMetadata?.channelHandle
+        ? { skip: "skipped_no_data", reason: "Instagram analysis returned no channel handle" }
+        : async () => {
+            await upsertPlatformHandle(
+              subjectId,
+              "instagram",
+              instagramMetadata.channelHandle,
+              `https://www.instagram.com/${instagramMetadata.channelHandle}/`,
+            );
+            console.log(`[persist] Instagram handle @${instagramMetadata.channelHandle} saved`);
+          }));
 
     // 10. Instagram post content items
-    if (instagramMetadata?.postCaptions && instagramMetadata.postCaptions.length > 0) {
-      const igContentRows = instagramMetadata.postCaptions.map((caption, i) => ({
-        platform: "instagram" as const,
-        platformVideoId: `ig-post-${instagramMetadata.channelHandle}-${i}`,
-        caption,
-        status: "sampled",
-      }));
-      await insertContentItems(subjectId, observationId, igContentRows);
-      console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written`);
-    }
+    await runEnrichment(persistence, "instagram_content_items",
+      instagramGate ?? (!instagramMetadata?.postCaptions?.length
+        ? { skip: "skipped_no_data", reason: "Instagram analysis returned no post captions" }
+        : async () => {
+            const igContentRows = instagramMetadata.postCaptions!.map((caption, i) => ({
+              platform: "instagram" as const,
+              platformVideoId: `ig-post-${instagramMetadata.channelHandle}-${i}`,
+              caption,
+              status: "sampled",
+            }));
+            await insertContentItems(subjectId, observationId, igContentRows);
+            console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written`);
+          }));
 
     // 11. Instagram signal values (keywords, themes, vocab from LLM analysis)
+    const igSignals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
     if (instagramMetadata) {
-      const igSignals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
       (instagramMetadata.rawKeywords ?? []).forEach((k, i) => igSignals.push({ domain: "keyword", signalKey: k, rank: i + 1, source: "instagram" }));
       (instagramMetadata.themeLabels ?? []).forEach((t, i) => igSignals.push({ domain: "content_theme", signalKey: t, rank: i + 1, source: "instagram" }));
       (instagramMetadata.symbolicVocabulary ?? []).forEach((s, i) => igSignals.push({ domain: "symbolic_vocabulary", signalKey: s, rank: i + 1, source: "instagram" }));
-      if (igSignals.length > 0) {
-        await insertSignalValues(subjectId, observationId, igSignals);
-        console.log(`[persist] Instagram signal values: ${igSignals.length} rows written`);
-      }
+    }
+    await runEnrichment(persistence, "instagram_signal_values",
+      instagramGate ?? (igSignals.length === 0
+        ? { skip: "skipped_no_data", reason: "Instagram analysis produced no signals" }
+        : async () => {
+            await insertSignalValues(subjectId, observationId, igSignals);
+            console.log(`[persist] Instagram signal values: ${igSignals.length} rows written`);
+          }));
 
-      // 12. Instagram decoded signals
-      if (instagramMetadata.decodedSymbols && instagramMetadata.decodedSymbols.length > 0) {
-        const igDecodedRows = instagramMetadata.decodedSymbols.map(s => ({
-          category: s.category,
-          phrase: s.phrase,
-          meaning: s.meaning,
-          source: "instagram",
-        }));
-        await insertDecodedSignals(subjectId, observationId, igDecodedRows);
-        console.log(`[persist] Instagram decoded signals: ${igDecodedRows.length} rows written`);
-      }
+    // 12. Instagram decoded signals
+    await runEnrichment(persistence, "instagram_decoded_signals",
+      instagramGate ?? (!instagramMetadata?.decodedSymbols?.length
+        ? { skip: "skipped_no_data", reason: "Instagram analysis produced no decoded symbols" }
+        : async () => {
+            const igDecodedRows = instagramMetadata.decodedSymbols!.map(s => ({
+              category: s.category,
+              phrase: s.phrase,
+              meaning: s.meaning,
+              source: "instagram",
+            }));
+            await insertDecodedSignals(subjectId, observationId, igDecodedRows);
+            console.log(`[persist] Instagram decoded signals: ${igDecodedRows.length} rows written`);
+          }));
+
+    // Record the outcome map on the observation row. Best-effort: a failure to
+    // record status must not turn an otherwise-successful persist into an error.
+    try {
+      await updateObservationPersistenceStatus(observationId, persistence);
+    } catch (err) {
+      console.error("[persist] Failed to write persistence_status (brand):", err);
     }
 
-    return { subjectId };
+    return { subjectId, observationId, persistence };
   } catch (err) {
     console.error("[V2 Pipeline] Brand persist failed (non-fatal):", err);
     return { error: err instanceof Error ? err.message : "Unknown error" };
@@ -1123,6 +1263,8 @@ export const appRouter = router({
           dataConfidenceLevel: brandDataConfidenceLevel,
           semanticWordCount: brandSemanticWordCount,
           crawledPagesCount: brandCrawledPagesCount,
+          tiktokRequested: Boolean(input.tiktokChannelUrl?.trim()),
+          instagramRequested: Boolean(input.instagramHandle?.trim()),
         });
 
         if ("error" in brandPersistResult) {
@@ -1301,6 +1443,8 @@ export const appRouter = router({
           dataConfidenceLevel: brandDataConfidenceLevel,
           semanticWordCount: brandSemanticWordCountReanalyze,
           crawledPagesCount: brandCrawledPagesCountReanalyze,
+          tiktokRequested: Boolean(existing.tiktokChannelUrl),
+          instagramRequested: Boolean(igHandleToUse),
         });
 
         const updated = await getBrandProfileById(input.id);

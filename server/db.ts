@@ -385,6 +385,22 @@ export async function insertObservation(
 }
 
 /**
+ * Write the per-component persistence outcome map onto an observation row
+ * (womo_0005). Shape: { component: { status, reason, at } } with status
+ * success | failed | skipped_no_data | skipped_not_attempted.
+ */
+export async function updateObservationPersistenceStatus(
+  observationId: string,
+  statusMap: Record<string, { status: string; reason: string | null; at: string }>,
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(observations)
+    .set({ persistenceStatus: statusMap })
+    .where(eq(observations.id, observationId));
+}
+
+/**
  * Get the latest observation ID for a given subject.
  * Used when appending content items after the initial pipeline
  * (e.g., supplemental video ingestion).
