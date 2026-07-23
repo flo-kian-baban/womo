@@ -148,6 +148,8 @@ The two skip statuses are deliberately distinct: `skipped_no_data` is a data-leg
 signal about the subject; `skipped_not_attempted` marks incomplete collection on our side.
 `NULL` (whole column) = the row predates womo_0005 tracking.
 
+**Reserved keys (Session 8):** keys prefixed with `_` are **not** enrichment components — they carry run metadata and can never collide with a component name. Currently `_meta.sociologicalFieldsProvenance` (`"computed" | "estimated"`) marks whether the creator's sociological fields (parasocialBondStrength / audienceRelationshipType / culturalCapital / remixRate) were data-derived from TikTok engagement signals or LLM-estimated (Instagram / YouTube). `getRunDiagnostics` skips `_`-prefixed keys in its component loop and surfaces `sociologicalFieldsProvenance`; the clean component map is still what the API returns.
+
 #### 3b. Review gate (womo_0006)
 
 Every analysis run produces an observation with `review_status = 'pending'`. An
@@ -298,7 +300,7 @@ observations still persist as accepted until Session 7.
 | video_duration | real | yes | — | seconds |
 | create_time | timestamptz | yes | — | original post time |
 | region | varchar(128) | yes | — | |
-| temporal_bucket | varchar(16) | yes | — | recent/mid/anchor (6-3-3 sampling) |
+| temporal_bucket | varchar(16) | yes | — | recent/mid/anchor (6-3-3 sampling) — **written Session 8** by `updateContentItemTranscript` during transcript wiring (previously never written; the read model + `getRunDiagnostics` already consumed it) |
 | like_count | **bigint** | yes | — | |
 | comment_count | **bigint** | yes | — | |
 | share_count | **bigint** | yes | — | |
@@ -468,7 +470,8 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 **Evidence snapshot vocabulary (womo_0007)** — written per creator analysis run (append-only history):
 - `creator_evidence_inputs` — JSON of the structured inputs used to build the extraction prompt (evidence-summary builder input: stats, titles, hashtags, keywords, themes, transcripts, engagement signals, decoded-symbols block).
 - `creator_extraction_prompt` — the **exact user-prompt string** sent to the LLM; with `metadata.systemPrompt` this reconstructs the messages array byte-identically for extraction replay.
-- `brand_evidence_inputs` / `brand_extraction_prompt` — reserved for Session 8.
+- `creator_longitudinal_sample` — **(Session 8)** the verbatim 6-3-3 `LongitudinalSample` object (recent/mid/anchor buckets, fill-forward decisions, ordering, `totalFetched`, `completeness`, `culturalVelocity`) as a JSON string; one per run, keyed `(run_id, document_type)` like the others. Preserves exactly what the sampler produced — a `content_items`/`temporal_bucket` reconstruction cannot fully recover the fill-forward + ordering. Written only on the TikTok path. Writer: `insertLongitudinalSampleSnapshot`; read seam: `getLongitudinalSampleSnapshot(observationId)`.
+- `brand_evidence_inputs` / `brand_extraction_prompt` — reserved for a later session.
 
 **[FACT]** The `embedding vector(1536)` column + ivfflat index described in the `schema.ts` comment are **NOT created** in the live DB. pgvector is installed but the embedding feature is dormant. As of womo_0007 this table gains its first writer (the creator evidence-snapshot path).
 
@@ -607,8 +610,9 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | 20260723 (see ledger) | **womo_0005_persistence_completeness** (`observations.persistence_status` jsonb + vocabulary [§3a](#3a-persistence_status-vocabulary); `llm_invocations.status`/`error_message` + partial index `llm_status_failed_idx`; `scrape_events` unchanged — failure columns already existed) |
 | 20260723 (see ledger) | **womo_0006_review_gate_and_run_id** (`observations.review_status`/`reviewed_at`/`reviewed_by` + backfill to accepted; `run_id` on observations/scrape_events/llm_invocations; 4 indexes — see [§3b](#3b-review-gate-womo_0006)) |
 | 20260723 (see ledger) | **womo_0007_evidence_snapshots** (`semantic_documents.run_id` + `sd_run_idx` + partial unique `sd_run_doc_unique(run_id, document_type)`; evidence-snapshot document kinds — table gains its first writer) |
+| 20260723 (see ledger) | **womo_0008_correct_false_silent_failure_flags** (Session 8 **data correction**, not DDL: clears the false `silent_failure_detected=true` flag on **253** auto-logged TikTok success rows with `response_size_bytes >= 5000` — the empty-body `detectSilentFailure` bug fixed in `httpClient.ts`; **14** sub-5000-byte rows intentionally left flagged since their bodies were never stored) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **11** — `womo_0004_db_hardening`, `womo_0005_persistence_completeness`, `womo_0006_review_gate_and_run_id`, and `womo_0007_evidence_snapshots` were applied in later sessions. This doc reflects the live state.
+> *Note:* the original work order referenced "7 migrations"; there are now **12** — `womo_0004`..`womo_0008` were applied in later sessions. `womo_0008` is a data correction (no schema change). This doc reflects the live state.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).

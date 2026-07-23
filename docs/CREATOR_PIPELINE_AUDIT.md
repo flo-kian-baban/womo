@@ -11,6 +11,24 @@
 
 ---
 
+## SESSION 8 — ADDRESSED (update; the diagnosis below is preserved as originally written, pre-fix)
+
+Everything below this section is the **pre-fix** diagnosis at `cf312c4`. Session 8 landed the following correctness fixes on `main` (fitEngine/scoring untouched; the caption-vs-transcript *evidence* rule is Jason's and was left exactly as-is):
+
+| Prioritized finding | What shipped | Commit |
+|---|---|---|
+| **#7** — scrape telemetry corrupt (§3.1) | `logScrapeSuccess` now evaluates the real response body; **253** historical false-positive rows corrected via migration **`womo_0008`** (the 14 sub-5000-byte rows are intentionally left flagged — bodies were never stored) | `a2d5991` + womo_0008 |
+| **#4** — reanalyze fabricates on scrape failure (§1.4, C1.1) | `reanalyze` fails cleanly (no observation, nothing persisted); `analyze`/`bulkAnalyze` guarded too; the "use your knowledge" prompt branch remains only for the (now-unreachable-with-empty-evidence) snapshot path | `e4e422f` |
+| **#2** — confidence over-stated (§6.4, C1.3) | transcript counter now counts only `content_items` rows actually updated (`.returning()`); confidence on new analyses drops to honest values. The caption-counts-as-evidence question is **unchanged** (Jason's) | `5cbbd2b` |
+| **#1** — 6-3-3 sample not persisted (§7.6, C4) | `content_items.temporal_bucket` written + verbatim sample stored as `semantic_documents` `creator_longitudinal_sample` (womo_0007 mechanism, no DDL) | `a071b4e` |
+| **#3** — IG/YouTube sociological fields unmarked (§6.2, C1.4) | provenance marker `persistence_status._meta.sociologicalFieldsProvenance` (`computed`/`estimated`), surfaced in `creator.getDiagnostics`; **values unchanged** | `c6fade9` |
+
+**Still OUTSTANDING (not touched in Session 8):** **#5** (TikTok video collection is a single fragile Playwright-XHR strategy), **#6** (Instagram transcription is one vendor-shape from zero; the `fetchReelVideoUrl` fallback is dead code), the remaining §C4 data-loss items (`following_count` dropped on read-back, `content_items.region` unwritten), the three incompatible engagement-rate formulas (§6.1), and the free-text mythology hallucination surface (§5.3 / #12). Non-determinism in the two default-temperature LLM calls (§C6 / #10) is unchanged.
+
+> Numbering note: findings are cited by their number in the **Prioritized Findings** list at the end. The sociological-fields item is **#3** (shipped as Commit 5).
+
+---
+
 ## TABLE OF CONTENTS
 
 1. Stage 1 — Entry (preflight → analyze; auth, rate limiting, run-id, duplicate gate; rerun/bulk/ingest variants)
