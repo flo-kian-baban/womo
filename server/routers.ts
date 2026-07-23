@@ -836,6 +836,17 @@ export const appRouter = router({
           const research = await researchCreator(input.handleOrUrl, input.platform);
           stepTimings.push({ step: "Web Research & Scraping", durationMs: Date.now() - t1 });
 
+          // Session 8: never extract on empty evidence. A researchCreator failure
+          // already rejects this promise before extraction runs; this guard also
+          // closes the theoretical "succeeded but empty evidence" case so the
+          // "use your own knowledge" prompt branch can never fabricate a profile.
+          if (!research.evidenceSummary) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `No usable evidence was collected for @${input.handleOrUrl}. Analysis was not saved.`,
+            });
+          }
+
           // Step 2: AI Extraction (with retry)
           const t2 = Date.now();
           let extracted;
@@ -1115,7 +1126,27 @@ export const appRouter = router({
             transcripts: research.transcripts?.length ? research.transcripts : undefined,
           };
         } catch (err) {
-          console.warn("[creator.reanalyze] Web research failed, proceeding without evidence:", err);
+          // Session 8: FAIL CLEANLY on research failure. This previously swallowed
+          // the error and fell through to extractCreatorProfile with an empty
+          // evidenceSummary, which triggers the "use your own knowledge of this
+          // creator" prompt branch (aiExtraction.ts:107-109) and fabricates a
+          // profile with no confidence penalty. We throw here — before the persist
+          // call below — so NO observation is created and nothing is persisted.
+          if (err instanceof TRPCError) throw err;
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Re-analysis could not collect fresh evidence for @${existing.handle ?? input.id}. Nothing was saved. (${(err as Error).message})`,
+          });
+        }
+
+        // Defensive: a successful research always yields a non-empty evidence
+        // summary. If that ever changes, still refuse to extract on empty evidence
+        // rather than hallucinate a profile from the model's own knowledge.
+        if (!evidenceSummary) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Re-analysis produced no usable evidence for @${existing.handle ?? input.id}. Nothing was saved.`,
+          });
         }
 
         const extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
@@ -1252,6 +1283,16 @@ export const appRouter = router({
               await withAnalysisRun(newRunId(), async () => {
               // Call the regular analyze endpoint
               const research = await researchCreator(handle, input.platform);
+              // Session 8: never extract on empty evidence (fabrication guard).
+              // A researchCreator throw is already caught by the per-handle
+              // try/catch below and recorded as a job error; this also closes the
+              // theoretical empty-success case for the same fabrication path.
+              if (!research.evidenceSummary) {
+                throw new TRPCError({
+                  code: "PRECONDITION_FAILED",
+                  message: `No usable evidence was collected for @${handle}.`,
+                });
+              }
               const extracted = await extractCreatorProfile(handle, input.platform, research.evidenceSummary);
 
               const bulkPersistResult = await persistCreatorToV2({
