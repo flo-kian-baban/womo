@@ -16,7 +16,7 @@
  * requestGovernor("tiktok") enforces human-pattern timing.
  */
 
-import { fetchHtml, detectSilentFailure, requestGovernor, randomMobileUserAgent } from "../httpClient";
+import { fetchHtml, detectSilentFailure, requestGovernor, randomMobileUserAgent, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession, retireContext } from "../browserClient";
 
 // ─── Response Types (mirror Forge API response shapes — unchanged from Phase 1) ──
@@ -160,6 +160,9 @@ interface PlaywrightResult {
 
 async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | null> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const scrapeStart = Date.now();
+  const profileUrl = `https://www.tiktok.com/@${handle}`;
+  let navStatus: number | undefined;
   try {
     await requestGovernor("tiktok");
     ctx = await getContext("desktop-chrome");
@@ -219,11 +222,13 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
     await warmSession(page, "https://www.tiktok.com/", 2000, 4000);
 
     // Navigate to profile — use networkidle for full JS execution
-    const url = `https://www.tiktok.com/@${handle}`;
-    await page.goto(url, { waitUntil: "networkidle", timeout: 25000 }).catch((err: Error) => {
+    const url = profileUrl;
+    const navResponse = await page.goto(url, { waitUntil: "networkidle", timeout: 25000 }).catch((err: Error) => {
       // FIX 1.2: Log navigation failure instead of silently swallowing
       console.warn(`[tiktokScraper] @${handle}: navigation failed (page may still be usable): ${err.message}`);
+      return null;
     });
+    navStatus = navResponse?.status();
 
     // Wait for rehydration data to appear
     await page.waitForSelector("#__UNIVERSAL_DATA_FOR_REHYDRATION__", { timeout: 8000 }).catch((err: Error) => {
@@ -250,11 +255,24 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
     const check = detectSilentFailure("tiktok", html, url, page.url());
     if (check.isFailed && capturedVideoItems.length === 0 && !capturedUserDetail) {
       console.warn(`[profileScraper] Path C (Playwright) silent failure: ${check.reason}`);
+      recordScrapeEvent({
+        platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: url,
+        httpStatus: navStatus, responseSizeBytes: html.length,
+        silentFailureDetected: true, failureReason: check.reason,
+        durationMs: Date.now() - scrapeStart,
+      });
       await retireContext(context);
       return null;
     }
 
     await page.close();
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: url,
+      httpStatus: navStatus, responseSizeBytes: html.length,
+      silentFailureDetected: check.isFailed,
+      failureReason: check.isFailed ? check.reason : undefined,
+      durationMs: Date.now() - scrapeStart,
+    });
     return {
       html,
       source: "playwright-desktop",
@@ -263,6 +281,11 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
     };
   } catch (err) {
     console.warn(`[profileScraper] Path C (Playwright) failed:`, (err as Error).message);
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: profileUrl,
+      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }

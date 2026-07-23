@@ -15,7 +15,7 @@
  *   - Brand mention collection (Track B) in brandTikTokAnalysis.ts
  */
 
-import { requestGovernor } from "../httpClient";
+import { requestGovernor, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession, retireContext, randomDelay } from "../browserClient";
 
 // ─── Response Type (same shape as the former Forge search response) ───────────
@@ -63,6 +63,9 @@ export interface TikTokSearchItem {
 
 async function searchViaPlaywright(keyword: string): Promise<TikTokSearchResponse | null> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const scrapeStart = Date.now();
+  const searchUrlForLog = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
+  let navStatus: number | undefined;
 
   try {
     await requestGovernor("tiktok");
@@ -108,8 +111,9 @@ async function searchViaPlaywright(keyword: string): Promise<TikTokSearchRespons
     });
 
     // Navigate to search page
-    const searchUrl = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const searchUrl = searchUrlForLog;
+    const navResponse = await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    navStatus = navResponse?.status();
 
     // Wait for initial search results XHR to arrive
     await randomDelay(2000, 4000);
@@ -132,6 +136,10 @@ async function searchViaPlaywright(keyword: string): Promise<TikTokSearchRespons
     if (capturedItems.length > 0) {
       console.log(`[searchScraper] Captured ${capturedItems.length} total results for "${keyword}" (${xhrResponseCount} XHR batches)`);
       await page.close();
+      recordScrapeEvent({
+        platform: "tiktok", scrapeMethod: "tiktok_search_xhr", urlRequested: searchUrlForLog,
+        httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
+      });
       return {
         item_list: normalizeSearchItems(capturedItems),
         has_more: lastHasMore,
@@ -146,14 +154,29 @@ async function searchViaPlaywright(keyword: string): Promise<TikTokSearchRespons
 
     if (htmlResult && htmlResult.item_list.length > 0) {
       console.log(`[searchScraper] HTML parse found ${htmlResult.item_list.length} results for "${keyword}"`);
+      recordScrapeEvent({
+        platform: "tiktok", scrapeMethod: "tiktok_search_html", urlRequested: searchUrlForLog,
+        httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
+      });
       return htmlResult;
     }
 
     console.warn(`[searchScraper] No results found for "${keyword}" via either method`);
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_search_html", urlRequested: searchUrlForLog,
+      httpStatus: navStatus, silentFailureDetected: true,
+      failureReason: "no results via XHR interception or HTML parse",
+      durationMs: Date.now() - scrapeStart,
+    });
     await retireContext(context);
     return { item_list: [], has_more: false };
   } catch (err) {
     console.warn(`[searchScraper] Playwright search failed for "${keyword}":`, (err as Error).message);
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_search_xhr", urlRequested: searchUrlForLog,
+      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }

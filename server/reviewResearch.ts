@@ -14,7 +14,7 @@
 
 import { makeRequest, PlacesSearchResult, PlaceDetailsResult } from "./_core/map";
 import { insertScrapeEvent } from "./db";
-import { fetchHtml } from "./scraping/httpClient";
+import { fetchHtml, recordScrapeEvent } from "./scraping/httpClient";
 import { getContext, retireContext } from "./scraping/browserClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -305,10 +305,16 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
   const searchLoc = cityHint || "Canada";
   console.log(`[yelp] Scraping: ${brandName} in ${searchLoc}`);
   const { context, page } = await getContext("desktop-chrome", 1);
+  // Session 7 telemetry: the scrape_method enum has no Yelp-specific value —
+  // website_crawl is the closest honest label (Playwright page scrape); the
+  // platform column carries 'yelp' and the URL discloses the target.
+  const scrapeStart = Date.now();
+  let searchNavStatus: number | undefined;
   try {
     // Step 1: Search Yelp for the business
     const searchUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(brandName)}&find_loc=${encodeURIComponent(searchLoc)}`;
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const searchNav = await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    searchNavStatus = searchNav?.status();
     await page.waitForTimeout(3000);
 
     // Check for DataDome block
@@ -321,6 +327,12 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
       bodySnippet.includes("are you a robot")
     ) {
       console.warn(`[yelp] Blocked by anti-bot protection for ${brandName}`);
+      recordScrapeEvent({
+        platform: "yelp", scrapeMethod: "website_crawl", urlRequested: searchUrl,
+        httpStatus: searchNavStatus, silentFailureDetected: true,
+        failureReason: "Yelp anti-bot (DataDome) block on search page",
+        durationMs: Date.now() - scrapeStart,
+      });
       return null;
     }
 
@@ -342,17 +354,29 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
 
     if (!bizUrl) {
       console.warn(`[yelp] No business results found for "${brandName}" in ${searchLoc}`);
+      recordScrapeEvent({
+        platform: "yelp", scrapeMethod: "website_crawl", urlRequested: searchUrl,
+        httpStatus: searchNavStatus, failureReason: `no business results for "${brandName}" in ${searchLoc}`,
+        durationMs: Date.now() - scrapeStart,
+      });
       return null;
     }
 
     // Step 3: Navigate to the business page
-    await page.goto(bizUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const bizStart = Date.now();
+    const bizNav = await page.goto(bizUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.waitForTimeout(3000);
 
     // Re-check for DataDome on business page
     const bizTitle = await page.title();
     if (bizTitle === "Access Denied") {
       console.warn(`[yelp] Blocked by anti-bot on business page for ${brandName}`);
+      recordScrapeEvent({
+        platform: "yelp", scrapeMethod: "website_crawl", urlRequested: bizUrl,
+        httpStatus: bizNav?.status(), silentFailureDetected: true,
+        failureReason: "Yelp anti-bot (DataDome) block on business page",
+        durationMs: Date.now() - bizStart,
+      });
       return null;
     }
 
@@ -420,6 +444,11 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
 
     if (!yelpData.name && !yelpData.rating) {
       console.warn(`[yelp] Could not extract business data from ${bizUrl}`);
+      recordScrapeEvent({
+        platform: "yelp", scrapeMethod: "website_crawl", urlRequested: bizUrl,
+        httpStatus: bizNav?.status(), failureReason: "business page loaded but no name/rating extractable",
+        durationMs: Date.now() - bizStart,
+      });
       return null;
     }
 
@@ -427,6 +456,12 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
     // Prevents wrong-business reviews from contaminating the analysis
     if (yelpData.name && !nameSimilar(yelpData.name, brandName)) {
       console.warn(`[yelp] Business name mismatch: found "${yelpData.name}" for brand "${brandName}" — skipping`);
+      recordScrapeEvent({
+        platform: "yelp", scrapeMethod: "website_crawl", urlRequested: bizUrl,
+        httpStatus: bizNav?.status(),
+        failureReason: `business name mismatch: found "${yelpData.name.slice(0, 100)}" for brand "${brandName.slice(0, 100)}"`,
+        durationMs: Date.now() - bizStart,
+      });
       return null;
     }
 
@@ -434,6 +469,11 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
       `[yelp] Scraped: ${yelpData.rating}★, ${yelpData.reviewCount} reviews, ` +
       `${yelpData.reviews.length} review texts extracted`
     );
+
+    recordScrapeEvent({
+      platform: "yelp", scrapeMethod: "website_crawl", urlRequested: bizUrl,
+      httpStatus: bizNav?.status(), durationMs: Date.now() - scrapeStart,
+    });
 
     return {
       platform: "Yelp" as const,
@@ -444,6 +484,12 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
     };
   } catch (err) {
     console.warn("[yelp] Playwright scrape failed:", (err as Error).message);
+    recordScrapeEvent({
+      platform: "yelp", scrapeMethod: "website_crawl",
+      urlRequested: `https://www.yelp.com/search?find_desc=${encodeURIComponent(brandName)}`,
+      httpStatus: searchNavStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     return null;
   } finally {
     await retireContext(context);

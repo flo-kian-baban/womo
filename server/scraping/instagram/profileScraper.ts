@@ -14,7 +14,7 @@
  *   - Mobile viewport consistently
  */
 
-import { fetchHtml, detectSilentFailure, requestGovernor } from "../httpClient";
+import { fetchHtml, detectSilentFailure, requestGovernor, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession, retireContext } from "../browserClient";
 import type { InstagramProfileData, InstagramPostData, InstagramScrapedProfile } from "./types";
 import { emptyProfile } from "./types";
@@ -23,6 +23,9 @@ import { emptyProfile } from "./types";
 
 async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProfile | null> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const scrapeStart = Date.now();
+  const profileUrl = `https://www.instagram.com/${handle}/`;
+  let navStatus: number | undefined;
 
   try {
     await requestGovernor("instagram");
@@ -66,8 +69,9 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
     await warmSession(page, "https://www.instagram.com/", 3000, 5000);
 
     // Navigate to profile
-    const url = `https://www.instagram.com/${handle}/`;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const url = profileUrl;
+    const navResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    navStatus = navResponse?.status();
 
     // Wait for content to load — Instagram's client-side JS
     await page.waitForTimeout(4000 + Math.floor(Math.random() * 2000));
@@ -140,7 +144,13 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
       // Strategy A: web_profile_info (most reliable — returns full user + media)
       try {
         const wpiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${handle}`;
+        const wpiStart = Date.now();
         const wpiRes = await context.request.get(wpiUrl, { headers: apiHeaders, timeout: 10000 });
+        recordScrapeEvent({
+          platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: wpiUrl,
+          httpStatus: wpiRes.status(), durationMs: Date.now() - wpiStart,
+          failureReason: wpiRes.ok() ? undefined : `web_profile_info HTTP ${wpiRes.status()}`,
+        });
         if (wpiRes.ok()) {
           const wpiBody = await wpiRes.json();
           const edges = findMediaEdges(wpiBody);
@@ -169,7 +179,13 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
         if (userId) {
           try {
             const feedUrl = `https://www.instagram.com/api/v1/feed/user/${userId}/?count=12`;
+            const feedStart = Date.now();
             const feedRes = await context.request.get(feedUrl, { headers: apiHeaders, timeout: 10000 });
+            recordScrapeEvent({
+              platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: feedUrl,
+              httpStatus: feedRes.status(), durationMs: Date.now() - feedStart,
+              failureReason: feedRes.ok() ? undefined : `feed/user HTTP ${feedRes.status()}`,
+            });
             if (feedRes.ok()) {
               const feedBody = await feedRes.json();
               const edges = findMediaEdges(feedBody);
@@ -198,6 +214,12 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
     const check = detectSilentFailure("instagram", html, url, page.url());
     if (check.isFailed && capturedMediaEdges.length === 0 && !capturedUserData) {
       console.warn(`[instagramScraper] Path A (Playwright) silent failure: ${check.reason}`);
+      recordScrapeEvent({
+        platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: url,
+        httpStatus: navStatus, responseSizeBytes: html.length,
+        silentFailureDetected: true, failureReason: check.reason,
+        durationMs: Date.now() - scrapeStart,
+      });
       await retireContext(context);
       return null;
     }
@@ -291,13 +313,31 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
 
     if (profileData) {
       console.log(`[instagramScraper] @${handle}: Playwright extracted profile (${profileData.posts.length} posts)`);
+      recordScrapeEvent({
+        platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: url,
+        httpStatus: navStatus, responseSizeBytes: html.length,
+        silentFailureDetected: check.isFailed,
+        failureReason: check.isFailed ? check.reason : undefined,
+        durationMs: Date.now() - scrapeStart,
+      });
       return profileData;
     }
 
     console.log(`[instagramScraper] @${handle}: Playwright loaded page but all extraction methods failed`);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: url,
+      httpStatus: navStatus, responseSizeBytes: html.length,
+      failureReason: "page loaded but all extraction methods failed",
+      durationMs: Date.now() - scrapeStart,
+    });
     return null;
   } catch (err) {
     console.warn(`[instagramScraper] Path A (Playwright) failed:`, (err as Error).message);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: profileUrl,
+      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }
@@ -309,6 +349,9 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
 
 async function scrapeViaPlaywrightDesktop(handle: string): Promise<InstagramScrapedProfile | null> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const scrapeStart = Date.now();
+  const profileUrl = `https://www.instagram.com/${handle}/`;
+  let navStatus: number | undefined;
 
   try {
     await requestGovernor("instagram");
@@ -347,10 +390,12 @@ async function scrapeViaPlaywrightDesktop(handle: string): Promise<InstagramScra
     // Session warming
     await warmSession(page, "https://www.instagram.com/", 3000, 5000);
 
-    const url = `https://www.instagram.com/${handle}/`;
-    await page.goto(url, { waitUntil: "networkidle", timeout: 25000 }).catch((err: Error) => {
+    const url = profileUrl;
+    const navResponse = await page.goto(url, { waitUntil: "networkidle", timeout: 25000 }).catch((err: Error) => {
       console.warn(`[instagramScraper] @${handle}: desktop navigation failed: ${err.message}`);
+      return null;
     });
+    navStatus = navResponse?.status();
     await page.waitForTimeout(3000 + Math.floor(Math.random() * 2000));
 
     // Scroll to trigger post grid loading
@@ -420,13 +465,27 @@ async function scrapeViaPlaywrightDesktop(handle: string): Promise<InstagramScra
 
     if (profileData) {
       console.log(`[instagramScraper] @${handle}: Desktop Playwright got profile (${profileData.posts.length} posts)`);
+      recordScrapeEvent({
+        platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: url,
+        httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
+      });
       return profileData;
     }
 
     console.log(`[instagramScraper] @${handle}: Desktop Playwright also failed`);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: url,
+      httpStatus: navStatus, failureReason: "desktop page loaded but all extraction methods failed",
+      durationMs: Date.now() - scrapeStart,
+    });
     return null;
   } catch (err) {
     console.warn(`[instagramScraper] Path A2 (Desktop Playwright) failed:`, (err as Error).message);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: profileUrl,
+      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }

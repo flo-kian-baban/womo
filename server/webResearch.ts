@@ -25,7 +25,7 @@
  * NO YouTube fallback for TikTok creators — it causes hallucinations.
  */
 
-import { fetchHtml, requestGovernor } from "./scraping/httpClient";
+import { fetchHtml, requestGovernor, recordScrapeEvent } from "./scraping/httpClient";
 import { getContext, retireContext } from "./scraping/browserClient";
 import pLimit from "p-limit";
 import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
@@ -574,6 +574,7 @@ async function downloadAndParseSubtitle(
  * Download a WEBVTT file and parse to plain text.
  */
 async function downloadWebVTT(url: string): Promise<{ transcript: string; wordCount: number } | null> {
+  const dlStart = Date.now();
   try {
     const { default: axios } = await import("axios");
     const subResponse = await axios.get(url, {
@@ -588,12 +589,28 @@ async function downloadWebVTT(url: string): Promise<{ transcript: string; wordCo
     const vttText = subResponse.data as string;
     const transcript = parseWebVTT(vttText);
 
+    // Session 7 telemetry: subtitle downloads bypass fetchHtml (axios) — record
+    // each attempt. Enum has no subtitle-specific method; tiktok_desktop_http
+    // is the closest honest label (plain HTTP GET); the URL discloses the target.
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
+      httpStatus: subResponse.status, responseSizeBytes: vttText?.length,
+      durationMs: Date.now() - dlStart,
+      failureReason: !transcript || transcript.length < 10 ? "WEBVTT downloaded but parsed to empty/too-short transcript" : undefined,
+    });
+
     if (!transcript || transcript.length < 10) return null;
 
     const wordCount = transcript.split(/\s+/).length;
     return { transcript, wordCount };
   } catch (err) {
     console.warn(`[transcript] WEBVTT download failed: ${(err as Error).message}`);
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
+      httpStatus: (err as { response?: { status?: number } }).response?.status,
+      failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - dlStart,
+    });
     return null;
   }
 }
@@ -1235,6 +1252,7 @@ async function fetchYouTubeVideoTranscript(
     if (!baseUrl) return null;
 
     const { default: axios } = await import("axios");
+    const captionStart = Date.now();
     const captionResponse = await axios.get(baseUrl, {
       headers: {
         "Referer": "https://www.youtube.com/",
@@ -1242,10 +1260,24 @@ async function fetchYouTubeVideoTranscript(
       },
       timeout: 10000,
       responseType: "text",
+    }).catch((err: Error & { response?: { status?: number } }) => {
+      // Session 7 telemetry: caption downloads bypass fetchHtml (axios)
+      recordScrapeEvent({
+        platform: "youtube", scrapeMethod: "youtube_html", urlRequested: baseUrl,
+        httpStatus: err.response?.status, failureReason: err.message.slice(0, 500),
+        durationMs: Date.now() - captionStart,
+      });
+      throw err;
     });
 
     const captionXml = captionResponse.data as string;
     const transcript = parseYouTubeCaptionXml(captionXml);
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html", urlRequested: baseUrl,
+      httpStatus: captionResponse.status, responseSizeBytes: captionXml?.length,
+      durationMs: Date.now() - captionStart,
+      failureReason: !transcript || transcript.length < 10 ? "caption XML downloaded but parsed to empty/too-short transcript" : undefined,
+    });
 
     if (!transcript || transcript.length < 10) return null;
 
@@ -1929,6 +1961,7 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
             // Download video via Playwright context.request (inherits cookies)
             try {
               console.log(`[webResearch] Instagram reel ${reel.shortcode}: downloading via context.request...`);
+              const dlStart = Date.now();
               const dlRes = await browserCtx.request.get(reel.video_url, {
                 timeout: 20000,
                 headers: {
@@ -1939,6 +1972,12 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
 
               if (!dlRes.ok()) {
                 console.log(`[webResearch] Instagram reel ${reel.shortcode}: download failed — HTTP ${dlRes.status()}`);
+                recordScrapeEvent({
+                  platform: "instagram", scrapeMethod: "instagram_playwright",
+                  urlRequested: reel.video_url.slice(0, 1000), httpStatus: dlRes.status(),
+                  failureReason: `reel video download failed — HTTP ${dlRes.status()}`,
+                  durationMs: Date.now() - dlStart,
+                });
                 return null;
               }
 
@@ -1946,6 +1985,11 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
               const mimeType = dlRes.headers()["content-type"] || "video/mp4";
               const sizeMB = audioBuffer.length / (1024 * 1024);
               console.log(`[webResearch] Instagram reel ${reel.shortcode}: downloaded ${sizeMB.toFixed(1)}MB`);
+              recordScrapeEvent({
+                platform: "instagram", scrapeMethod: "instagram_playwright",
+                urlRequested: reel.video_url.slice(0, 1000), httpStatus: dlRes.status(),
+                responseSizeBytes: audioBuffer.length, durationMs: Date.now() - dlStart,
+              });
 
               if (sizeMB < 0.01) {
                 console.log(`[webResearch] Instagram reel ${reel.shortcode}: file too small — skipping`);

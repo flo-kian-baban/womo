@@ -11,7 +11,7 @@
  *   Returns: author_name, title (first caption line), thumbnail_url, media_id
  */
 
-import { fetchHtml, requestGovernor } from "../httpClient";
+import { fetchHtml, requestGovernor, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession } from "../browserClient";
 import type { InstagramPostData } from "./types";
 
@@ -65,6 +65,9 @@ export async function fetchPostViaOEmbed(shortcode: string): Promise<Partial<Ins
  */
 export async function fetchReelVideoUrl(shortcode: string): Promise<string | null> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const scrapeStart = Date.now();
+  const reelUrl = `https://www.instagram.com/reel/${shortcode}/`;
+  let navStatus: number | undefined;
 
   try {
     await requestGovernor("instagram");
@@ -73,8 +76,9 @@ export async function fetchReelVideoUrl(shortcode: string): Promise<string | nul
 
     await warmSession(page, "https://www.instagram.com/", 3000, 5000);
 
-    const url = `https://www.instagram.com/reel/${shortcode}/`;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+    const url = reelUrl;
+    const navResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+    navStatus = navResponse?.status();
     await page.waitForTimeout(2000);
 
     // Try to find video source URL
@@ -95,9 +99,19 @@ export async function fetchReelVideoUrl(shortcode: string): Promise<string | nul
     });
 
     await page.close();
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: reelUrl,
+      httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
+      failureReason: videoUrl ? undefined : "reel page loaded but no video source URL found",
+    });
     return videoUrl ?? null;
   } catch (err) {
     console.warn(`[postScraper] Reel video URL fetch failed for ${shortcode}:`, (err as Error).message);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright", urlRequested: reelUrl,
+      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
+      durationMs: Date.now() - scrapeStart,
+    });
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }

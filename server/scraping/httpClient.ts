@@ -297,13 +297,36 @@ function logScrapeEventSafe(
   }
 }
 
+/**
+ * Session 7: exported single logging path for collection code that bypasses
+ * fetchHtml (Playwright navigations, context.request fetches, axios subtitle/
+ * caption downloads, transcription attempts). Fire-and-forget — telemetry must
+ * never change scraping behavior; drops are counted via recordTelemetryDrop.
+ * The ambient analysis-run id is stamped inside insertScrapeEvent (womo_0006).
+ */
+export function recordScrapeEvent(
+  event: Parameters<typeof insertScrapeEvent>[0],
+  context = "instrumented-path",
+): void {
+  logScrapeEventSafe(event, context);
+}
+
 /** Infer platform + scrape method from a URL. Returns null for non-loggable URLs. */
 function inferScrapeContext(url: string): { platform: string; scrapeMethod: string } | null {
   const lower = url.toLowerCase();
+  // Session 7: label the mobile-web and Google-cache fetch paths accurately
+  // (previously both fell through to tiktok_desktop_http).
+  if (lower.includes("webcache.googleusercontent.com")) {
+    return { platform: "tiktok", scrapeMethod: "tiktok_google_cache" };
+  }
+  if (lower.includes("picuki.com")) {
+    return { platform: "instagram", scrapeMethod: "instagram_picuki" };
+  }
   // Only log profile and video page fetches, skip subtitle/caption/API calls
   if (lower.includes("tiktok.com")) {
+    const method = lower.includes("m.tiktok.com") ? "tiktok_mobile_http" : "tiktok_desktop_http";
     if (lower.includes("/video/") || lower.match(/tiktok\.com\/@[^/]+\/?$/)) {
-      return { platform: "tiktok", scrapeMethod: "tiktok_desktop_http" };
+      return { platform: "tiktok", scrapeMethod: method };
     }
     return null; // Skip API/search/subtitle URLs
   }

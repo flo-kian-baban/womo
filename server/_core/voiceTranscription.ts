@@ -33,6 +33,7 @@
  * ```
  */
 import { ENV } from "./env";
+import { recordScrapeEvent } from "../scraping/httpClient";
 
 /**
  * fetch() with an AbortController timeout so a stalled download or transcription
@@ -95,11 +96,30 @@ export type TranscriptionError = {
 
 /**
  * Transcribe audio to text using the internal Speech-to-Text service
- * 
+ *
  * @param options - Audio data and metadata
  * @returns Transcription result or error
  */
 export async function transcribeAudio(
+  options: TranscribeOptions
+): Promise<TranscriptionResponse | TranscriptionError> {
+  // Session 7 telemetry: every transcription attempt records a scrape_event
+  // (method whisper_transcription — the enum value covers both the Whisper and
+  // Gemini-audio variants; provenance detail lives in failureReason/URL).
+  const start = Date.now();
+  const result = await transcribeAudioInner(options);
+  recordScrapeEvent({
+    scrapeMethod: "whisper_transcription",
+    urlRequested: options.audioUrl?.slice(0, 1000),
+    durationMs: Date.now() - start,
+    failureReason: "error" in result
+      ? `${result.code}: ${result.error}${result.details ? ` — ${result.details.slice(0, 300)}` : ""}`
+      : undefined,
+  }, "transcription");
+  return result;
+}
+
+async function transcribeAudioInner(
   options: TranscribeOptions
 ): Promise<TranscriptionResponse | TranscriptionError> {
   try {
