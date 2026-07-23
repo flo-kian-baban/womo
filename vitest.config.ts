@@ -15,5 +15,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // Test-only env so env.ts (ENV.cookieSecret / ENV.pinCode) is populated when the
+    // auth modules load under vitest. These are NOT production secrets.
+    env: {
+      JWT_SECRET: "test-jwt-secret-do-not-use-in-prod-0123456789abcdef",
+      PIN_CODE: "1234",
+    },
   },
 });

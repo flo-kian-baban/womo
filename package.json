@@ -10,6 +10,9 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:integration": "TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/womo_test vitest run --config vitest.integration.config.ts",
+    "test:db:up": "docker run -d --rm --name womo-test-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=womo_test -p 55432:5432 postgres:17-alpine",
+    "test:db:down": "docker rm -f womo-test-pg",
     "db:push": "echo 'BLOCKED: this DB is Supabase-migration-managed. Do NOT run drizzle-kit against it (there is no __drizzle_migrations ledger, so drizzle would try to recreate every object). Make schema changes via a Supabase migration (apply_migration), then mirror them into drizzle/schema.ts for types. See docs/STORAGE_MODEL.md. To override knowingly against a NON-production database: pnpm run db:push:UNSAFE' && exit 1",
     "db:push:UNSAFE": "drizzle-kit generate && drizzle-kit migrate"
   },
