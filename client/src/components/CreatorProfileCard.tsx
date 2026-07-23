@@ -5,6 +5,7 @@ import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
 import { trpc } from "../lib/trpc";
 import { toast } from "sonner";
 import { useState } from "react";
+import { MODEL_PRICING } from "@shared/llmPricing";
 
 // Flattened creator profile as returned by getCreatorProfileById in db.ts.
 // Uses Record<string, any> base so field access with `as` casts works
@@ -546,14 +547,8 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
     return String(n);
   };
 
-  // Cost calculation per model (USD per 1M tokens)
-  const MODEL_PRICING: Record<string, { input: number; output: number; label: string }> = {
-    "gemini-2.5-flash": { input: 0.15, output: 0.60, label: "Gemini 2.5 Flash" },
-    "gemini-2.5-pro": { input: 1.25, output: 10.00, label: "Gemini 2.5 Pro" },
-    "gemini-2.0-flash": { input: 0.10, output: 0.40, label: "Gemini 2.0 Flash" },
-    "gemini-1.5-flash": { input: 0.075, output: 0.30, label: "Gemini 1.5 Flash" },
-    "gemini-1.5-pro": { input: 1.25, output: 5.00, label: "Gemini 1.5 Pro" },
-  };
+  // Cost calculation per model (USD per 1M tokens) — shared table so server
+  // diagnostics and this card always agree (shared/llmPricing.ts).
 
   const modelKey = metrics.tokens.model || "unknown";
   const pricing = MODEL_PRICING[modelKey] ?? { input: 0, output: 0, label: modelKey };

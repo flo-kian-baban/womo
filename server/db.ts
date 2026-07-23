@@ -17,6 +17,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { currentRunId } from './_core/runContext';
+import { computeLlmCostUsd } from '../shared/llmPricing';
 
 // Re-export legacy types for routers.ts compilation
 export type { InsertUser } from "../drizzle/schema";
@@ -1334,6 +1335,271 @@ export async function getContentItemsBySubject(subjectId: string) {
     status: ci.status,
     observationId: ci.observationId,
   }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RUN DIAGNOSTICS (womo_0006) — factual breakdown for the analyst review gate.
+// Facts and counts only: no data-quality score, confidence percentage, or any
+// derived metric that resembles a scoring output (metrics belong to Jason).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type RunDiagnostics = {
+  observationId: string;
+  subjectId: string;
+  runId: string | null;
+  /** false = observation predates run tagging; scrape/LLM data fell back to observation_id linkage and may be incomplete */
+  exactRunLinkage: boolean;
+  reviewStatus: string;
+  observedAt: Date;
+  scrapes: {
+    total: number;
+    failed: number;
+    byPlatform: Array<{
+      platform: string;
+      attempts: number;
+      succeeded: number;
+      failed: number;
+      events: Array<{
+        method: string;
+        url: string | null;
+        httpStatus: number | null;
+        failureReason: string | null;
+        silentFailure: boolean;
+        durationMs: number | null;
+        at: Date;
+      }>;
+    }>;
+  };
+  videos: {
+    total: number;
+    byStatus: Record<string, number>;
+    withTranscript: number;
+    withoutTranscript: number;
+    transcriptSources: Record<string, number>;
+  };
+  llm: {
+    calls: number;
+    failed: number;
+    failures: Array<{ purpose: string; errorMessage: string | null; durationMs: number | null; at: Date }>;
+    byPurpose: Record<string, number>;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    model: string;
+    costUsd: number;
+  };
+  enrichments: {
+    /** verbatim persistence_status map; null = observation predates womo_0005 */
+    raw: Record<string, { status: string; reason: string | null; at: string }> | null;
+    succeeded: string[];
+    failed: Array<{ component: string; reason: string | null }>;
+    skippedNoData: Array<{ component: string; reason: string | null }>;
+    skippedNotAttempted: Array<{ component: string; reason: string | null }>;
+  };
+  fields: {
+    present: string[];
+    missing: string[];
+    counts: { keywords: number; contentThemes: number; hashtags: number; decodedSignals: number; contentItems: number; transcripts: number; temporalBuckets: number };
+  };
+  summary: string[];
+};
+
+export async function getRunDiagnostics(observationId: string): Promise<RunDiagnostics | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const [obs] = await db.select().from(observations)
+    .where(eq(observations.id, observationId)).limit(1);
+  if (!obs) return null;
+
+  const runId = obs.runId;
+  // Exact linkage via run_id when the run was tagged (womo_0006+); otherwise
+  // fall back to observation_id linkage for older rows (scrape/LLM rows
+  // written before persistence carry no observation_id, so pre-run_id
+  // diagnostics are inherently incomplete — flagged via exactRunLinkage).
+  const scrapeWhere = runId ? eq(scrapeEvents.runId, runId) : eq(scrapeEvents.observationId, observationId);
+  const llmWhere = runId ? eq(llmInvocations.runId, runId) : eq(llmInvocations.observationId, observationId);
+
+  const [scrapeRows, llmRows, contentRows, creatorObsRows, signalCountRows, decodedCountRows] = await Promise.all([
+    db.select().from(scrapeEvents).where(scrapeWhere).orderBy(scrapeEvents.createdAt).limit(500),
+    db.select().from(llmInvocations).where(llmWhere).orderBy(llmInvocations.createdAt).limit(500),
+    db.select().from(contentItems).where(eq(contentItems.observationId, observationId)),
+    db.select().from(creatorObservations).where(eq(creatorObservations.observationId, observationId)).limit(1),
+    db.select({ domain: signalValues.domain, count: sql<number>`count(*)::int` })
+      .from(signalValues).where(eq(signalValues.observationId, observationId))
+      .groupBy(signalValues.domain),
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(decodedSignals).where(eq(decodedSignals.observationId, observationId)),
+  ]);
+
+  // ── Scrapes per platform ──
+  const isFailedScrape = (e: typeof scrapeRows[number]) =>
+    Boolean(e.failureReason) || Boolean(e.silentFailureDetected) || (e.httpStatus != null && e.httpStatus >= 400);
+  const platformMap = new Map<string, RunDiagnostics["scrapes"]["byPlatform"][number]>();
+  for (const e of scrapeRows) {
+    const key = e.platform ?? "unknown";
+    let entry = platformMap.get(key);
+    if (!entry) {
+      entry = { platform: key, attempts: 0, succeeded: 0, failed: 0, events: [] };
+      platformMap.set(key, entry);
+    }
+    const failed = isFailedScrape(e);
+    entry.attempts++;
+    if (failed) entry.failed++; else entry.succeeded++;
+    entry.events.push({
+      method: e.scrapeMethod,
+      url: e.urlRequested,
+      httpStatus: e.httpStatus,
+      failureReason: e.failureReason,
+      silentFailure: Boolean(e.silentFailureDetected),
+      durationMs: e.durationMs,
+      at: e.createdAt,
+    });
+  }
+  const byPlatform = Array.from(platformMap.values());
+  const scrapesFailed = byPlatform.reduce((s, p) => s + p.failed, 0);
+
+  // ── Video funnel ──
+  const byStatus: Record<string, number> = {};
+  const transcriptSources: Record<string, number> = {};
+  let withTranscript = 0;
+  const temporalBuckets = new Set<string>();
+  for (const ci of contentRows) {
+    byStatus[ci.status] = (byStatus[ci.status] ?? 0) + 1;
+    if (ci.transcriptText) {
+      withTranscript++;
+      const src = ci.transcriptSource ?? "unknown";
+      transcriptSources[src] = (transcriptSources[src] ?? 0) + 1;
+    }
+    if (ci.temporalBucket) temporalBuckets.add(ci.temporalBucket);
+  }
+
+  // ── LLM ──
+  let inputTokens = 0, outputTokens = 0, llmFailed = 0;
+  let model = "unknown";
+  const byPurpose: Record<string, number> = {};
+  const llmFailures: RunDiagnostics["llm"]["failures"] = [];
+  for (const r of llmRows) {
+    inputTokens += r.inputTokens ?? 0;
+    outputTokens += r.outputTokens ?? 0;
+    if (r.model) model = r.model;
+    byPurpose[r.purpose] = (byPurpose[r.purpose] ?? 0) + 1;
+    if (r.status === "failed") {
+      llmFailed++;
+      llmFailures.push({ purpose: r.purpose, errorMessage: r.errorMessage, durationMs: r.durationMs, at: r.createdAt });
+    }
+  }
+
+  // ── Enrichment persistence outcomes ──
+  const raw = obs.persistenceStatus as RunDiagnostics["enrichments"]["raw"];
+  const succeeded: string[] = [];
+  const failedComponents: Array<{ component: string; reason: string | null }> = [];
+  const skippedNoData: Array<{ component: string; reason: string | null }> = [];
+  const skippedNotAttempted: Array<{ component: string; reason: string | null }> = [];
+  if (raw) {
+    for (const [component, outcome] of Object.entries(raw)) {
+      if (outcome.status === "success") succeeded.push(component);
+      else if (outcome.status === "failed") failedComponents.push({ component, reason: outcome.reason });
+      else if (outcome.status === "skipped_no_data") skippedNoData.push({ component, reason: outcome.reason });
+      else if (outcome.status === "skipped_not_attempted") skippedNotAttempted.push({ component, reason: outcome.reason });
+    }
+  }
+
+  // ── Field presence (what extraction actually produced) ──
+  const co = creatorObsRows[0];
+  const signalCounts = Object.fromEntries(signalCountRows.map(r => [r.domain, r.count]));
+  const decodedCount = decodedCountRows[0]?.count ?? 0;
+  const fieldChecks: Array<[string, boolean]> = [
+    ["bio", obs.bio != null && obs.bio !== ""],
+    ["followerCount", obs.followerCount != null],
+    ["followingCount", obs.followingCount != null],
+    ["engagementRate", obs.engagementRate != null],
+    ["archetype", co?.archetype != null],
+    ["toneRegister", co?.toneRegister != null],
+    ["barthesMyth", co?.barthesMyth != null],
+    ["nicheTopicNode", co?.nicheTopicNode != null],
+    ["aiSummary", co?.aiSummary != null],
+    ["symbolicSummary", co?.symbolicSummary != null],
+    ["contentThemes", (signalCounts["content_theme"] ?? 0) > 0],
+    ["keywords", (signalCounts["keyword"] ?? 0) > 0],
+    ["decodedSymbols", decodedCount > 0],
+    ["longitudinalSample", temporalBuckets.size > 0],
+  ];
+  const present = fieldChecks.filter(([, ok]) => ok).map(([name]) => name);
+  const missing = fieldChecks.filter(([, ok]) => !ok).map(([name]) => name);
+
+  // ── Plain factual summary ──
+  const summary: string[] = [];
+  if (raw) {
+    const totalComponents = Object.keys(raw).length;
+    summary.push(`${succeeded.length} of ${totalComponents} persistence components succeeded`);
+    if (failedComponents.length > 0) {
+      summary.push(`failed: ${failedComponents.map(f => f.component).join(", ")}`);
+    }
+  } else {
+    summary.push("no persistence outcome map (observation predates womo_0005 tracking)");
+  }
+  for (const p of byPlatform) {
+    if (p.failed > 0) {
+      const firstFailure = p.events.find(e => e.failureReason || e.httpStatus != null && e.httpStatus >= 400);
+      const reason = firstFailure?.httpStatus != null && firstFailure.httpStatus >= 400
+        ? `HTTP ${firstFailure.httpStatus}`
+        : firstFailure?.failureReason?.slice(0, 80) ?? "unknown reason";
+      summary.push(`${p.platform}: ${p.failed} of ${p.attempts} scrapes failed (${reason})`);
+    }
+  }
+  if (contentRows.length > 0) {
+    summary.push(`${withTranscript} of ${contentRows.length} captured videos have transcripts`);
+  } else {
+    summary.push("no videos captured");
+  }
+  if (llmRows.length > 0) {
+    summary.push(`${llmRows.length} LLM calls${llmFailed > 0 ? `, ${llmFailed} failed` : ", all succeeded"}`);
+  } else {
+    summary.push(runId ? "no LLM calls recorded for this run" : "LLM calls not linkable (observation predates run tagging)");
+  }
+  if (missing.length > 0) {
+    summary.push(`missing fields: ${missing.join(", ")}`);
+  }
+
+  return {
+    observationId,
+    subjectId: obs.subjectId,
+    runId,
+    exactRunLinkage: runId != null,
+    reviewStatus: obs.reviewStatus,
+    observedAt: obs.observedAt,
+    scrapes: { total: scrapeRows.length, failed: scrapesFailed, byPlatform },
+    videos: {
+      total: contentRows.length,
+      byStatus,
+      withTranscript,
+      withoutTranscript: contentRows.length - withTranscript,
+      transcriptSources,
+    },
+    llm: {
+      calls: llmRows.length,
+      failed: llmFailed,
+      failures: llmFailures,
+      byPurpose,
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      model,
+      costUsd: computeLlmCostUsd(model, inputTokens, outputTokens),
+    },
+    enrichments: { raw, succeeded, failed: failedComponents, skippedNoData, skippedNotAttempted },
+    fields: { present, missing, counts: {
+      keywords: signalCounts["keyword"] ?? 0,
+      contentThemes: signalCounts["content_theme"] ?? 0,
+      hashtags: signalCounts["hashtag"] ?? 0,
+      decodedSignals: decodedCount,
+      contentItems: contentRows.length,
+      transcripts: withTranscript,
+      temporalBuckets: temporalBuckets.size,
+    } },
+    summary,
+  };
 }
 
 /**

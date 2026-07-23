@@ -17,7 +17,7 @@ import {
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
-  setObservationReviewStatus,
+  setObservationReviewStatus, getRunDiagnostics,
   getLatestObservationId,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
@@ -919,6 +919,19 @@ export const appRouter = router({
       }))
       .mutation(async ({ input }) => {
         return setObservationReviewStatus(input.observationId, "declined", input.reviewedBy);
+      }),
+
+    // Factual diagnostic breakdown for an observation/run (womo_0006) — the
+    // data an analyst reviews before accepting or declining. Facts and counts
+    // only; no derived quality metrics.
+    getDiagnostics: protectedProcedure
+      .input(z.object({ observationId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const diagnostics = await getRunDiagnostics(input.observationId);
+        if (!diagnostics) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Observation not found" });
+        }
+        return diagnostics;
       }),
 
     getProvenance: protectedProcedure
