@@ -13,6 +13,7 @@ import {
   insertSignalValues, insertDecodedSignals, insertContentItems,
   updateContentItemTranscript, updateObservationTranscriptCount,
   updateCreatorObservationAvgDuration, updateObservationPersistenceStatus,
+  insertEvidenceSnapshots,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
@@ -26,7 +27,7 @@ import {
   listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
 } from "./db";
-import { extractCreatorProfile, extractBrandProfile, generateFITNarrative } from "./aiExtraction";
+import { extractCreatorProfile, extractBrandProfile, generateFITNarrative, buildCreatorExtractionPrompts } from "./aiExtraction";
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
@@ -113,6 +114,44 @@ async function runEnrichment(
 }
 
 /**
+ * Evidence snapshot payload (womo_0007): built by the analyze/reanalyze/bulk
+ * handlers with the SAME (handleOrUrl, platform, evidenceSummary) triple that
+ * extractCreatorProfile received, so the persisted prompt is byte-identical to
+ * what the LLM saw. Capture only — nothing about the pipeline's LLM input
+ * changes.
+ */
+export type CreatorEvidenceSnapshotPayload = {
+  inputsJson: string;
+  promptText: string;
+  promptMeta: Record<string, unknown>;
+};
+
+function buildCreatorEvidenceSnapshotPayload(
+  handleOrUrl: string,
+  platform: string,
+  evidenceSummary: string | undefined,
+  structuredInputs: unknown,
+): CreatorEvidenceSnapshotPayload {
+  const prompts = buildCreatorExtractionPrompts(handleOrUrl, platform, evidenceSummary);
+  return {
+    inputsJson: JSON.stringify({
+      schemaVersion: 1,
+      handleOrUrl,
+      platform,
+      evidenceSummary: evidenceSummary ?? null,
+      structuredInputs,
+    }),
+    promptText: prompts.userPrompt,
+    promptMeta: {
+      systemPrompt: prompts.systemPrompt,
+      model: prompts.model,
+      purpose: prompts.purpose,
+      temperature: prompts.temperature,
+    },
+  };
+}
+
+/**
  * Persist a full creator analysis result to the V2 schema.
  * Identity core is atomic; enrichments are independent and status-tracked.
  */
@@ -160,6 +199,8 @@ export async function persistCreatorToV2(params: {
   pronouns?: string;
   extracted: Record<string, any>;
   researchData: Record<string, any>;
+  /** womo_0007: evidence snapshot to persist alongside the observation */
+  evidenceSnapshot?: CreatorEvidenceSnapshotPayload;
 }): Promise<PersistResult> {
   try {
     const { handle, platform, profileUrl, displayName, pronouns, extracted, researchData } = params;
@@ -335,6 +376,20 @@ export async function persistCreatorToV2(params: {
       transcriptSuccessCount >= 3 ? "medium" : "low";
     await runEnrichment(persistence, "transcript_count",
       () => updateObservationTranscriptCount(observationId, transcriptSuccessCount, confidence));
+
+    // Evidence snapshot (womo_0007): structured inputs + exact extraction
+    // prompt, keyed by the ambient run id. Capture-only.
+    await runEnrichment(persistence, "evidence_snapshot",
+      !params.evidenceSnapshot
+        ? { skip: "skipped_not_attempted", reason: "caller provided no evidence snapshot payload" }
+        : () => insertEvidenceSnapshots({
+            subjectId,
+            observationId,
+            kindPrefix: "creator",
+            inputsJson: params.evidenceSnapshot!.inputsJson,
+            promptText: params.evidenceSnapshot!.promptText,
+            promptMeta: params.evidenceSnapshot!.promptMeta,
+          }));
 
     // Record the outcome map on the observation row. Best-effort: a failure to
     // record status must not turn an otherwise-successful persist into an error.
@@ -833,6 +888,11 @@ export const appRouter = router({
           pronouns: extracted.pronouns,
           extracted,
           researchData: researchData ?? {},
+          // womo_0007: same (handleOrUrl, platform, evidenceSummary) triple the
+          // extraction call above received → byte-identical prompt snapshot
+          evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
+            input.handleOrUrl, input.platform, research.evidenceSummary, research,
+          ),
         });
         stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
 
@@ -1032,6 +1092,10 @@ export const appRouter = router({
           pronouns: extracted.pronouns,
           extracted,
           researchData,
+          // womo_0007: mirror the exact extraction inputs used above
+          evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
+            existing.profileUrl || existing.handle, existing.platform as string, evidenceSummary, researchData,
+          ),
         });
         const persistence = summarizePersistence(reanalyzePersistResult);
         if (persistence.saved !== "full") {
@@ -1160,6 +1224,10 @@ export const appRouter = router({
                 displayName: extracted.displayName,
                 pronouns: extracted.pronouns,
                 extracted,
+                // womo_0007: mirror the exact extraction inputs used above
+                evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
+                  handle, input.platform, research.evidenceSummary, research,
+                ),
                 researchData: {
                   followerCount: research.followerCount ?? undefined,
                   totalLikes: research.totalLikes ?? undefined,

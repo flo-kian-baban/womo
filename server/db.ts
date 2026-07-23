@@ -544,6 +544,63 @@ export async function setObservationReviewStatus(
 }
 
 /**
+ * Evidence snapshots (womo_0007): persist the structured inputs used to build
+ * the extraction prompt AND the exact prompt string sent to the LLM, keyed by
+ * run_id. Two semantic_documents rows per run; the partial unique index
+ * sd_run_doc_unique enforces one of each kind per run (append-only history —
+ * a duplicate write for the same run rejects rather than replacing).
+ */
+export async function insertEvidenceSnapshots(args: {
+  subjectId: string;
+  observationId: string | null;
+  /** Defaults to the ambient analysis-run id. */
+  runId?: string | null;
+  /** 'creator' this session; 'brand' reserved for Session 8 */
+  kindPrefix: "creator" | "brand";
+  /** JSON string of the structured inputs used to build the prompt */
+  inputsJson: string;
+  /** The exact user-prompt string sent to the LLM */
+  promptText: string;
+  /** { systemPrompt, model, purpose, temperature } — reconstructs the messages array */
+  promptMeta: Record<string, unknown>;
+  inputsMeta?: Record<string, unknown>;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const runId = args.runId ?? currentRunId();
+  await db.insert(semanticDocuments).values([
+    {
+      subjectId: args.subjectId,
+      observationId: args.observationId,
+      runId,
+      documentType: `${args.kindPrefix}_evidence_inputs`,
+      contentText: args.inputsJson,
+      metadata: args.inputsMeta ?? { schemaVersion: 1 },
+    },
+    {
+      subjectId: args.subjectId,
+      observationId: args.observationId,
+      runId,
+      documentType: `${args.kindPrefix}_extraction_prompt`,
+      contentText: args.promptText,
+      metadata: args.promptMeta,
+    },
+  ]);
+}
+
+/**
+ * Read the evidence snapshot set for a run (diagnostics / replay tooling).
+ */
+export async function getEvidenceSnapshotsByRunId(runId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(semanticDocuments)
+    .where(eq(semanticDocuments.runId, runId))
+    .orderBy(semanticDocuments.documentType);
+}
+
+/**
  * Write the per-component persistence outcome map onto an observation row
  * (womo_0005). Shape: { component: { status, reason, at } } with status
  * success | failed | skipped_no_data | skipped_not_attempted.

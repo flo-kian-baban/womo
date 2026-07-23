@@ -37,11 +37,26 @@ export interface CreatorExtractionResult {
   aiSummary: string;
 }
 
-export async function extractCreatorProfile(
+/**
+ * Session 7: the exact prompt strings for creator extraction, exposed so the
+ * evidence-snapshot writer can persist byte-identical copies of what is sent
+ * to the LLM. extractCreatorProfile() uses this same builder — there is ONE
+ * source of truth for the prompt text.
+ */
+export interface CreatorExtractionPrompts {
+  systemPrompt: string;
+  userPrompt: string;
+  /** Informational — the model is hardcoded in _core/llm.ts */
+  model: string;
+  purpose: string;
+  temperature: number;
+}
+
+export function buildCreatorExtractionPrompts(
   handleOrUrl: string,
   platform: string,
   evidenceSummary?: string  // Real scraped evidence from webResearch.ts
-): Promise<CreatorExtractionResult> {
+): CreatorExtractionPrompts {
   const systemPrompt = `You are a cultural anthropologist and media analyst specializing in creator marketing.
 Your task is to analyze a social media creator and produce a structured cultural profile using the Connex Cultural Match Platform framework.
 
@@ -179,6 +194,22 @@ CAMPAIGN TYPE SELECTION GUIDE — choose the most accurate fit:
 - Awareness/Consideration: Established brands seeking broader audience reach and category education without a specific launch (financial services, insurance, healthcare, nonprofits, B2B).
 
 Be specific and evidence-based. Every field must be populated. Output only valid JSON.`;
+
+  return {
+    systemPrompt,
+    userPrompt,
+    model: "gemini-2.5-flash",
+    purpose: "creator_profile_extraction",
+    temperature: 0,
+  };
+}
+
+export async function extractCreatorProfile(
+  handleOrUrl: string,
+  platform: string,
+  evidenceSummary?: string  // Real scraped evidence from webResearch.ts
+): Promise<CreatorExtractionResult> {
+  const { systemPrompt, userPrompt } = buildCreatorExtractionPrompts(handleOrUrl, platform, evidenceSummary);
 
   const response = await invokeLLM({
     purpose: "creator_profile_extraction",
