@@ -796,16 +796,30 @@ export const semanticDocuments = pgTable("semantic_documents", {
   subjectId: uuid("subject_id").notNull().references(() => subjects.id, { onDelete: "cascade" }),
   observationId: uuid("observation_id").references(() => observations.id, { onDelete: "set null" }),
 
+  // womo_0007: evidence snapshots per analysis run. Kinds:
+  //   'creator_evidence_inputs'   — JSON of the structured inputs used to build
+  //                                 the extraction prompt (content_text = JSON)
+  //   'creator_extraction_prompt' — the exact user-prompt string sent to the
+  //                                 LLM; metadata carries systemPrompt, model,
+  //                                 purpose, temperature
+  //   ('brand_*' kinds reserved for Session 8)
   documentType: varchar("document_type", { length: 64 }).notNull(),
   contentText: text("content_text").notNull(),
   tokenCount: integer("token_count"),
   metadata: jsonb("metadata"),
+
+  // Analysis-run correlation id (womo_0007). Snapshots are keyed by
+  // (run_id, document_type) — one of each kind per run, enforced by a partial
+  // unique index in the DB. NULL = document not tied to a run.
+  runId: uuid("run_id"),
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   subjectIdx: index("sd_subject_idx").on(t.subjectId),
   typeIdx: index("sd_type_idx").on(t.documentType),
   observationIdx: index("sd_observation_idx").on(t.observationId),
+  runIdx: index("sd_run_idx").on(t.runId),
+  runDocUnique: uniqueIndex("sd_run_doc_unique").on(t.runId, t.documentType).where(sql`${t.runId} IS NOT NULL`),
 }));
 
 

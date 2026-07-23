@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict h2Z30PzQjP5cv8HDUKyrENPscVzySjJqUmJ90qACE9ntTychGUZbMb7QlqQe6k1
+\restrict aF2q7DS5AzSXIpaIeoGHcYvrX0sAOSoHAKeQlwfwkmgYwbhVc3dKj7JeJ7fkO74
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.10 (Homebrew)
@@ -806,8 +806,23 @@ CREATE TABLE public.semantic_documents (
     content_text text NOT NULL,
     token_count integer,
     metadata jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    run_id uuid
 );
+
+
+--
+-- Name: TABLE semantic_documents; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.semantic_documents IS 'Document store. womo_0007: evidence snapshots per analysis run — document_type ''creator_evidence_inputs'' (JSON of the structured inputs used to build the extraction prompt) and ''creator_extraction_prompt'' (the exact user-prompt string sent to the LLM; metadata carries the exact system prompt, model, purpose, temperature). Brand kinds (''brand_evidence_inputs'', ''brand_extraction_prompt'') reserved for Session 8. The pgvector embedding column mentioned in early plans was never created.';
+
+
+--
+-- Name: COLUMN semantic_documents.run_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.semantic_documents.run_id IS 'Analysis-run correlation id (womo_0006 family). Snapshot documents are keyed by (run_id, document_type). NULL = document not tied to a run.';
 
 
 --
@@ -1447,6 +1462,20 @@ CREATE INDEX sd_observation_idx ON public.semantic_documents USING btree (observ
 
 
 --
+-- Name: sd_run_doc_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX sd_run_doc_unique ON public.semantic_documents USING btree (run_id, document_type) WHERE (run_id IS NOT NULL);
+
+
+--
+-- Name: sd_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sd_run_idx ON public.semantic_documents USING btree (run_id);
+
+
+--
 -- Name: sd_subject_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1936,5 +1965,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict h2Z30PzQjP5cv8HDUKyrENPscVzySjJqUmJ90qACE9ntTychGUZbMb7QlqQe6k1
+\unrestrict aF2q7DS5AzSXIpaIeoGHcYvrX0sAOSoHAKeQlwfwkmgYwbhVc3dKj7JeJ7fkO74
 

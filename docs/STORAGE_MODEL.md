@@ -452,18 +452,25 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | example_angle | text | **no** | — | |
 | rank | integer | yes | — | |
 
-### 19. `semantic_documents` (8 cols) — `schema.ts:751` — **embedding column NOT present**
+### 19. `semantic_documents` (9 cols) — `schema.ts:751` — **evidence snapshot store (womo_0007)**
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
 | subject_id | uuid | **no** | — | FK→subjects (cascade) |
 | observation_id | uuid | yes | — | FK→observations (set null) |
-| document_type | varchar(64) | **no** | — | |
-| content_text | text | **no** | — | |
+| document_type | varchar(64) | **no** | — | snapshot kind — see vocabulary below *(womo_0007)* |
+| content_text | text | **no** | — | the document body (JSON string or prompt text) |
 | token_count | integer | yes | — | |
-| metadata | jsonb | yes | — | |
+| metadata | jsonb | yes | — | for `creator_extraction_prompt`: `{ systemPrompt, model, purpose, temperature }` |
+| run_id | uuid | yes | — | analysis-run correlation id; snapshots keyed `(run_id, document_type)`, one of each kind per run (partial unique `sd_run_doc_unique`) *(added by `womo_0007`)* |
 | created_at | timestamptz | no | now() | |
-**[FACT]** The `embedding vector(1536)` column + ivfflat index described in the `schema.ts:747-749` comment are **NOT created** in the live DB (verified: table has exactly these 8 columns). pgvector is installed but this feature is dormant.
+
+**Evidence snapshot vocabulary (womo_0007)** — written per creator analysis run (append-only history):
+- `creator_evidence_inputs` — JSON of the structured inputs used to build the extraction prompt (evidence-summary builder input: stats, titles, hashtags, keywords, themes, transcripts, engagement signals, decoded-symbols block).
+- `creator_extraction_prompt` — the **exact user-prompt string** sent to the LLM; with `metadata.systemPrompt` this reconstructs the messages array byte-identically for extraction replay.
+- `brand_evidence_inputs` / `brand_extraction_prompt` — reserved for Session 8.
+
+**[FACT]** The `embedding vector(1536)` column + ivfflat index described in the `schema.ts` comment are **NOT created** in the live DB. pgvector is installed but the embedding feature is dormant. As of womo_0007 this table gains its first writer (the creator evidence-snapshot path).
 
 ### 20. `pipeline_runs` (10 cols) — `schema.ts:773` — **no writer; empty**
 | Column | Type | Null | Default | Meaning |
@@ -599,8 +606,9 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | 20260722070910 | **womo_0004_db_hardening** (RLS on all tables, `llm_invocations.match_score_id` FK, drop duplicate `nt_slug_idx`) |
 | 20260723 (see ledger) | **womo_0005_persistence_completeness** (`observations.persistence_status` jsonb + vocabulary [§3a](#3a-persistence_status-vocabulary); `llm_invocations.status`/`error_message` + partial index `llm_status_failed_idx`; `scrape_events` unchanged — failure columns already existed) |
 | 20260723 (see ledger) | **womo_0006_review_gate_and_run_id** (`observations.review_status`/`reviewed_at`/`reviewed_by` + backfill to accepted; `run_id` on observations/scrape_events/llm_invocations; 4 indexes — see [§3b](#3b-review-gate-womo_0006)) |
+| 20260723 (see ledger) | **womo_0007_evidence_snapshots** (`semantic_documents.run_id` + `sd_run_idx` + partial unique `sd_run_doc_unique(run_id, document_type)`; evidence-snapshot document kinds — table gains its first writer) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **10** — `womo_0004_db_hardening`, `womo_0005_persistence_completeness`, and `womo_0006_review_gate_and_run_id` were applied in later sessions. This doc reflects the live state.
+> *Note:* the original work order referenced "7 migrations"; there are now **11** — `womo_0004_db_hardening`, `womo_0005_persistence_completeness`, `womo_0006_review_gate_and_run_id`, and `womo_0007_evidence_snapshots` were applied in later sessions. This doc reflects the live state.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).
