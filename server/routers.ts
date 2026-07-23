@@ -20,7 +20,7 @@ import {
   setObservationReviewStatus, getRunDiagnostics,
   getLatestObservationId,
   // V2 read functions
-  getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile,
+  getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
   getBrandProfileById, listBrandProfiles, deleteBrandProfile,
   listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
@@ -870,9 +870,20 @@ export const appRouter = router({
       }),
 
     list: protectedProcedure
-      .input(z.object({ search: z.string().optional() }))
+      .input(z.object({
+        search: z.string().optional(),
+        /** true = accepted only — for matching/creator-selection surfaces (womo_0006) */
+        matchableOnly: z.boolean().optional(),
+      }))
       .query(async ({ input }) => {
-        return listCreatorProfiles(undefined, input.search);
+        return listCreatorProfiles(undefined, input.search, { matchableOnly: input.matchableOnly });
+      }),
+
+    // Archived (declined) runs — retained, never deleted; browsable for
+    // scraper-failure analysis (womo_0006).
+    listArchived: protectedProcedure
+      .query(async () => {
+        return listArchivedCreatorRuns();
       }),
 
     get: protectedProcedure
@@ -1601,6 +1612,16 @@ export const appRouter = router({
         const brand = await getBrandProfileById(input.brandProfileId);
         if (!creator) throw new Error("Creator profile not found");
         if (!brand) throw new Error("Brand profile not found");
+
+        // Review-gate eligibility (womo_0006): only ACCEPTED creator profiles
+        // are matchable. Eligibility filter ONLY — the scoring engine is not
+        // touched. Brands are not gated this session (Session 7).
+        if (creator.reviewStatus !== "accepted") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Creator profile is ${creator.reviewStatus} — only accepted profiles can be matched. Review the analysis run first.`,
+          });
+        }
 
         // ── Derive myth alignment score from Barthes myth sentence overlap ──
         // Both profiles carry a barthesMyth field extracted by the AI.

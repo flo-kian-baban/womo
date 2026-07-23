@@ -1652,11 +1652,18 @@ export async function getProvenance(observationId: string) {
   };
 }
 
-export async function listCreatorProfiles(userId?: number, search?: string) {
+export async function listCreatorProfiles(
+  userId?: number,
+  search?: string,
+  opts?: {
+    /** true = accepted only (matching eligibility); default lists accepted + pending */
+    matchableOnly?: boolean;
+  },
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const baseCondition = search
+  const searchCondition = search
     ? and(
         eq(subjects.subjectType, "creator"),
         or(
@@ -1666,9 +1673,19 @@ export async function listCreatorProfiles(userId?: number, search?: string) {
       )
     : eq(subjects.subjectType, "creator");
 
+  // Review-gate eligibility (womo_0006): the default library view lists
+  // accepted + pending (pending marked in the UI); declined runs never hold
+  // is_latest and declined-only subjects have no is_latest row, so the INNER
+  // join (was a left join) excludes them from default views. Archived runs
+  // are browsable via listArchivedCreatorRuns. matchableOnly narrows to
+  // accepted-only for creator-selection surfaces (matching eligibility).
+  const baseCondition = opts?.matchableOnly
+    ? and(searchCondition, eq(observations.reviewStatus, "accepted"))
+    : and(searchCondition, ne(observations.reviewStatus, "declined"));
+
   const rows = await db.select()
     .from(subjects)
-    .leftJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
+    .innerJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
     .leftJoin(creatorObservations, eq(creatorObservations.observationId, observations.id))
     .where(baseCondition)
     .orderBy(desc(subjects.createdAt))
@@ -1714,6 +1731,39 @@ export async function deleteCreatorProfile(subjectId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(subjects).where(eq(subjects.id, subjectId));
+}
+
+/**
+ * Archived (declined) creator runs — retained with full provenance for
+ * scraper-failure analysis, hidden from default views (womo_0006).
+ */
+export async function listArchivedCreatorRuns() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select({
+    observationId: observations.id,
+    runId: observations.runId,
+    observedAt: observations.observedAt,
+    reviewedAt: observations.reviewedAt,
+    reviewedBy: observations.reviewedBy,
+    followerCount: observations.followerCount,
+    dataConfidenceLevel: observations.dataConfidenceLevel,
+    transcriptCount: observations.transcriptCount,
+    subjectId: subjects.id,
+    handle: subjects.primaryHandle,
+    displayName: subjects.displayName,
+    platform: subjects.primaryPlatform,
+    archetype: creatorObservations.archetype,
+  })
+    .from(observations)
+    .innerJoin(subjects, and(eq(subjects.id, observations.subjectId), eq(subjects.subjectType, "creator")))
+    .leftJoin(creatorObservations, eq(creatorObservations.observationId, observations.id))
+    .where(eq(observations.reviewStatus, "declined"))
+    .orderBy(desc(observations.reviewedAt))
+    .limit(100);
+
+  return rows;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

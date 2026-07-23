@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { ReviewGatePanel } from "@/components/ReviewGate";
+import { Archive } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -370,6 +372,48 @@ function CreatorRow({ creator, onDelete, onExport }: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ARCHIVED RUN ROW — declined analysis runs (womo_0006): retained with full
+// provenance for scraper-failure analysis, hidden from the default view.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ArchivedRunRow({ run }: { run: Record<string, any> }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="fit-card rounded-xl border-red-400/25 bg-red-400/[0.03]">
+      <div className="px-5 py-3.5 cursor-pointer flex items-center gap-4" onClick={() => setExpanded(!expanded)}>
+        <Archive className="w-3.5 h-3.5 text-red-300/70 flex-shrink-0" />
+        <div className="min-w-0 w-[220px] flex-shrink-0">
+          <span className="text-[13px] font-medium text-foreground/80 truncate block">{run.displayName ?? run.handle ?? "—"}</span>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <PlatformIcon platform={run.platform ?? ""} />
+            <span className="text-[11px] text-muted-foreground/50">@{run.handle ?? "?"}</span>
+          </div>
+        </div>
+        <span className="inline-flex items-center px-2 py-0.5 rounded border border-red-400/40 bg-red-400/10 text-red-300 text-[9px] font-bold uppercase tracking-wider flex-shrink-0">
+          Declined
+        </span>
+        <div className="text-[11px] text-muted-foreground/60 ml-auto flex items-center gap-4 flex-shrink-0">
+          <span>run {formatDate(run.observedAt)}</span>
+          {run.reviewedAt && <span>declined {formatDate(run.reviewedAt)}{run.reviewedBy ? ` by ${run.reviewedBy}` : ""}</span>}
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/30 flex-shrink-0 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`} />
+      </div>
+      {expanded && (
+        <div className="px-5 pb-4 border-t border-border/15 pt-3">
+          <ReviewGatePanel
+            observationId={run.observationId}
+            reviewStatus="declined"
+            reviewedAt={run.reviewedAt}
+            reviewedBy={run.reviewedBy}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -738,6 +782,12 @@ export default function Library() {
   const { data: creators, isLoading: loadingCreators } = trpc.creator.list.useQuery({});
   const { data: brands, isLoading: loadingBrands } = trpc.brand.list.useQuery({});
   const { data: matches, isLoading: loadingMatches } = trpc.fit.list.useQuery();
+  // Archived (declined) creator runs — womo_0006; loaded only when viewing
+  const [showArchived, setShowArchived] = useState(false);
+  const { data: archivedRuns, isLoading: loadingArchived } = trpc.creator.listArchived.useQuery(
+    undefined,
+    { enabled: showArchived },
+  );
 
   const deleteCreator = trpc.creator.delete.useMutation({
     onSuccess: () => { utils.creator.list.invalidate(); toast.success("Creator deleted"); },
@@ -902,6 +952,21 @@ export default function Library() {
             <span className="ml-1 w-4 h-4 rounded-full bg-primary/20 text-primary text-[10px] flex items-center justify-center">{activeFilterList.length}</span>
           )}
         </button>
+        {activeTab === "creators" && (
+          <button
+            onClick={() => setShowArchived(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all duration-150 ${
+              showArchived ? "border-red-400/50 bg-red-400/10 text-red-300" : "border-border/40 bg-secondary text-muted-foreground hover:text-foreground"
+            }`}
+            title="Declined runs are archived — retained with full provenance, hidden from the default view"
+          >
+            <Archive className="w-3 h-3" />
+            Archived
+            {showArchived && archivedRuns && (
+              <span className="ml-1 w-4 h-4 rounded-full bg-red-400/20 text-red-300 text-[10px] flex items-center justify-center">{archivedRuns.length}</span>
+            )}
+          </button>
+        )}
         <div className="text-xs text-muted-foreground/50 ml-auto">
           {hasFilter ? `Showing ${showing} of ${total}` : `${total} ${activeTab}`}
         </div>
@@ -1047,7 +1112,22 @@ export default function Library() {
         </div>
       ) : (
         <div className="space-y-2 animate-fade-in-up animate-stagger-3">
-          {activeTab === "creators" && (
+          {activeTab === "creators" && showArchived && (
+            <>
+              <div className="text-[11px] text-red-300/70 px-1 pb-1">
+                Archived (declined) analysis runs — retained with full provenance for scraper-failure analysis. Never deleted.
+              </div>
+              {loadingArchived ? (
+                <div className="text-center py-10 text-muted-foreground text-sm animate-pulse">Loading archived runs…</div>
+              ) : !archivedRuns || archivedRuns.length === 0 ? (
+                <div className="fit-card rounded-xl p-10 text-center text-muted-foreground text-sm">No declined runs.</div>
+              ) : archivedRuns.map(run => (
+                <ArchivedRunRow key={run.observationId} run={run} />
+              ))}
+            </>
+          )}
+
+          {activeTab === "creators" && !showArchived && (
             filteredCreators.length === 0 ? (
               <div className="fit-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
                 <Users className="w-10 h-10 text-muted-foreground/20 mb-4" />

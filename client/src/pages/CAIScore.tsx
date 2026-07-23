@@ -205,7 +205,8 @@ export default function FITScore() {
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 
-  const { data: creators } = trpc.creator.list.useQuery({ search: undefined });
+  // Matching eligibility (womo_0006): only ACCEPTED creator profiles are offered.
+  const { data: creators } = trpc.creator.list.useQuery({ search: undefined, matchableOnly: true });
   const { data: brands } = trpc.brand.list.useQuery({ search: undefined });
 
   const calculateMutation = trpc.fit.calculate.useMutation({
