@@ -40,6 +40,7 @@ import * as db from "../db";
 import { appRouter, persistCreatorToV2 } from "../routers";
 import { researchCreator } from "../webResearch";
 import { extractCreatorProfile } from "../aiExtraction";
+import { newRunId, withAnalysisRun } from "../_core/runContext";
 import type { TrpcContext } from "../_core/context";
 
 const TEST_URL = process.env.TEST_DATABASE_URL;
@@ -199,5 +200,66 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
     // A new (pending) observation was appended — append-only re-analysis.
     expect(await count("observations where subject_id=$1", [subjectId])).toBe(2);
     expect(await count("observations where subject_id=$1 and review_status='pending'", [subjectId])).toBe(1);
+  });
+
+  // ── Commit 4: persist the 6-3-3 longitudinal sample ─────────────────────────
+  it("writes temporal_bucket on rows AND a verbatim longitudinal-sample snapshot", async () => {
+    const runId = newRunId();
+    const sample = {
+      recent: [{ videoId: "v_recent", transcript: "r", wordCount: 1, bucket: "recent" }],
+      mid: [], anchor: [],
+      totalFetched: 1, completeness: "insufficient", culturalVelocity: "Insufficient Data",
+    };
+
+    let subjectId = "", observationId = "";
+    await withAnalysisRun(runId, async () => {
+      const result = await persistCreatorToV2({
+        handle: "longi_creator", platform: "TikTok", displayName: "Longi Creator",
+        extracted: { archetype: "The Sage" },
+        researchData: {
+          followerCount: 5000,
+          discoveredVideoPoolJson: [
+            {
+              id: "v_recent", url: "https://www.tiktok.com/@longi_creator/video/v_recent",
+              caption: "recent one", createTime: 1700000000,
+              views: 10, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 30,
+            },
+          ],
+          transcripts: [
+            { videoId: "v_recent", transcript: "r", wordCount: 1, transcriptSource: "captions", bucket: "recent" },
+          ],
+          longitudinalSampleJson: sample,
+        },
+      });
+      if ("error" in result) throw new Error(result.error);
+      expect(result.persistence.longitudinal_sample.status).toBe("success");
+      subjectId = result.subjectId;
+      observationId = result.observationId;
+    });
+
+    // (a) temporal_bucket written on the transcript-bearing content_items row.
+    const rows = await q(
+      "select platform_video_id, temporal_bucket from content_items where subject_id=$1",
+      [subjectId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].temporal_bucket).toBe("recent");
+
+    // (b) verbatim snapshot doc exists, run-keyed, and round-trips exactly.
+    const docs = await q(
+      "select run_id from semantic_documents where subject_id=$1 and document_type='creator_longitudinal_sample'",
+      [subjectId],
+    );
+    expect(docs).toHaveLength(1);
+    expect(docs[0].run_id).toBe(runId);
+    const readBack = await db.getLongitudinalSampleSnapshot(observationId);
+    expect(readBack).toMatchObject({ totalFetched: 1, completeness: "insufficient", culturalVelocity: "Insufficient Data" });
+    expect((readBack as any).recent[0].bucket).toBe("recent");
+
+    // (c) diagnostic now reports the longitudinal sample as PRESENT (was always
+    // missing before, because temporal_bucket was never written).
+    const diag = await db.getRunDiagnostics(observationId);
+    expect(diag?.fields.present).toContain("longitudinalSample");
+    expect(diag?.fields.counts.temporalBuckets).toBeGreaterThan(0);
   });
 });

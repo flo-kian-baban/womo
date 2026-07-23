@@ -13,7 +13,7 @@ import {
   insertSignalValues, insertDecodedSignals, insertContentItems,
   updateContentItemTranscript, updateObservationTranscriptCount,
   updateCreatorObservationAvgDuration, updateObservationPersistenceStatus,
-  insertEvidenceSnapshots, findExistingCreatorByHandle,
+  insertEvidenceSnapshots, insertLongitudinalSampleSnapshot, findExistingCreatorByHandle,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
@@ -358,7 +358,7 @@ export async function persistCreatorToV2(params: {
           });
 
     // 8. Wire transcripts into content_items rows
-    const transcriptArray = researchData.transcripts as Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }> ?? [];
+    const transcriptArray = researchData.transcripts as Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string; bucket?: string }> ?? [];
     let transcriptSuccessCount = 0;
     await runEnrichment(persistence, "transcripts",
       transcriptArray.length === 0
@@ -369,6 +369,8 @@ export async function persistCreatorToV2(params: {
                 const updated = await updateContentItemTranscript(
                   subjectId, t.videoId, platform,
                   t.transcript, t.transcriptSource ?? "captions", t.wordCount,
+                  // Session 8: carry the 6-3-3 bucket onto content_items.temporal_bucket
+                  t.bucket ?? null,
                 );
                 if (updated) transcriptSuccessCount++;
               }
@@ -395,6 +397,23 @@ export async function persistCreatorToV2(params: {
             inputsJson: params.evidenceSnapshot!.inputsJson,
             promptText: params.evidenceSnapshot!.promptText,
             promptMeta: params.evidenceSnapshot!.promptMeta,
+          }));
+
+    // Session 8: persist the VERBATIM 6-3-3 longitudinal sample (womo_0007
+    // snapshot mechanism, document_type 'creator_longitudinal_sample'). The
+    // per-video temporal_bucket written above makes the sample functional in the
+    // read model + diagnostics NOW; this preserves the exact sampler output
+    // (fill-forward decisions, ordering, completeness, culturalVelocity) that a
+    // content_items reconstruction cannot fully recover. Only the TikTok path
+    // produces a longitudinal sample.
+    const longitudinalSampleJson = researchData.longitudinalSampleJson as Record<string, unknown> | undefined;
+    await runEnrichment(persistence, "longitudinal_sample",
+      !longitudinalSampleJson
+        ? { skip: "skipped_no_data", reason: "no longitudinal sample produced (non-TikTok path or no dated videos)" }
+        : () => insertLongitudinalSampleSnapshot({
+            subjectId,
+            observationId,
+            sampleJson: JSON.stringify(longitudinalSampleJson),
           }));
 
     // Record the outcome map on the observation row. Best-effort: a failure to

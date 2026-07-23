@@ -606,6 +606,62 @@ export async function getEvidenceSnapshotsByRunId(runId: string) {
     .orderBy(semanticDocuments.documentType);
 }
 
+/** semantic_documents.document_type for the verbatim 6-3-3 longitudinal sample. */
+export const LONGITUDINAL_SAMPLE_DOC_TYPE = "creator_longitudinal_sample";
+
+/**
+ * Session 8: persist the VERBATIM 6-3-3 longitudinal sample object as a single
+ * run-keyed semantic_documents row (womo_0007 snapshot mechanism — no new DDL;
+ * document_type is a free varchar). This preserves exactly what the sampler
+ * produced — bucket membership, fill-forward decisions, ordering, totalFetched,
+ * completeness, culturalVelocity — which a reconstruction from content_items
+ * cannot fully recover. Append-only: the sd_run_doc_unique index enforces one
+ * per (run_id, document_type), so a duplicate write for the same run rejects.
+ */
+export async function insertLongitudinalSampleSnapshot(args: {
+  subjectId: string;
+  observationId: string | null;
+  runId?: string | null;
+  /** JSON string of the LongitudinalSample object. */
+  sampleJson: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(semanticDocuments).values({
+    subjectId: args.subjectId,
+    observationId: args.observationId,
+    runId: args.runId ?? currentRunId(),
+    documentType: LONGITUDINAL_SAMPLE_DOC_TYPE,
+    contentText: args.sampleJson,
+    metadata: args.metadata ?? { schemaVersion: 1 },
+  });
+}
+
+/**
+ * Read the verbatim longitudinal sample snapshot for an observation, if present.
+ * Returns the parsed object (or null). Retrieval seam for future drift analysis;
+ * no fit/UI consumer wires it into the profile today (the functional need is met
+ * by content_items.temporal_bucket + creator_observations.cultural_velocity).
+ */
+export async function getLongitudinalSampleSnapshot(observationId: string): Promise<Record<string, unknown> | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [doc] = await db.select({ contentText: semanticDocuments.contentText })
+    .from(semanticDocuments)
+    .where(and(
+      eq(semanticDocuments.observationId, observationId),
+      eq(semanticDocuments.documentType, LONGITUDINAL_SAMPLE_DOC_TYPE),
+    ))
+    .limit(1);
+  if (!doc?.contentText) return null;
+  try {
+    return JSON.parse(doc.contentText) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Write the per-component persistence outcome map onto an observation row
  * (womo_0005). Shape: { component: { status, reason, at } } with status
@@ -997,6 +1053,15 @@ export async function updateContentItemTranscript(
   transcriptText: string,
   transcriptSource: string,
   wordCount: number,
+  /**
+   * Session 8: the 6-3-3 sample bucket (recent/mid/anchor) for this video, when
+   * known. Persisting it here — during transcript wiring — populates the
+   * previously-unwritten content_items.temporal_bucket for the transcript-bearing
+   * sampled videos, which is exactly the set the longitudinal sample contains.
+   * The read model (getCreatorProfileById) and getRunDiagnostics already consume
+   * this column. Null/undefined for non-6-3-3 platforms (Instagram/YouTube).
+   */
+  temporalBucket?: string | null,
 ): Promise<boolean> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1016,6 +1081,7 @@ export async function updateContentItemTranscript(
         transcriptSource,
         transcriptWordCount: wordCount,
         status: "sampled",
+        ...(temporalBucket ? { temporalBucket } : {}),
       })
       .where(and(
         eq(contentItems.subjectId, subjectId),
