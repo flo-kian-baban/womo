@@ -17,6 +17,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { currentRunId } from './_core/runContext';
+import { canonicalizeHandle } from './_core/handles';
 import { computeLlmCostUsd } from '../shared/llmPricing';
 
 // Re-export legacy types for routers.ts compilation
@@ -268,12 +269,16 @@ export async function upsertSubject(data: {
 
   const platform = data.primaryPlatform ? normalizePlatform(data.primaryPlatform) : undefined;
 
-  // Try to find existing subject by handle + platform
+  // Try to find existing subject by handle + platform.
+  // Session 7: case-insensitive handle match — stored handles were historically
+  // LLM echoes with arbitrary casing; the exact-case lookup was a latent
+  // duplicate-subject vector. New writes store canonical (lowercased) handles,
+  // and lower() comparison also matches any legacy-cased rows.
   if (data.primaryHandle && platform) {
     const existing = await db.select({ id: subjects.id })
       .from(subjects)
       .where(and(
-        eq(subjects.primaryHandle, data.primaryHandle),
+        sql`lower(${subjects.primaryHandle}) = lower(${data.primaryHandle})`,
         eq(subjects.primaryPlatform, platform),
         eq(subjects.subjectType, data.subjectType),
       ))
@@ -377,7 +382,8 @@ export async function upsertPlatformHandle(
     .from(platformHandles)
     .where(and(
       eq(platformHandles.platform, normalizedPlatform),
-      eq(platformHandles.handle, handle),
+      // Session 7: case-insensitive — see upsertSubject
+      sql`lower(${platformHandles.handle}) = lower(${handle})`,
     ))
     .limit(1);
 
@@ -614,6 +620,93 @@ export async function updateObservationPersistenceStatus(
   await db.update(observations)
     .set({ persistenceStatus: statusMap })
     .where(eq(observations.id, observationId));
+}
+
+/**
+ * Duplicate pre-flight lookup (Session 7): find an existing creator subject
+ * for a raw handle-or-URL input, using the canonical (lowercased, extracted)
+ * form against both subjects.primary_handle and platform_handles. Returns a
+ * summary for the pre-flight warning dialog, or null.
+ */
+export async function findExistingCreatorByHandle(
+  handleOrUrl: string,
+  platform: string,
+): Promise<{
+  subjectId: string;
+  handle: string | null;
+  displayName: string | null;
+  lastAnalyzedAt: Date | null;
+  reviewStatus: string | null;
+  pendingObservation: { id: string; observedAt: Date } | null;
+} | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const canonical = canonicalizeHandle(handleOrUrl);
+  if (!canonical) return null;
+  const normalizedPlatform = normalizePlatform(platform);
+
+  // Primary probe: subjects.primary_handle (case-insensitive)
+  const [subj] = await db.select({
+    id: subjects.id,
+    handle: subjects.primaryHandle,
+    displayName: subjects.displayName,
+  })
+    .from(subjects)
+    .where(and(
+      eq(subjects.subjectType, "creator"),
+      eq(subjects.primaryPlatform, normalizedPlatform),
+      sql`lower(${subjects.primaryHandle}) = ${canonical}`,
+    ))
+    .limit(1);
+
+  let found = subj ?? null;
+
+  // Secondary probe: platform_handles (covers subjects whose primary platform differs)
+  if (!found) {
+    const [ph] = await db.select({
+      id: subjects.id,
+      handle: subjects.primaryHandle,
+      displayName: subjects.displayName,
+    })
+      .from(platformHandles)
+      .innerJoin(subjects, and(
+        eq(subjects.id, platformHandles.subjectId),
+        eq(subjects.subjectType, "creator"),
+      ))
+      .where(and(
+        eq(platformHandles.platform, normalizedPlatform),
+        sql`lower(${platformHandles.handle}) = ${canonical}`,
+      ))
+      .limit(1);
+    found = ph ?? null;
+  }
+
+  if (!found) return null;
+
+  const [latestObs] = await db.select({
+    observedAt: observations.observedAt,
+    reviewStatus: observations.reviewStatus,
+  })
+    .from(observations)
+    .where(eq(observations.subjectId, found.id))
+    .orderBy(desc(observations.observedAt))
+    .limit(1);
+
+  const [pending] = await db.select({ id: observations.id, observedAt: observations.observedAt })
+    .from(observations)
+    .where(and(eq(observations.subjectId, found.id), eq(observations.reviewStatus, "pending")))
+    .orderBy(desc(observations.observedAt))
+    .limit(1);
+
+  return {
+    subjectId: found.id,
+    handle: found.handle,
+    displayName: found.displayName,
+    lastAnalyzedAt: latestObs?.observedAt ?? null,
+    reviewStatus: latestObs?.reviewStatus ?? null,
+    pendingObservation: pending ? { id: pending.id, observedAt: pending.observedAt } : null,
+  };
 }
 
 /**

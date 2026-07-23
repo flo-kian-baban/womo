@@ -4,7 +4,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Users, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, Clock, Clock3 } from "lucide-react";
-import { ReviewGatePanel } from "@/components/ReviewGate";
+import { ReviewGatePanel, ReviewStatusBadge } from "@/components/ReviewGate";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,10 +67,21 @@ const ANALYSIS_STEPS = [
   "Assembling deep cultural alignment profile...",
 ];
 
+type PreflightExisting = {
+  subjectId: string;
+  handle: string | null;
+  displayName: string | null;
+  lastAnalyzedAt: string | Date | null;
+  reviewStatus: string | null;
+  pendingObservation: { id: string; observedAt: string | Date } | null;
+};
+
 export default function AnalyzeCreator() {
   const [result, setResult] = useState<{ profile: Record<string, any> & { id: string }; pipelineMetrics?: any } | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ existing: PreflightExisting; values: FormValues } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const utils = trpc.useUtils();
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -125,7 +140,7 @@ export default function AnalyzeCreator() {
     },
   });
 
-  const onSubmit = (values: FormValues) => {
+  const startAnalysis = (values: FormValues, confirmDuplicate = false) => {
     setResult(null);
     setStepIndex(0);
     // Clear any previous interval
@@ -145,11 +160,90 @@ export default function AnalyzeCreator() {
         return prev + 1;
       });
     }, 1800);
-    analyzeMutation.mutate(values);
+    analyzeMutation.mutate({ ...values, confirmDuplicate });
+  };
+
+  // Duplicate pre-flight (Session 7): check for an existing subject BEFORE any
+  // scraping starts; a match requires explicit confirmation to proceed.
+  const onSubmit = async (values: FormValues) => {
+    setDuplicateWarning(null);
+    try {
+      const pre = await utils.creator.preflight.fetch({
+        handleOrUrl: values.handleOrUrl,
+        platform: values.platform,
+      });
+      if (pre.existing) {
+        setDuplicateWarning({ existing: pre.existing, values });
+        return;
+      }
+    } catch {
+      // Pre-flight unavailable — the server-side gate on analyze still holds;
+      // proceed and let it reject if a duplicate exists.
+    }
+    startAnalysis(values);
   };
 
   return (
     <div className="min-h-full px-6 py-8 lg:px-10 lg:py-10">
+      {/* Duplicate pre-flight confirmation (Session 7) — blocks BEFORE scraping */}
+      <AlertDialog open={!!duplicateWarning} onOpenChange={(open) => { if (!open) setDuplicateWarning(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This creator already has a profile</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <span className="font-medium text-foreground">
+                    {duplicateWarning?.existing.displayName ?? duplicateWarning?.existing.handle ?? "Existing profile"}
+                  </span>
+                  {duplicateWarning?.existing.handle && (
+                    <span className="text-muted-foreground"> · @{duplicateWarning.existing.handle}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-muted-foreground">
+                    Last analyzed: {duplicateWarning?.existing.lastAnalyzedAt
+                      ? new Date(duplicateWarning.existing.lastAnalyzedAt).toLocaleDateString()
+                      : "unknown"}
+                  </span>
+                  <ReviewStatusBadge status={duplicateWarning?.existing.reviewStatus} />
+                  {duplicateWarning?.existing.reviewStatus === "accepted" && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded border border-green-400/40 bg-green-400/10 text-green-400 text-[10px] font-semibold uppercase tracking-wider">Accepted</span>
+                  )}
+                </div>
+                {duplicateWarning?.existing.pendingObservation && (
+                  <div className="text-amber-300 text-xs">
+                    A pending analysis run from {new Date(duplicateWarning.existing.pendingObservation.observedAt).toLocaleDateString()} is already awaiting review.
+                  </div>
+                )}
+                <div className="text-muted-foreground">
+                  Running a new analysis creates a new pending run for this same profile — it does not create a duplicate.
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDuplicateWarning(null)}>Cancel</AlertDialogCancel>
+            {duplicateWarning && (
+              <Link href={`/creator/${duplicateWarning.existing.subjectId}`}>
+                <Button variant="outline">Open existing profile</Button>
+              </Link>
+            )}
+            <AlertDialogAction
+              onClick={() => {
+                if (duplicateWarning) {
+                  const { values } = duplicateWarning;
+                  setDuplicateWarning(null);
+                  startAnalysis(values, true);
+                }
+              }}
+            >
+              Re-analyze anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Header */}
       <div className="mb-8 animate-fade-in-up">
         <div className="flex items-center gap-3 mb-4">

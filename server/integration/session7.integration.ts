@@ -22,6 +22,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Client } from "pg";
 import * as db from "../db";
+import { canonicalizeHandle } from "../_core/handles";
 import { persistCreatorToV2 } from "../routers";
 import { buildCreatorExtractionPrompts } from "../aiExtraction";
 import { recordScrapeEvent } from "../scraping/httpClient";
@@ -194,6 +195,66 @@ suite("session 7: snapshots, music metadata, instrumented telemetry (ephemeral P
       .map(t => t.musicMetadata?.soundName as string | undefined)
       .filter((s): s is string => Boolean(s));
     expect(creatorMusicTitles).toEqual(["Espresso"]);
+  });
+
+  // ── Handle canonicalization + duplicate pre-flight ─────────────────────────
+
+  it("canonicalizes handles at persist time so casing/@/URL variants map to ONE subject", async () => {
+    expect(canonicalizeHandle("@Dup.Creator")).toBe("dup.creator");
+    expect(canonicalizeHandle("https://www.tiktok.com/@Dup.Creator/")).toBe("dup.creator");
+    expect(canonicalizeHandle("DUP.CREATOR")).toBe("dup.creator");
+
+    // First analysis with an LLM-echo-style mixed-case handle
+    const r1 = await persistCreatorToV2({
+      handle: "Dup.Creator", platform: "TikTok", displayName: "Dup Creator",
+      extracted: { archetype: "The Sage" },
+      researchData: { followerCount: 10 },
+    });
+    if ("error" in r1) throw new Error(r1.error);
+
+    // Second analysis with bulk-style raw input variants → SAME subject
+    const r2 = await persistCreatorToV2({
+      handle: "@dup.creator", platform: "TikTok", displayName: "Dup Creator",
+      extracted: { archetype: "The Sage" },
+      researchData: { followerCount: 11 },
+    });
+    if ("error" in r2) throw new Error(r2.error);
+    expect(r2.subjectId).toBe(r1.subjectId);
+
+    // Stored form is canonical (lowercase, no @)
+    const [subj] = await q("select primary_handle from subjects where id=$1", [r1.subjectId]);
+    expect(subj.primary_handle).toBe("dup.creator");
+    expect(await count("subjects where lower(primary_handle)='dup.creator'")).toBe(1);
+  });
+
+  it("pre-flight lookup finds the existing subject from any input variant, with review summary", async () => {
+    const r = await persistCreatorToV2({
+      handle: "preflight_creator", platform: "TikTok", displayName: "Preflight Creator",
+      extracted: { archetype: "The Hero" },
+      researchData: { followerCount: 55 },
+    });
+    if ("error" in r) throw new Error(r.error);
+    await db.setObservationReviewStatus(r.observationId, "accepted", "Analyst A");
+
+    for (const variant of ["preflight_creator", "@PREFLIGHT_CREATOR", "https://www.tiktok.com/@Preflight_Creator"]) {
+      const found = await db.findExistingCreatorByHandle(variant, "TikTok");
+      expect(found?.subjectId).toBe(r.subjectId);
+      expect(found?.reviewStatus).toBe("accepted");
+      expect(found?.lastAnalyzedAt).toBeTruthy();
+    }
+
+    // A pending rerun surfaces in the summary
+    const rerun = await persistCreatorToV2({
+      handle: "preflight_creator", platform: "TikTok", displayName: "Preflight Creator",
+      extracted: { archetype: "The Hero" },
+      researchData: { followerCount: 56 },
+    });
+    if ("error" in rerun) throw new Error(rerun.error);
+    const found = await db.findExistingCreatorByHandle("preflight_creator", "TikTok");
+    expect(found?.pendingObservation?.id).toBe(rerun.observationId);
+
+    // Unknown handle → null
+    expect(await db.findExistingCreatorByHandle("does_not_exist_xyz", "TikTok")).toBeNull();
   });
 
   // ── Instrumented scrape-event shapes ───────────────────────────────────────

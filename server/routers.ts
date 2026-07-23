@@ -13,7 +13,7 @@ import {
   insertSignalValues, insertDecodedSignals, insertContentItems,
   updateContentItemTranscript, updateObservationTranscriptCount,
   updateCreatorObservationAvgDuration, updateObservationPersistenceStatus,
-  insertEvidenceSnapshots,
+  insertEvidenceSnapshots, findExistingCreatorByHandle,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
@@ -36,6 +36,7 @@ import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTi
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
 import { newRunId, withAnalysisRun } from "./_core/runContext";
+import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
 import pLimit from "p-limit";
 
@@ -203,7 +204,12 @@ export async function persistCreatorToV2(params: {
   evidenceSnapshot?: CreatorEvidenceSnapshotPayload;
 }): Promise<PersistResult> {
   try {
-    const { handle, platform, profileUrl, displayName, pronouns, extracted, researchData } = params;
+    const { platform, profileUrl, displayName, pronouns, extracted, researchData } = params;
+    // Session 7: the persisted subject key is the CANONICAL handle (extracted
+    // from URL/@-prefix, lowercased) — not the LLM's raw echo. This makes
+    // storage and duplicate-pre-flight lookup share one key across analyze,
+    // reanalyze, and bulk.
+    const handle = canonicalizeHandle(params.handle) || params.handle;
 
     // ── ATOMIC IDENTITY CORE ──
     // subject → platform handle → observation → creator_observation commit as
@@ -774,12 +780,43 @@ export const appRouter = router({
 
   // ─── Creator Routes ─────────────────────────────────────────────────────────
   creator: router({
-    analyze: analysisRateLimitedProcedure
+    // Duplicate pre-flight (Session 7): read-only check the client calls BEFORE
+    // starting an analysis. Returns the existing profile summary when the
+    // canonicalized handle already exists as a creator subject.
+    preflight: protectedProcedure
       .input(z.object({
         handleOrUrl: z.string().min(1),
         platform: z.enum(["TikTok", "Instagram"]),
       }))
+      .query(async ({ input }) => {
+        const existing = await findExistingCreatorByHandle(input.handleOrUrl, input.platform);
+        return { existing };
+      }),
+
+    analyze: analysisRateLimitedProcedure
+      .input(z.object({
+        handleOrUrl: z.string().min(1),
+        platform: z.enum(["TikTok", "Instagram"]),
+        /** Session 7: required to proceed when the handle already exists as a subject */
+        confirmDuplicate: z.boolean().optional(),
+      }))
       .mutation(async ({ input }) => {
+        // Duplicate gate (Session 7): enforced server-side even if a client
+        // skips the pre-flight, and re-checked at submit time to cover the
+        // pre-flight → submit race. Runs BEFORE any scraping starts.
+        if (!input.confirmDuplicate) {
+          const existing = await findExistingCreatorByHandle(input.handleOrUrl, input.platform);
+          if (existing) {
+            const last = existing.lastAnalyzedAt
+              ? new Date(existing.lastAnalyzedAt).toISOString().slice(0, 10)
+              : "unknown date";
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `A profile for @${existing.handle ?? canonicalizeHandle(input.handleOrUrl)} already exists (last analyzed ${last}, status: ${existing.reviewStatus ?? "unknown"}). Re-submit with confirmation to run a new analysis.`,
+            });
+          }
+        }
+
         // womo_0006: one correlation id per analysis run — every scrape_event
         // and llm_invocation below inherits it via AsyncLocalStorage (see
         // _core/runContext.ts), and the observation is stamped with it.
