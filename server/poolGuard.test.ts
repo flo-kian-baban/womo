@@ -30,7 +30,7 @@ describe("fetchTikTokVideosFromAPI author guard", () => {
     const ids = items.map(i => i.id).sort();
     expect(ids).toEqual(["own1", "own2"]);            // foreign + author-less excluded
     expect(rejected).toBe(2);                          // juarezaale + author-less
-    // duration is carried through for the kept items (Commit 2 relevance)
-    expect(items.find(i => i.id === "own1")?.durationMs).toBe(12);
+    // duration is carried through and normalized to ms (Commit 2): 12s → 12000ms.
+    expect(items.find(i => i.id === "own1")?.durationMs).toBe(12000);
   });
 });

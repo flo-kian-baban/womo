@@ -351,7 +351,13 @@ export async function persistCreatorToV2(params: {
     const videosWithDuration = contentRows.filter(v => v.videoDuration && v.videoDuration > 0);
     await runEnrichment(persistence, "avg_video_duration",
       videosWithDuration.length === 0
-        ? { skip: "skipped_no_data", reason: "no videos with duration data" }
+        // Session 10: distinguish a SCRAPE capture gap from a genuine data absence.
+        // If we captured videos but none carried a duration, that's our scrape not
+        // capturing video.duration (skipped_not_attempted), NOT the subject lacking
+        // data (skipped_no_data — reserved for a creator with no videos at all).
+        ? (contentRows.length > 0
+            ? { skip: "skipped_not_attempted" as const, reason: "video duration not present in the scraped payloads (capture gap, not a subject-data absence)" }
+            : { skip: "skipped_no_data" as const, reason: "no videos captured for this creator" })
         : () => {
             const totalDuration = videosWithDuration.reduce((sum, v) => sum + (v.videoDuration ?? 0), 0);
             const avgDuration = Math.round((totalDuration / videosWithDuration.length) * 10) / 10;

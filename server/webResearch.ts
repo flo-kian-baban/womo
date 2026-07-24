@@ -196,6 +196,19 @@ export function matchKnownCity(text: string): string | null {
   return null;
 }
 
+/**
+ * Session 10 (Commit 2): TikTok's `video.duration` on the web item_list is in
+ * SECONDS, but it was consumed as milliseconds (`durationMs` then `/1000`
+ * downstream), which zeroed every sub-1000-second video — so with_duration was
+ * always 0 and avg_video_duration was always skipped. Normalize to ACTUAL
+ * milliseconds, robust to either unit: a value over 1000 is already ms (no
+ * TikTok video is 1000s+ long), otherwise it is seconds → ×1000.
+ */
+export function tiktokDurationToMs(raw: number): number {
+  if (!raw || raw <= 0) return 0;
+  return raw > 1000 ? Math.round(raw) : Math.round(raw * 1000);
+}
+
 function extractHashtags(texts: string[]): string[] {
   const tagCounts: Record<string, number> = {};
   for (const text of texts) {
@@ -780,7 +793,7 @@ export async function fetchTikTokVideosFromAPI(
         duetEnabled: Boolean(item.duetEnabled ?? false),
         stitchEnabled: Boolean(item.stitchEnabled ?? false),
         isAd: Boolean(item.isAd ?? false),
-        durationMs: Number(item.video?.duration ?? 0),
+        durationMs: tiktokDurationToMs(Number(item.video?.duration ?? 0)),
       });
     }
   } catch (err) {
@@ -925,7 +938,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
           const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
           const isAd = Boolean(v?.isAd ?? v?.is_ad ?? false);
           const videoObj = (v?.video as Record<string, unknown>) ?? {};
-          const durationMs = Number(videoObj?.duration ?? 0);
+          const durationMs = tiktokDurationToMs(Number(videoObj?.duration ?? 0));
 
           // Collect hashtags from challenges and textExtra
           const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];

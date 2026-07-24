@@ -194,4 +194,39 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     const { rows } = await admin.query("select persistence_status from observations where id=$1", [observationId]);
     expect((rows[0].persistence_status as Record<string, any>)._meta.pool.authorRejected).toBe(7);
   });
+
+  // ── Session 10 (Commit 2): duration computed when present; capture-gap label ─
+  it("avg_video_duration computes when durations are present", async () => {
+    const res = await persistCreatorToV2({
+      handle: "dur_creator", platform: "TikTok", displayName: "Dur Creator",
+      extracted: { archetype: "The Sage" },
+      researchData: {
+        followerCount: 1000,
+        discoveredVideoPoolJson: [
+          { id: "d1", url: "u1", caption: "c", createTime: 1700000000, views: 10, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 20 },
+          { id: "d2", url: "u2", caption: "c", createTime: 1700000001, views: 10, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 40 },
+        ],
+      },
+    });
+    if ("error" in res) throw new Error(res.error);
+    expect(res.persistence.avg_video_duration.status).toBe("success");
+    const { rows } = await admin.query("select avg_video_duration from creator_observations where observation_id=$1", [res.observationId]);
+    expect(Number(rows[0].avg_video_duration)).toBe(30); // (20+40)/2
+  });
+
+  it("avg_video_duration reports a CAPTURE GAP (not no-data) when videos have no duration", async () => {
+    const res = await persistCreatorToV2({
+      handle: "nodur_creator", platform: "TikTok", displayName: "NoDur Creator",
+      extracted: { archetype: "The Hero" },
+      researchData: {
+        followerCount: 1000,
+        discoveredVideoPoolJson: [
+          { id: "n1", url: "u", caption: "c", createTime: 1700000000, views: 10, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 0 },
+        ],
+      },
+    });
+    if ("error" in res) throw new Error(res.error);
+    expect(res.persistence.avg_video_duration.status).toBe("skipped_not_attempted");
+    expect(res.persistence.avg_video_duration.reason).toMatch(/capture gap/);
+  });
 });
