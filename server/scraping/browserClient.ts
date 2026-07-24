@@ -85,6 +85,29 @@ const MAX_CONCURRENT_CONTEXTS = 5;
 const DEFAULT_MAX_USES = 5;
 const CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 minutes max lifetime
 const CLEANUP_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
+// Stability FIX 1: never hand OUT a warm context that is within this margin of
+// its TTL — a checkout seconds before the reaper's boundary is how in-flight work
+// used to get its context closed from under it. Near-TTL idle contexts are left
+// for the reaper; the caller gets a fresh one.
+const REUSE_TTL_SAFETY_MS = 60 * 1000;
+
+/**
+ * May this pooled context be handed out for reuse right now? Exported for tests.
+ * Requires: matching preset, uses remaining, not checked out (busy), and not
+ * within REUSE_TTL_SAFETY_MS of its TTL expiry.
+ */
+export function isWarmContextReusable(
+  mc: { preset: ContextPreset; useCount: number; maxUses: number; busy: boolean; createdAt: number },
+  preset: ContextPreset,
+  nowMs: number = Date.now(),
+): boolean {
+  return (
+    mc.preset === preset &&
+    mc.useCount < mc.maxUses &&
+    !mc.busy &&
+    (nowMs - mc.createdAt) < (CONTEXT_TTL_MS - REUSE_TTL_SAFETY_MS)
+  );
+}
 
 let _browser: Browser | null = null;
 let _browserLaunching = false;
@@ -123,23 +146,76 @@ export function getPoolSnapshot(): { contexts: number; busyContexts: number } {
   return { contexts: _contexts.length, busyContexts: _contexts.filter((mc) => mc.busy).length };
 }
 
+/**
+ * TEST-ONLY pool seam (stability FIX 1 tests): lets the reap sweep be exercised
+ * against fabricated contexts without launching Chromium. Throws in production.
+ */
+export const __testPool = {
+  insert(mc: {
+    context: Pick<BrowserContext, "close" | "pages">;
+    preset: ContextPreset; useCount: number; maxUses: number; createdAt: number; busy: boolean;
+  }): void {
+    if (process.env.NODE_ENV === "production") throw new Error("__testPool is test-only");
+    _contexts.push(mc as unknown as ManagedContext);
+  },
+  clear(): void {
+    if (process.env.NODE_ENV === "production") throw new Error("__testPool is test-only");
+    _contexts.length = 0;
+  },
+};
+
 // ── FIX 4.1: Periodic cleanup of stale browser contexts ──
 // Prevents leaked contexts from accumulating until OOM.
+
+/**
+ * Is this context safe for a background reaper to close right now?
+ * NOT safe while any analysis is actively using it: the `busy` checkout flag is
+ * the primary signal, and open pages are the belt-and-braces backstop (covers any
+ * path where a page is alive on the context regardless of checkout bookkeeping).
+ */
+function isContextIdle(mc: ManagedContext): boolean {
+  if (mc.busy) return false;
+  try {
+    if (mc.context.pages().length > 0) return false;
+  } catch { /* context already gone — treat as idle so it gets swept from the pool */ }
+  return true;
+}
+
+/**
+ * One reap sweep (stability session FIX 1). Exported so tests can drive it
+ * directly. The pre-fix sweep closed contexts on AGE ALONE — including contexts a
+ * run was actively using (`busy` was never checked) — so a long run (e.g. a slow
+ * transcript phase) or a context handed out shortly before its TTL got its
+ * context closed OUT FROM UNDER IT mid-flight: "Target page, context or browser
+ * has been closed". Now an in-flight context is never touched by the reaper; a
+ * stale-but-busy context is deferred and swept on the first sweep after release
+ * (busy clears when its checked-out page closes).
+ */
+export async function reapStaleContexts(nowMs: number = Date.now()): Promise<{ reaped: number; deferredInFlight: number }> {
+  let reaped = 0;
+  let deferredInFlight = 0;
+  const stale = _contexts.filter(mc => (nowMs - mc.createdAt) > CONTEXT_TTL_MS);
+  for (const mc of stale) {
+    const ageS = Math.round((nowMs - mc.createdAt) / 1000);
+    const ageM = Math.floor(ageS / 60);
+    const ageRemS = ageS % 60;
+    if (!isContextIdle(mc)) {
+      deferredInFlight++;
+      console.log(`[browserClient] Stale context still IN USE — deferring reap (age: ${ageM}m ${ageRemS}s, preset: ${mc.preset})`);
+      continue;
+    }
+    console.log(`[browserClient] Evicted stale context (age: ${ageM}m ${ageRemS}s, preset: ${mc.preset}, uses: ${mc.useCount}/${mc.maxUses})`);
+    const idx = _contexts.indexOf(mc);
+    if (idx >= 0) _contexts.splice(idx, 1);
+    try { await mc.context.close(); } catch { /* ignore close errors on stale context */ }
+    reaped++;
+  }
+  return { reaped, deferredInFlight };
+}
+
 function startCleanupTimer(): void {
   if (_cleanupTimer) return;
-  _cleanupTimer = setInterval(async () => {
-    const now = Date.now();
-    const stale = _contexts.filter(mc => (now - mc.createdAt) > CONTEXT_TTL_MS);
-    for (const mc of stale) {
-      const ageS = Math.round((now - mc.createdAt) / 1000);
-      const ageM = Math.floor(ageS / 60);
-      const ageRemS = ageS % 60;
-      console.log(`[browserClient] Evicted stale context (age: ${ageM}m ${ageRemS}s, preset: ${mc.preset}, uses: ${mc.useCount}/${mc.maxUses})`);
-      const idx = _contexts.indexOf(mc);
-      if (idx >= 0) _contexts.splice(idx, 1);
-      try { await mc.context.close(); } catch { /* ignore close errors on stale context */ }
-    }
-  }, CLEANUP_INTERVAL_MS);
+  _cleanupTimer = setInterval(() => { void reapStaleContexts(); }, CLEANUP_INTERVAL_MS);
   // Don't keep the process alive just for cleanup
   if (_cleanupTimer && typeof _cleanupTimer === "object" && "unref" in _cleanupTimer) {
     (_cleanupTimer as NodeJS.Timeout).unref();
@@ -276,9 +352,9 @@ async function acquireContextPage(
   // two concurrent callers (e.g. two pLimit(2) runs) can't share one context and
   // then have one caller's retireContext()/eviction close it out from under the
   // other — the retire race. busy clears when the handed-out page closes.
-  const existing = _contexts.find(
-    (mc) => mc.preset === preset && mc.useCount < mc.maxUses && !mc.busy,
-  );
+  // Stability FIX 1: also refuse near-TTL contexts (isWarmContextReusable) so a
+  // checkout can't land seconds before the reaper's TTL boundary.
+  const existing = _contexts.find((mc) => isWarmContextReusable(mc, preset));
 
   if (existing) {
     existing.useCount++;
