@@ -1960,7 +1960,22 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Use full transcript text for richer AI analysis (up to 6000 chars combined)
   const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
-  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, bio, combinedTranscriptText);
+  // Session 11 (Commit 3): the theme-extraction and symbol-decoder LLM calls are
+  // independent — neither reads the other's output — so launch both together and
+  // do the local work (themes heuristic, location, excerpts) while they run,
+  // instead of awaiting them back-to-back (~2 calls of latency -> ~1). Both helpers
+  // catch internally (never throw), so Promise.all cannot reject here.
+  // extractCreatorProfile (later, in the router) still depends on BOTH via the
+  // evidence summary and stays ordered.
+  const themesPromise = translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, bio, combinedTranscriptText);
+  const symbolsPromise = decodeCreatorSymbols({
+    handle,
+    bio,
+    videoTitles: allTitles,
+    hashtags: topHashtags,
+    transcriptExcerpts: transcripts.map(t => t.transcript),
+  });
+
   const contentThemes = inferContentThemes(allTitles, topHashtags, bio);
 
   if (!location) {
@@ -1975,14 +1990,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
     .join("\n\n");
 
-  // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
-  const tikTokDecodedSymbols = await decodeCreatorSymbols({
-    handle,
-    bio,
-    videoTitles: allTitles,
-    hashtags: topHashtags,
-    transcriptExcerpts: transcripts.map(t => t.transcript),
-  });
+  // Await both LLM calls (kicked off above; ran concurrently with the work between).
+  const [contentThemeLabels, tikTokDecodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
   const tikTokDecodedSymbolsBlock = tikTokDecodedSymbols ? formatDecodedSymbolsBlock(tikTokDecodedSymbols) : "";
 
   const evidenceSummary = buildCreatorEvidenceSummary({
@@ -2186,7 +2195,16 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
   const transcriptTexts = transcripts.map(t => t.transcript);
   const rawKeywords = extractKeywords([...videoTitles, profile.biography, ...transcriptTexts]);
   const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
-  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, allHashtags, videoTitles, profile.biography, combinedTranscriptText);
+  // Session 11 (Commit 3): themes + symbols are independent LLM calls — launch
+  // both, do the local work (location, excerpts) while they run, then await both.
+  const themesPromise = translateKeywordsToThemes(rawKeywords, allHashtags, videoTitles, profile.biography, combinedTranscriptText);
+  const symbolsPromise = decodeCreatorSymbols({
+    handle,
+    bio: profile.biography,
+    videoTitles,
+    hashtags: allHashtags,
+    transcriptExcerpts: transcriptTexts,
+  });
   const contentThemes = inferContentThemes(videoTitles, allHashtags, profile.biography);
 
   // Step 7: Location detection
@@ -2200,14 +2218,8 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
     .map(t => `[${t.caption.slice(0, 60) || "reel"}]: ${t.transcript}`)
     .join("\n\n");
 
-  // Step 9: Symbol decoder
-  const decodedSymbols = await decodeCreatorSymbols({
-    handle,
-    bio: profile.biography,
-    videoTitles,
-    hashtags: allHashtags,
-    transcriptExcerpts: transcriptTexts,
-  });
+  // Step 9: Await themes + symbols (launched above, ran concurrently)
+  const [contentThemeLabels, decodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
   const decodedSymbolsBlock = decodedSymbols ? formatDecodedSymbolsBlock(decodedSymbols) : "";
 
   // Step 10: Build evidence summary with Instagram-specific signals
@@ -2361,7 +2373,16 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
   const rawKeywords = Array.from(new Set([...channelKeywords, ...extractKeywords([...uniqueVideoTitles, bio, ...transcriptTexts])])).slice(0, 40);
   // Use full transcript text for richer AI analysis (up to 6000 chars combined)
   const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
-  const contentThemeLabels = await translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio, combinedTranscriptText);
+  // Session 11 (Commit 3): themes + symbols are independent LLM calls — launch
+  // both, do the local work (profile URL, excerpts) while they run, then await both.
+  const themesPromise = translateKeywordsToThemes(rawKeywords, topHashtags, uniqueVideoTitles, bio, combinedTranscriptText);
+  const symbolsPromise = decodeCreatorSymbols({
+    handle,
+    bio,
+    videoTitles: uniqueVideoTitles,
+    hashtags: topHashtags,
+    transcriptExcerpts: transcripts.map(t => t.transcript),
+  });
   const contentThemes = inferContentThemes(uniqueVideoTitles, topHashtags, bio);
 
   const profileUrl = channelId
@@ -2373,14 +2394,8 @@ async function researchYouTubeCreator(handleOrUrl: string): Promise<CreatorResea
     .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
     .join("\n\n");
 
-  // Run Symbol Decoder — pre-process all creator-authored text into cultural signals
-  const ytDecodedSymbols = await decodeCreatorSymbols({
-    handle,
-    bio,
-    videoTitles: uniqueVideoTitles,
-    hashtags: topHashtags,
-    transcriptExcerpts: transcripts.map(t => t.transcript),
-  });
+  // Await themes + symbols (launched above, ran concurrently)
+  const [contentThemeLabels, ytDecodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
   const ytDecodedSymbolsBlock = ytDecodedSymbols ? formatDecodedSymbolsBlock(ytDecodedSymbols) : "";
 
   const evidenceSummary = buildCreatorEvidenceSummary({
