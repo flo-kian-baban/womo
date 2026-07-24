@@ -107,6 +107,50 @@ export async function probeDatabaseConnectivity(): Promise<boolean> {
   }
 }
 
+// ─── Run-outcome telemetry (Session 11, Commit 7) ────────────────────────────
+
+export type RunOutcomeStatus =
+  | "success" | "partial" | "saved_none"
+  | "timeout" | "crash" | "min_data_rejection" | "error";
+
+/**
+ * Record a terminal outcome for an analysis run in pipeline_runs.
+ *
+ * Before this the analyze path wrote NO run-level row (pipeline_runs was always
+ * empty), so a run that scraped + ran LLMs but persisted nothing — a 5-min timeout
+ * orphaning a finished extraction, or a persist-time bail (Part 0.3, run a8c1833e)
+ * — left ZERO telemetry. Upsert keyed on the run's correlation id (womo_0006), so a
+ * late authoritative write (e.g. a raced extraction that finishes AFTER the client
+ * already saw a timeout, and still persists) supersedes the provisional status.
+ *
+ * Never throws — telemetry must not break a run.
+ */
+export async function recordRunOutcome(
+  runId: string,
+  status: RunOutcomeStatus,
+  opts?: { runType?: string; detail?: Record<string, unknown>; startedAt?: Date },
+): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const now = new Date();
+    const errorLog = opts?.detail ?? null;
+    await db.insert(pipelineRuns).values({
+      id: runId,
+      runType: opts?.runType ?? "creator_analysis",
+      status,
+      startedAt: opts?.startedAt ?? now,
+      completedAt: now,
+      errorLog,
+    }).onConflictDoUpdate({
+      target: pipelineRuns.id,
+      set: { status, completedAt: now, errorLog },
+    });
+  } catch (err) {
+    console.warn(`[db] recordRunOutcome(${runId}, ${status}) failed:`, (err as Error).message);
+  }
+}
+
 // ─── Transaction plumbing ────────────────────────────────────────────────────
 // Write helpers for the identity core accept an optional `executor` so the
 // subject → observation → subtype-row chain can run inside ONE transaction

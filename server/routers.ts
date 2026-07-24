@@ -20,6 +20,7 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
+  recordRunOutcome,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -32,6 +33,7 @@ import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES 
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
+import { isBrowserDeadError } from "./scraping/browserClient";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
@@ -47,6 +49,19 @@ import pLimit from "p-limit";
 // Without this, 3+ concurrent requests can exhaust the browser pool (max 5 contexts)
 // and cause context eviction mid-analysis.
 const analysisConcurrencyLimit = pLimit(2);
+
+// Session 11 (Commit 7): map a run failure to a terminal-outcome status for
+// pipeline_runs telemetry. TIMEOUT is owned by the outer racer; here we classify
+// the work's own failure — a min-data rejection (PRECONDITION_FAILED), a browser
+// crash surfacing to the mutation, or an otherwise-unclassified error.
+function classifyRunFailure(err: unknown): "timeout" | "min_data_rejection" | "crash" | "error" {
+  if (err instanceof TRPCError) {
+    if (err.code === "TIMEOUT") return "timeout";
+    if (err.code === "PRECONDITION_FAILED") return "min_data_rejection";
+  }
+  if (isBrowserDeadError(err)) return "crash";
+  return "error";
+}
 
 // ─── V2 Pipeline Helpers ─────────────────────────────────────────────────────
 
@@ -872,43 +887,165 @@ export const appRouter = router({
         // to prevent hung Playwright pages from blocking the server thread.
         const ANALYSIS_TIMEOUT_MS = 5 * 60 * 1000;
 
-        const analysisPromise = (async () => {
-          // Step 1: Research
-          const t1 = Date.now();
-          const research = await researchCreator(input.handleOrUrl, input.platform);
-          stepTimings.push({ step: "Web Research & Scraping", durationMs: Date.now() - t1 });
-
-          // Session 8: never extract on empty evidence. A researchCreator failure
-          // already rejects this promise before extraction runs; this guard also
-          // closes the theoretical "succeeded but empty evidence" case so the
-          // "use your own knowledge" prompt branch can never fabricate a profile.
-          if (!research.evidenceSummary) {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message: `No usable evidence was collected for @${input.handleOrUrl}. Analysis was not saved.`,
-            });
-          }
-
-          // Step 2: AI Extraction (with retry)
-          const t2 = Date.now();
-          let extracted;
+        const workPromise = (async () => {
           try {
-            extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-          } catch (firstErr) {
-            console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-              extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-            } catch (secondErr) {
+            // Step 1: Research
+            const t1 = Date.now();
+            const research = await researchCreator(input.handleOrUrl, input.platform);
+            stepTimings.push({ step: "Web Research & Scraping", durationMs: Date.now() - t1 });
+
+            // Session 8: never extract on empty evidence. A researchCreator failure
+            // already rejects before extraction runs; this guard also closes the
+            // theoretical "succeeded but empty evidence" case so the "use your own
+            // knowledge" prompt branch can never fabricate a profile.
+            if (!research.evidenceSummary) {
               throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Creator extraction failed after retry. Please try again.",
+                code: "PRECONDITION_FAILED",
+                message: `No usable evidence was collected for @${input.handleOrUrl}. Analysis was not saved.`,
               });
             }
-          }
-          stepTimings.push({ step: "AI Profile Extraction", durationMs: Date.now() - t2 });
 
-          return { research, extracted };
+            // Step 2: AI Extraction (with retry)
+            const t2 = Date.now();
+            let extracted;
+            try {
+              extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+            } catch (firstErr) {
+              console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
+              await new Promise(r => setTimeout(r, 1000));
+              try {
+                extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+              } catch (secondErr) {
+                throw new TRPCError({
+                  code: "INTERNAL_SERVER_ERROR",
+                  message: "Creator extraction failed after retry. Please try again.",
+                });
+              }
+            }
+            stepTimings.push({ step: "AI Profile Extraction", durationMs: Date.now() - t2 });
+
+            // ── Step 3: DB Persistence ──
+            // Session 11 (Commit 7): persistence now lives INSIDE the raced work.
+            // It used to run AFTER Promise.race — but Promise.race does not cancel
+            // the loser, so when the 5-min timeout won, this extraction kept running
+            // to completion and its result was thrown away UNPERSISTED (Part 0.3:
+            // runs 69c13004 / 1944190b reached extraction at 430s / 348s, both past
+            // the 300s timeout). Persisting here means a finished extraction is
+            // ALWAYS saved — even if the client already received a timeout, the
+            // observation still lands is_latest and recordRunOutcome upserts the
+            // true result over the provisional "timeout" the outer handler wrote.
+            const researchData: {
+              followerCount?: number; followingCount?: number; totalLikes?: number; videoCount?: number;
+              totalViews?: number; avgViews?: number; engagementRate?: number;
+              location?: string; bio?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
+              topHashtags?: string[]; recentVideoTitles?: string[];
+              transcriptCount?: number; transcriptExcerpts?: string;
+              decodedSymbols?: Record<string, unknown>;
+              culturalVelocity?: string;
+              dataConfidenceLevel?: string;
+              sociologicalFieldsComputed?: boolean;
+              foreignVideosRejected?: number;
+              longitudinalSampleJson?: Record<string, unknown>;
+              discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
+              transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
+            } = {
+              followerCount: research.followerCount || undefined,
+              // I1: Thread followingCount from scraper data
+              followingCount: research.followingCount || undefined,
+              totalLikes: research.totalLikes || undefined,
+              videoCount: research.videoCount || undefined,
+              totalViews: research.totalViews || undefined,
+              avgViews: research.avgViews || undefined,
+              engagementRate: research.engagementRate || undefined,
+              location: research.location || undefined,
+              bio: research.bio || undefined,
+              rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+              contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+              topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+              recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+              transcriptCount: research.transcriptCount ?? 0,
+              transcriptExcerpts: research.transcriptExcerpts || undefined,
+              decodedSymbols: research.decodedSymbols ?? undefined,
+              culturalVelocity: research.culturalVelocity ?? undefined,
+              dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+              sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+              foreignVideosRejected: research.foreignVideosRejected,
+              longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+              discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+              transcripts: research.transcripts?.length ? research.transcripts : undefined,
+            };
+
+            const t3 = Date.now();
+            const persistResult = await persistCreatorToV2({
+              handle: extracted.handle,
+              platform: extracted.platform,
+              profileUrl: research.profileUrl ?? (input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined),
+              displayName: extracted.displayName,
+              pronouns: extracted.pronouns,
+              extracted,
+              researchData,
+              // womo_0007: same (handleOrUrl, platform, evidenceSummary) triple the
+              // extraction call above received → byte-identical prompt snapshot
+              evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
+                input.handleOrUrl, input.platform, research.evidenceSummary, research,
+              ),
+            });
+            stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
+
+            // Collect token metrics — exact per-run lookup via run_id (womo_0006).
+            const tokenMetrics = await getLlmTokenUsageByRunId(runId)
+              .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
+
+            const totalDurationMs = Date.now() - pipelineStart;
+
+            // Honest persistence outcome — never report plain success when
+            // persistence partially or wholly failed.
+            const persistence = summarizePersistence(persistResult);
+            if (persistence.saved !== "full") {
+              console.warn(`[V2 Pipeline] ⚠️ Creator persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
+            }
+            const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
+
+            // Terminal telemetry — the authoritative outcome for this run.
+            await recordRunOutcome(
+              runId,
+              persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none",
+              {
+                startedAt: new Date(pipelineStart),
+                detail: persistence.saved === "full" ? undefined : {
+                  saved: persistence.saved,
+                  error: persistence.error ?? null,
+                  failedComponents: persistence.failedComponents ?? [],
+                },
+              },
+            );
+
+            // Return saved profile + persistence outcome + pipeline metrics
+            const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
+            return {
+              profile: saved,
+              persistence,
+              extracted,
+              runId,
+              pipelineMetrics: {
+                totalDurationMs,
+                steps: stepTimings,
+                tokens: tokenMetrics,
+                transcriptCount: researchData.transcriptCount ?? 0,
+                videosScraped: researchData.discoveredVideoPoolJson?.length ?? 0,
+              },
+            };
+          } catch (err) {
+            // The work itself failed (research / extraction / persist). Record the
+            // true terminal cause so a persist-time bail leaves telemetry instead of
+            // the old nothing (Part 0.3, run a8c1833e). TIMEOUT is not raised here —
+            // it belongs to the outer racer below.
+            await recordRunOutcome(runId, classifyRunFailure(err), {
+              startedAt: new Date(pipelineStart),
+              detail: { message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) },
+            });
+            throw err;
+          }
         })();
 
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -920,106 +1057,25 @@ export const appRouter = router({
           ), ANALYSIS_TIMEOUT_MS)
         );
 
-        const { research, extracted } = await analysisConcurrencyLimit(() =>
-          Promise.race([analysisPromise, timeoutPromise])
-        );
-
-        // Step 1: Gather real evidence from the platform before AI analysis
-        let evidenceSummary: string | undefined;
-        let researchedProfileUrl: string | undefined;
-        let researchData: {
-          followerCount?: number; followingCount?: number; totalLikes?: number; videoCount?: number;
-          totalViews?: number; avgViews?: number; engagementRate?: number;
-          location?: string; bio?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
-          topHashtags?: string[]; recentVideoTitles?: string[];
-          transcriptCount?: number; transcriptExcerpts?: string;
-          decodedSymbols?: Record<string, unknown>;
-          culturalVelocity?: string;
-          dataConfidenceLevel?: string;
-          sociologicalFieldsComputed?: boolean;
-          foreignVideosRejected?: number;
-          longitudinalSampleJson?: Record<string, unknown>;
-          discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
-          transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
-        } | undefined;
-
-        evidenceSummary = research.evidenceSummary;
-        researchedProfileUrl = research.profileUrl;
-        researchData = {
-          followerCount: research.followerCount || undefined,
-          // I1: Thread followingCount from scraper data
-          followingCount: research.followingCount || undefined,
-          totalLikes: research.totalLikes || undefined,
-          videoCount: research.videoCount || undefined,
-          totalViews: research.totalViews || undefined,
-          avgViews: research.avgViews || undefined,
-          engagementRate: research.engagementRate || undefined,
-          location: research.location || undefined,
-          bio: research.bio || undefined,
-          rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
-          contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
-          topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
-          recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
-          transcriptCount: research.transcriptCount ?? 0,
-          transcriptExcerpts: research.transcriptExcerpts || undefined,
-          decodedSymbols: research.decodedSymbols ?? undefined,
-          culturalVelocity: research.culturalVelocity ?? undefined,
-          dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-          sociologicalFieldsComputed: research.sociologicalFieldsComputed,
-          foreignVideosRejected: research.foreignVideosRejected,
-          longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-          discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
-          transcripts: research.transcripts?.length ? research.transcripts : undefined,
-        };
-
-        // ── Step 3: DB Persistence ──
-        const t3 = Date.now();
-        const persistResult = await persistCreatorToV2({
-          handle: extracted.handle,
-          platform: extracted.platform,
-          profileUrl: researchedProfileUrl ?? (input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined),
-          displayName: extracted.displayName,
-          pronouns: extracted.pronouns,
-          extracted,
-          researchData: researchData ?? {},
-          // womo_0007: same (handleOrUrl, platform, evidenceSummary) triple the
-          // extraction call above received → byte-identical prompt snapshot
-          evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
-            input.handleOrUrl, input.platform, research.evidenceSummary, research,
-          ),
-        });
-        stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
-
-        // ── Collect token metrics — exact per-run lookup via run_id (womo_0006),
-        // replacing the old time-window inference.
-        const tokenMetrics = await getLlmTokenUsageByRunId(runId)
-          .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
-
-        const totalDurationMs = Date.now() - pipelineStart;
-
-        // Honest persistence outcome — never report plain success when
-        // persistence partially or wholly failed.
-        const persistence = summarizePersistence(persistResult);
-        if (persistence.saved !== "full") {
-          console.warn(`[V2 Pipeline] ⚠️ Creator persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
+        try {
+          return await analysisConcurrencyLimit(() =>
+            Promise.race([workPromise, timeoutPromise])
+          );
+        } catch (err) {
+          if (err instanceof TRPCError && err.code === "TIMEOUT") {
+            // Provisional: the client sees a timeout, but workPromise keeps running
+            // and — if the extraction finishes — persists and upserts the real
+            // outcome, superseding this. A timed-out run is no longer lost work.
+            await recordRunOutcome(runId, "timeout", {
+              startedAt: new Date(pipelineStart),
+              detail: { note: "5-min race timeout; extraction may still complete and persist out-of-band" },
+            });
+          }
+          // If the timeout won, don't let workPromise's later settlement surface as
+          // an unhandled rejection.
+          void workPromise.catch(() => {});
+          throw err;
         }
-        const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
-
-        // Return saved profile + persistence outcome + pipeline metrics
-        const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
-        return {
-          profile: saved,
-          persistence,
-          extracted,
-          runId,
-          pipelineMetrics: {
-            totalDurationMs,
-            steps: stepTimings,
-            tokens: tokenMetrics,
-            transcriptCount: researchData?.transcriptCount ?? 0,
-            videosScraped: researchData?.discoveredVideoPoolJson?.length ?? 0,
-          },
-        };
         });
       }),
 
