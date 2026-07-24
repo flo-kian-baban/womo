@@ -45,6 +45,7 @@ import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSy
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent } from "./db";
 import { TRANSCRIPT_SOURCE, isSpeechTranscript } from "@shared/transcriptSource";
+import { isStopword } from "@shared/stopwords";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -208,6 +209,11 @@ function extractHashtags(texts: string[]): string[] {
 }
 
 function extractKeywords(texts: string[]): string[] {
+  // C2: this local set keeps the original platform/domain fillers (video,
+  // subscribe, link, …) and generic nouns; the shared isStopword() adds a
+  // curated MULTILINGUAL function-word filter on top, closing the leaks
+  // (because/there/over/going/done/out/wants) and handling non-English creators
+  // (Spanish/French/Portuguese/German/Italian articles & prepositions).
   const stopWords = new Set([
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
     "from", "up", "about", "into", "through", "during", "is", "are", "was", "were", "be",
@@ -234,7 +240,7 @@ function extractKeywords(texts: string[]): string[] {
     const clean = text.replace(/#\w+/g, "").replace(/https?:\/\/\S+/g, "").toLowerCase();
     const words = clean.match(/\b[a-z]{3,20}\b/g) ?? [];
     for (const word of words) {
-      if (!stopWords.has(word)) {
+      if (!stopWords.has(word) && !isStopword(word)) {
         wordCounts[word] = (wordCounts[word] ?? 0) + 1;
       }
     }
