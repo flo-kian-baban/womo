@@ -31,8 +31,8 @@
    (EAV signals)   (symbol decoder)  (videos/       (brand mention
                                       transcripts)   videos)
 
-   PROVENANCE (append-only, per run):  scrape_events · llm_invocations
-   UNUSED / EMPTY:  niche_taxonomy · archetype_transitions · semantic_documents · pipeline_runs · users
+   PROVENANCE (append-only, per run):  scrape_events · llm_invocations · pipeline_runs (Session 11: terminal outcome)
+   UNUSED / EMPTY:  niche_taxonomy · archetype_transitions · semantic_documents · users
 ```
 
 - **[FACT]** A single `subjects` row is the durable identity (survives anonymization via `anonymized_at`). Each analysis appends a new `observations` row; `is_latest = true` marks the current snapshot (`schema.ts:209`). Reads resolve the latest observation and join the subtype table (`creator_observations` **or** `brand_observations`, 1:1 unique on `observation_id`).
@@ -67,10 +67,10 @@
 | 17 | `match_overlaps` | Shared signals per match | 7 | **written + read** |
 | 18 | `match_content_directions` | Content recommendations per match | 48 | **written + read** |
 | 19 | `semantic_documents` | pgvector store (embedding column NOT created) | **0** | **no writer** ⚠️ (dormant) |
-| 20 | `pipeline_runs` | Persistent batch-job tracking | **0** | **no writer** ⚠️ (bulk jobs use in-memory `Map` instead) |
+| 20 | `pipeline_runs` | **Session 11:** per-run terminal outcome (analyze) | grows | **written + read** (`recordRunOutcome`; bulk jobs still use in-memory `Map`) |
 | 21 | `users` | Legacy auth table (openId/role) | **0** | writer+reader exist but **zero callers** ⚠️ (orphaned) |
 
-**[FACT] Empty tables (6):** `audience_mentions`, `niche_taxonomy`, `archetype_transitions`, `semantic_documents`, `pipeline_runs`, `users`. **[FACT] No-writer tables (4):** `niche_taxonomy`, `archetype_transitions`, `semantic_documents`, `pipeline_runs` (grep of `db.ts` finds no `insert()` for these table objects). See [§10](#10-integrity--usage-gaps).
+**[FACT] Empty tables (5):** `audience_mentions`, `niche_taxonomy`, `archetype_transitions`, `semantic_documents`, `users`. **[FACT] No-writer tables (3):** `niche_taxonomy`, `archetype_transitions`, `semantic_documents`. **Session 11 (Commit 7):** `pipeline_runs` is no longer empty/no-writer — `recordRunOutcome` writes a terminal row per analyze run. See [§10](#10-integrity--usage-gaps) and [§20](#20-pipeline_runs-10-cols--schemats773--session-11-run-outcome-telemetry-writer).
 
 ---
 
@@ -477,20 +477,20 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 
 **[FACT]** The `embedding vector(1536)` column + ivfflat index described in the `schema.ts` comment are **NOT created** in the live DB. pgvector is installed but the embedding feature is dormant. As of womo_0007 this table gains its first writer (the creator evidence-snapshot path).
 
-### 20. `pipeline_runs` (10 cols) — `schema.ts:773` — **no writer; empty**
+### 20. `pipeline_runs` (10 cols) — `schema.ts:773` — **Session 11: run-outcome telemetry writer**
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
-| id | uuid | no | gen_random_uuid() | PK |
-| run_type | varchar(64) | **no** | — | |
-| status | varchar(32) | **no** | `'pending'` | |
-| total_items | integer | yes | 0 | |
-| completed_items | integer | yes | 0 | |
-| failed_items | integer | yes | 0 | |
-| error_log | jsonb | yes | — | |
-| started_at | timestamptz | yes | — | |
-| completed_at | timestamptz | yes | — | |
+| id | uuid | no | gen_random_uuid() | PK — **Session 11:** set to the analysis-run correlation id (womo_0006), so a row joins the run's scrape_events / llm_invocations / observation by `run_id` |
+| run_type | varchar(64) | **no** | — | **Session 11:** `'creator_analysis'` |
+| status | varchar(32) | **no** | `'pending'` | **Session 11:** terminal outcome — `success` / `partial` / `saved_none` / `timeout` / `crash` / `min_data_rejection` / `error` |
+| total_items | integer | yes | 0 | (unused by the analyze path) |
+| completed_items | integer | yes | 0 | (unused) |
+| failed_items | integer | yes | 0 | (unused) |
+| error_log | jsonb | yes | — | **Session 11:** failure detail (message / persistence-failure components) when not a clean success |
+| started_at | timestamptz | yes | — | pipeline start |
+| completed_at | timestamptz | yes | — | terminal write time |
 | created_at | timestamptz | no | now() | |
-**[INFERENCE]** Intended to persist bulk-analysis jobs, but `bulkAnalysisJobs.ts` uses an in-memory `Map` instead — this table is never written.
+**[FACT] Session 11 (Commit 7):** `recordRunOutcome` (`db.ts`) now upserts one terminal row per `creator.analyze` run, keyed on the run id. It closes the Part 0.3 blind spot — before this the analyze path wrote no run-level row, so a run that scraped + ran LLMs but persisted nothing (a 5-min timeout orphaning a finished extraction, or a persist-time bail) left zero telemetry. Upsert-on-conflict means a late authoritative outcome supersedes a provisional `timeout` rather than duplicating it. **Bulk** jobs still use the in-memory `Map` in `bulkAnalysisJobs.ts` (not this table).
 
 ### 21. `users` (9 cols) — `schema.ts:793` — **orphaned; empty**
 | Column | Type | Null | Default | Meaning |
@@ -653,7 +653,7 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | **niche_taxonomy** | **none** | (FK target only) | — |
 | **archetype_transitions** | **none** | none | — |
 | **semantic_documents** | **none** | none | — |
-| **pipeline_runs** | **none** | none | — |
+| **pipeline_runs** | recordRunOutcome *(Session 11)* | *(analytics; join by `id`=run_id)* | terminal outcome per analyze run |
 | **users** | upsertUser `:57`, — | getUserByOpenId `:86` | **zero callers** (orphaned) |
 
 ---

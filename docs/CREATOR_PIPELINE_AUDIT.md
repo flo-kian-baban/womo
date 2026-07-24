@@ -71,6 +71,35 @@ Commits: `2294706` `03b3af5` `8ef3748` (+ docs).
 
 ---
 
+## SESSION 11 — ADDRESSED (pipeline performance + reliability)
+
+Goal: make the pipeline **faster and more reliable without changing what is
+collected or scored** — fitEngine, scoring, confidence thresholds, velocity
+heuristics, and what-counts-as-evidence stayed **frozen**. All on `main`; **no
+DDL, no migration**.
+
+**Part 0 investigation (evidence, read-only) —**
+- *0.1 Double scrape:* `scrapeTikTokProfile` ran twice per TikTok run (`researchTikTokCreator` Step 1 + inside `fetchTikTokVideosFromAPI`), each a full ~30-45s Playwright scroll; both consumers derive from the same result.
+- *0.2 Browser crashes:* 17 `Target … closed` events, **13 of 17 single-run** → cause is `--single-process` renderer-crash instability cascading through the run, **not** concurrency or cross-run eviction. A shared-context/retire race is a secondary latent hazard.
+- *0.3 Lost work:* 4 of 8 recent runs persisted nothing; **all lost work, none a correct rejection** — a crash before collection (min-data gate), two 5-min-timeout runs whose completed extraction was discarded (`Promise.race` doesn't cancel the loser; persistence lived after the race), and one persist-time bail with **no telemetry** (`pipeline_runs` was always empty).
+
+**Performance (safe wins) —**
+- **`40f5871`** collapse the double profile scrape to one (~30-45s/run).
+- **`1673843`** run the 4 search queries with bounded concurrency (2) over one shared context — author guard + dedup byte-identical, no retire race (~65s→~33s).
+- **`8bac0d9`** run the independent themes + symbols LLM calls concurrently in all 3 research paths (~one round-trip; extraction stays ordered).
+- **`fea9afb`** replace the fake 23s/frozen progress animation (13 fabricated per-signal "LLM steps") with honest phase labels + a live elapsed timer + a realistic 2-4 min expectation.
+
+**Coverage —**
+- **`62d62f6`** cursor pagination: page `item_list` via infinite scroll until a 90-video cap / `hasMore=false` / stagnation (was 6 fixed scrolls). Every paged item still author-guarded.
+
+**Reliability (architectural) —**
+- **`1856afb`** browser stability *(option a)*: crash-resilient acquisition (detect a dead browser → hard-reset + relaunch → retry once, turning a whole-run cascade into one recovery) and close the retire race (contexts are exclusive per checkout via a `busy` flag; busy contexts are never reused or evicted). **Deferred:** removing `--single-process` (the root cause) needs a memory-instrumented deploy — it raises container memory (OOM risk) and can't be validated read-only.
+- **`43efb1f`** stop discarding completed work: persistence now runs **inside** the raced promise, so a finished extraction is saved even if the client already timed out; and `recordRunOutcome` writes a terminal `pipeline_runs` row per run (success / partial / saved_none / timeout / crash / min_data_rejection / error), upsert-keyed on the run id so a late real outcome supersedes a provisional `timeout`. Closes the `a8c1833e` no-telemetry blind spot. No DDL (existing table).
+
+Commits: `40f5871` `1673843` `8bac0d9` `fea9afb` `62d62f6` `1856afb` `43efb1f` (+ docs).
+
+---
+
 ## TABLE OF CONTENTS
 
 1. Stage 1 — Entry (preflight → analyze; auth, rate limiting, run-id, duplicate gate; rerun/bulk/ingest variants)
