@@ -295,7 +295,7 @@ observations still persist as accepted until Session 7.
 | video_url | text | yes | — | |
 | caption | text | yes | — | |
 | transcript_text | text | yes | — | full transcript |
-| transcript_source | varchar(32) | yes | — | captions/whisper/playwright-webvtt/… |
+| transcript_source | varchar(32) | yes | — | **normalized Session 9**: `subtitle` \| `speech_to_text` \| `post_caption` — states what the evidence IS (speech vs post caption). Legacy values (captions/caption/whisper/gemini-2.5-flash/playwright-*) are classified by `@shared/transcriptSource` at read time, so no backfill was needed |
 | transcript_word_count | integer | yes | — | |
 | video_duration | real | yes | — | seconds |
 | create_time | timestamptz | yes | — | original post time |
@@ -366,7 +366,7 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | purpose | varchar(64) | **no** | — | call purpose label |
 | model | varchar(128) | **no** | — | e.g. `gemini-2.5-flash` |
 | prompt_version | varchar(32) | yes | — | written as `"1.0"` |
-| temperature | real | yes | — | **never written** (always null) |
+| temperature | real | yes | — | **written from Session 9** (was always null) — the temperature sent per call; null = provider default was used |
 | input_tokens | integer | yes | — | null on failed invocations (no usage returned) |
 | output_tokens | integer | yes | — | null on failed invocations |
 | response_json | jsonb | yes | — | **never written** (always null) |
@@ -587,7 +587,7 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 
 **[FACT] `scrape_events`** — written by `insertScrapeEvent` (`db.ts:687`), called ~10× from the scraping layer (`scraping/httpClient.ts`, `webResearch.ts`, `reviewResearch.ts`). Read by `getProvenance` (`db.ts:1044`, used by `creator.getProvenance`). All fields are populated per fetch. **Gap:** `silent_failure_detected` is written **and** indexed (`se_failure_idx`) but is only ever returned row-by-row via `getProvenance` — **no query aggregates or alerts on it**, so soft-block rate is invisible operationally.
 
-**[FACT] `llm_invocations`** — written by `insertLlmInvocation` (`db.ts:721`), called only from `_core/llm.ts` (once per successful Gemini call; **not written on failure**, so failed calls leave no row). Read by `getLlmTokenUsageBySubject` (`db.ts:757`), `getLlmTokenUsageByTimeWindow` (`db.ts:784`), and `getProvenance`. **Populated:** purpose, model, prompt_version(`"1.0"`), input/output_tokens, duration_ms, observation_id/subject_id. **Always NULL (defined but never written):** `temperature`, `response_json`, `match_score_id` (the new `0004` FK column is never populated — verified: 0 non-null `match_score_id` rows). **Cost:** token columns are read to compute a per-analysis `pipelineMetrics.tokens` figure that is **returned to the client and discarded** — there is no persisted cost rollup, no `$` conversion, and no historical spend view.
+**[FACT] `llm_invocations`** — written by `insertLlmInvocation` (`db.ts:721`), called only from `_core/llm.ts` (once per successful Gemini call; **not written on failure**, so failed calls leave no row). Read by `getLlmTokenUsageBySubject` (`db.ts:757`), `getLlmTokenUsageByTimeWindow` (`db.ts:784`), and `getProvenance`. **Populated:** purpose, model, prompt_version(`"1.0"`), input/output_tokens, duration_ms, observation_id/subject_id. **Always NULL (defined but never written):** `response_json`, `match_score_id` (the new `0004` FK column is never populated — verified: 0 non-null `match_score_id` rows). **`temperature` is now written as of Session 9** (records the temperature sent per call; null = provider default). **Cost:** token columns are read to compute a per-analysis `pipelineMetrics.tokens` figure that is **returned to the client and discarded** — there is no persisted cost rollup, no `$` conversion, and no historical spend view.
 
 ---
 

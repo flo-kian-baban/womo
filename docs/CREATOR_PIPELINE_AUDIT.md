@@ -29,6 +29,26 @@ Everything below this section is the **pre-fix** diagnosis at `cf312c4`. Session
 
 ---
 
+## SESSION 9 — ADDRESSED (diagnostic-panel truthfulness + generalized pipeline fixes)
+
+Prompted by the forensic audit of run `a8c1833e` (@juarezaale). fitEngine/scoring, the confidence thresholds, the `detectCreatorType` heuristic, and the location-extraction *approach* were left unchanged (Jason's rulings) — these are plumbing + panel-truthfulness fixes, mechanism-level (they hold for any creator/platform, incl. non-English, no-speech, very-large, and IG/YouTube-primary). All on `main`; **no DDL, no migration**.
+
+**Panel / read model (transcript honesty + Run diagnostics):**
+- Videos line is now one non-redundant funnel + **coverage** (captured of channel, %); transcript sources are human-readable ("Subtitle track" / "Post caption") and attached to the with-transcript group.
+- Surfaced: scrape-failure **consequences** (derived from failed methods), **confidence & velocity rationale**, **sociological-field provenance** (computed vs estimated), **per-field provenance** (evidence / scraped / derived / computed / estimated / model-inference), **per-call LLM temperature**, and a **"read the exact prompt the model received"** view.
+- Transcript evidence reordered **by value** (speech first, then word count) rather than view count; each entry labeled with its real source; the panel no longer calls a 20-word post caption "Spoken Content".
+- Derived stat tiles (views / avg views / engagement) marked **scrape-derived over the captured sample**, not "accurate".
+
+**Pipeline (generalized):**
+- `transcript_source` normalized to speech vs caption (`subtitle` / `speech_to_text` / `post_caption`) via `@shared/transcriptSource`; legacy values classified at read time.
+- Location matcher: short abbreviations ("LA") matched **case-sensitively** so they can't match a lowercase non-English word ("la"); full names stay case-insensitive.
+- Keyword stopwords: curated **multilingual** function-word filter (EN/ES/FR/PT/DE/IT) closing the leaks, with English-content homographs (sin/son/hay/war) protected.
+- LLM **temperature now recorded** on every invocation.
+
+Commits: `cdad30d` `ab534f9` `6428884` `bd212bf` `b69ed88` `dfcdcb1` `93f88f3` (+ docs).
+
+---
+
 ## TABLE OF CONTENTS
 
 1. Stage 1 — Entry (preflight → analyze; auth, rate limiting, run-id, duplicate gate; rerun/bulk/ingest variants)
