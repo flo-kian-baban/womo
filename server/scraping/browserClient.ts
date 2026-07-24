@@ -71,6 +71,11 @@ interface ManagedContext {
   useCount: number;
   maxUses: number;
   createdAt: number;
+  // Session 11 (Commit 6): true while a caller holds a page checked out from this
+  // context. A busy context is never reused by another concurrent caller and never
+  // evicted — that is what closed contexts out from under in-flight work (the
+  // retire race). Cleared when the handed-out page closes.
+  busy: boolean;
 }
 
 // FIX 3.1: Increased from 3 to 5 to accommodate multi-path Instagram analysis
@@ -168,37 +173,102 @@ export async function ensureBrowser(): Promise<Browser> {
   }
 }
 
+// ─── Crash Resilience (Session 11, Commit 6) ──────────────────────────────────
+
+/**
+ * Does this error mean the browser/context/page is dead (crashed or closed)?
+ * In --single-process mode a renderer crash takes down the whole browser, and
+ * Playwright then surfaces one of these on the next operation.
+ */
+export function isBrowserDeadError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes("target page, context or browser has been closed") ||
+    msg.includes("target closed") ||
+    msg.includes("browser has been closed") ||
+    msg.includes("browser has disconnected") ||
+    msg.includes("has been closed") ||
+    msg.includes("crash") ||
+    msg.includes("protocol error") ||
+    msg.includes("connection closed") ||
+    msg.includes("session closed")
+  );
+}
+
+/**
+ * Drop a dead/crashed browser and all its (now-invalid) contexts so the next
+ * ensureBrowser() launches a clean instance. Best-effort — the browser is
+ * presumed dead, so close() failures are expected and ignored.
+ */
+async function hardResetBrowser(): Promise<void> {
+  const dead = _browser;
+  _browser = null;
+  _contexts.length = 0;
+  if (dead) {
+    try { await dead.close(); } catch { /* already dead */ }
+  }
+}
+
 // ─── Context Pool ─────────────────────────────────────────────────────────────
 
 /**
  * Get a BrowserContext with the specified preset.
  * Reuses a warm context if one is available and hasn't exceeded maxUses.
  * Creates a new one otherwise.
+ *
+ * Session 11 (Commit 6): crash-resilient. In --single-process mode a renderer
+ * crash takes down the whole browser; a stale isConnected() then lets us hand back
+ * a dead context whose newPage() throws "Target ... closed", and every later op in
+ * the run cascades the same way (Part 0.2) — this is what turned one hiccup into a
+ * whole-run loss. If acquisition fails with that signature we hard-reset the
+ * browser (drop the dead instance + contexts) and retry ONCE on a fresh browser,
+ * converting the cascade into a single recovery.
  */
 export async function getContext(
   preset: ContextPreset = "desktop-chrome",
   maxUses: number = DEFAULT_MAX_USES,
 ): Promise<{ context: BrowserContext; page: Page }> {
+  try {
+    return await acquireContextPage(preset, maxUses);
+  } catch (err) {
+    if (!isBrowserDeadError(err)) throw err;
+    console.warn(`[browserClient] Browser looks dead (${(err as Error).message.slice(0, 80)}) — hard-resetting and retrying once`);
+    await hardResetBrowser();
+    return await acquireContextPage(preset, maxUses);
+  }
+}
+
+async function acquireContextPage(
+  preset: ContextPreset,
+  maxUses: number,
+): Promise<{ context: BrowserContext; page: Page }> {
   const browser = await ensureBrowser();
 
-  // Try to find a warm context with the same preset that hasn't exceeded maxUses
+  // Reuse a warm context ONLY if it is not currently checked out (`!busy`).
+  // Session 11 (Commit 6): the busy guard makes contexts exclusive per checkout, so
+  // two concurrent callers (e.g. two pLimit(2) runs) can't share one context and
+  // then have one caller's retireContext()/eviction close it out from under the
+  // other — the retire race. busy clears when the handed-out page closes.
   const existing = _contexts.find(
-    (mc) => mc.preset === preset && mc.useCount < mc.maxUses,
+    (mc) => mc.preset === preset && mc.useCount < mc.maxUses && !mc.busy,
   );
 
   if (existing) {
     existing.useCount++;
+    existing.busy = true;
     const page = await existing.context.newPage();
+    page.once("close", () => { existing.busy = false; });
     return { context: existing.context, page };
   }
 
-  // Evict oldest context if at capacity
+  // At capacity: evict the oldest context that is NOT in use. Never close a busy
+  // context (that is the retire race). If every context is busy, create one over
+  // the soft cap — the TTL cleanup reclaims stale contexts later.
   if (_contexts.length >= MAX_CONCURRENT_CONTEXTS) {
-    const oldest = _contexts.shift();
-    if (oldest) {
-      try {
-        await oldest.context.close();
-      } catch { /* ignore close errors */ }
+    const idx = _contexts.findIndex((mc) => !mc.busy);
+    if (idx >= 0) {
+      const [evicted] = _contexts.splice(idx, 1);
+      try { await evicted.context.close(); } catch { /* ignore close errors */ }
     }
   }
 
@@ -229,6 +299,7 @@ export async function getContext(
     useCount: 1,
     maxUses,
     createdAt: Date.now(),
+    busy: true,
   };
   _contexts.push(managed);
 
@@ -245,6 +316,7 @@ export async function getContext(
   startCleanupTimer();
 
   const page = await context.newPage();
+  page.once("close", () => { managed.busy = false; });
   return { context, page };
 }
 
