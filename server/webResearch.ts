@@ -164,6 +164,34 @@ function normalizeHandle(h: string): string {
   return h.toLowerCase().replace(/[._\-]/g, "");
 }
 
+// ─── Known-location matcher (C1: mechanism-safe) ────────────────────────────
+// The location list mixes full city names (safe — multi-char, unambiguous) with
+// SHORT ABBREVIATIONS ("LA", "NYC"). Matching abbreviations case-INsensitively
+// let a two-letter code match a common lowercase word in another language —
+// e.g. the Spanish/French article "la" matched "LA" (Los Angeles), giving a
+// creator location of "la". This fixes the MECHANISM (case handling), not the
+// approach (still a hardcoded list, per Jason's ruling): full names stay
+// case-insensitive; abbreviations must appear in UPPERCASE (case-sensitive),
+// which no common lowercase word can satisfy in ANY language. Prevents the
+// class of "short abbreviation matches a lowercase common word" false positives.
+const KNOWN_CITY_FULL_NAMES = [
+  "Toronto", "New York", "Los Angeles", "London", "Dubai", "Paris", "Chicago",
+  "Miami", "Houston", "Atlanta", "Montreal", "Vancouver", "Sydney", "Melbourne",
+  "Calgary", "Ottawa", "Edmonton", "Winnipeg", "Quebec", "Halifax", "Cleveland",
+  "Brooklyn", "Nashville", "Austin", "Seattle", "Denver", "Boston", "Philadelphia",
+];
+const KNOWN_CITY_ABBREVIATIONS = ["NYC", "LA"]; // uppercase-only, matched case-sensitively
+const CITY_FULL_RE = new RegExp(`\\b(${KNOWN_CITY_FULL_NAMES.join("|")})\\b`, "i");
+const CITY_ABBR_RE = new RegExp(`\\b(${KNOWN_CITY_ABBREVIATIONS.join("|")})\\b`); // NO /i flag
+
+export function matchKnownCity(text: string): string | null {
+  const full = text.match(CITY_FULL_RE);
+  if (full) return full[1];
+  const abbr = text.match(CITY_ABBR_RE); // case-sensitive: "LA" yes, "la" no
+  if (abbr) return abbr[1];
+  return null;
+}
+
 function extractHashtags(texts: string[]): string[] {
   const tagCounts: Record<string, number> = {};
   for (const text of texts) {
@@ -1748,8 +1776,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     videoCount = Number(stats?.videoCount ?? 0);
     totalLikes = Number(stats?.heartCount ?? 0);
 
-    const locationMatch = bio.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Calgary|Ottawa|Edmonton|Winnipeg|Quebec|Halifax|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
-    if (locationMatch) location = locationMatch[1];
+    const cityMatch = matchKnownCity(bio);
+    if (cityMatch) location = cityMatch;
 
     // Extract video titles and view counts from the combined post list
     const itemList = profileResult.posts?.data?.itemList ?? [];
@@ -1858,8 +1886,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   if (!location) {
     const allText = [bio, ...allTitles, combinedTranscriptText].join(" ");
-    const locationMatch = allText.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
-    if (locationMatch) location = locationMatch[1];
+    const cityMatch = matchKnownCity(allText);
+    if (cityMatch) location = cityMatch;
   }
 
   // Build transcript excerpts for DB storage — store ALL transcripts in full (no truncation)
@@ -2084,8 +2112,8 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
   // Step 7: Location detection
   let location = "";
   const locationText = [profile.biography, ...videoTitles, combinedTranscriptText].join(" ");
-  const locationMatch = locationText.match(/\b(Toronto|New York|NYC|Los Angeles|LA|London|Dubai|Paris|Chicago|Miami|Houston|Atlanta|Montreal|Vancouver|Sydney|Melbourne|Cleveland|Brooklyn|Nashville|Austin|Seattle|Denver|Boston|Philadelphia)\b/i);
-  if (locationMatch) location = locationMatch[1];
+  const cityMatch = matchKnownCity(locationText);
+  if (cityMatch) location = cityMatch;
 
   // Step 8: Build transcript excerpts
   const transcriptExcerpts = transcripts
