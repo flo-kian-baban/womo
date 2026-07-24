@@ -31,9 +31,9 @@ import pLimit from "p-limit";
 import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
 import {
   parseWebVTT,
-  defaultTranscriptStrategies,
+  budgetedTranscriptStrategies,
+  budgetedTranscriptPhase,
   fetchVideoTranscript,
-  createTranscriptPhase,
   type TranscriptPhase,
 } from "./scraping/tiktok/transcriptStrategies";
 import { searchTikTokVideos } from "./scraping/tiktok/searchScraper";
@@ -421,10 +421,12 @@ async function fetchVideoTranscriptMultiPath(
     return entry;
   }
 
+  // C2: the approved production budgets are active (per-video caps via the
+  // strategy list, phase deadline + early-bail via the shared batch phase).
   const hit = await fetchVideoTranscript(
     { handle, videoId, videoUrl, caption, sharedContext: sharedCtx?.context },
-    defaultTranscriptStrategies(),
-    phase ?? createTranscriptPhase(),
+    budgetedTranscriptStrategies(),
+    phase ?? budgetedTranscriptPhase(),
   );
 
   if (!hit) {
@@ -896,9 +898,9 @@ async function fetchTikTokTranscripts(
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
   const transcriptLimit = pLimit(3);
   // One shared phase for the whole batch: budgets + early-bail state common to
-  // the pLimit(3) workers. Structure commit: created without limits (inactive —
-  // identical behavior); the budget commit passes the approved caps here.
-  const transcriptPhase = createTranscriptPhase();
+  // the pLimit(3) workers. C2: the approved production budgets are active
+  // (phase 120s, early-bail after 4 consecutive subtitle-less browser results).
+  const transcriptPhase = budgetedTranscriptPhase();
   // Acquire a shared Playwright context for all videos in this batch
   let sharedCtx: Awaited<ReturnType<typeof getContext>> | null = null;
   try {

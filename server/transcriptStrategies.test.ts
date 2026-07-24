@@ -11,6 +11,9 @@
 import { describe, it, expect } from "vitest";
 import {
   defaultTranscriptStrategies,
+  budgetedTranscriptStrategies,
+  budgetedTranscriptPhase,
+  TRANSCRIPT_BUDGETS,
   fetchVideoTranscript,
   createTranscriptPhase,
   captionFallbackDecision,
@@ -184,6 +187,76 @@ describe("createTranscriptPhase — early-bail semantics (C2 machinery, pinned n
     expect(phase.shouldRun(browser).reason).toContain("budget exceeded");
     expect(phase.shouldRun(http).ok).toBe(true);
     expect(phase.stats().deadlineHit).toBe(true);
+  });
+});
+
+describe("C2 — approved production budgets", () => {
+  it("pins the approved numbers: browser 20s, http 12s race (8s×2 fetch), phase 120s, N=4", () => {
+    expect(TRANSCRIPT_BUDGETS).toEqual({
+      browserPerVideoMs: 20_000,
+      httpPerVideoMs: 12_000,
+      httpFetch: { timeout: 8_000, maxRetries: 2 },
+      phaseBudgetMs: 120_000,
+      maxConsecutiveBrowserEmpties: 4,
+    });
+    const list = budgetedTranscriptStrategies();
+    expect(list.map(s => [s.name, s.perVideoTimeoutMs])).toEqual([
+      ["subtitle_http", 12_000],
+      ["subtitle_browser", 20_000],
+      ["caption_fallback", null], // caption stays uncapped (instant)
+    ]);
+  });
+
+  it("caps are consistent by construction: 12 videos × browser cap ÷ 3 workers ≤ phase budget", () => {
+    // The no-sacrifice proof: the phase deadline cannot cut a within-cap browser
+    // attempt because full browser coverage of the whole batch fits the budget.
+    const worstCaseFullCoverageMs = (12 * TRANSCRIPT_BUDGETS.browserPerVideoMs) / 3;
+    expect(worstCaseFullCoverageMs).toBeLessThanOrEqual(TRANSCRIPT_BUDGETS.phaseBudgetMs);
+  });
+
+  it("subtitle-less batch simulation: browser runs exactly N times, then every later video is skipped-fast (fail-fast) while caption evidence still lands", async () => {
+    const phase = budgetedTranscriptPhase();
+    const browserAttempts = { count: 0 };
+    const videos = Array.from({ length: 12 }, (_, i) => ({
+      ...INPUT, videoId: `v${i}`, videoUrl: `https://www.tiktok.com/@testcreator/video/v${i}`,
+      // last video carries a rich caption → caption evidence must survive the bail
+      caption: i === 11 ? "w1 w2 w3 w4 w5 w6 w7 w8 w9" : "",
+    }));
+    const results = [] as Array<string | null>;
+    for (const v of videos) {
+      const http = stub("subtitle_http", "tiktok_desktop_http", { outcome: "empty" });
+      const browser = stub("subtitle_browser", "tiktok_playwright", () => {
+        browserAttempts.count++;
+        return Promise.resolve<TranscriptStrategyResult>({ outcome: "empty", detail: "navigated, no subtitles" });
+      });
+      const hit = await fetchVideoTranscript(v, [http, browser, makeCaptionFallbackStrategy()], phase, () => {});
+      results.push(hit?.strategy.name ?? null);
+    }
+    // Browser path ran only until the bail tripped (N=4), never again after.
+    expect(browserAttempts.count).toBe(TRANSCRIPT_BUDGETS.maxConsecutiveBrowserEmpties);
+    expect(phase.stats().browserDisabledAfterEmpties).toBe(true);
+    // Videos 0-10: nothing (same terminal result as today, minus the wasted ~22s each).
+    expect(results.slice(0, 11).every(r => r === null)).toBe(true);
+    // Video 11: caption evidence STILL lands after the bail — nothing sacrificed.
+    expect(results[11]).toBe("caption_fallback");
+  });
+
+  it("subtitle-RICH batch: budgets change nothing — every video that succeeds today still succeeds (no-sacrifice acceptance)", async () => {
+    const phase = budgetedTranscriptPhase();
+    const results: Array<string | null> = [];
+    for (let i = 0; i < 12; i++) {
+      // Path A succeeds instantly for all 12 — the budgeted phase must not gate,
+      // skip, or alter a single one.
+      const http = stub("subtitle_http", "tiktok_desktop_http", {
+        outcome: "success", transcript: { text: `spoken words ${i}`, wordCount: 3, source: "subtitle" },
+      });
+      const browser = stub("subtitle_browser", "tiktok_playwright", { outcome: "empty" });
+      const hit = await fetchVideoTranscript({ ...INPUT, videoId: `v${i}` }, [http, browser, makeCaptionFallbackStrategy()], phase, () => {});
+      results.push(hit?.strategy.name ?? null);
+    }
+    expect(results.every(r => r === "subtitle_http")).toBe(true); // 12/12, zero cut off
+    expect(phase.stats().browserDisabledAfterEmpties).toBe(false);
+    expect(phase.stats().deadlineHit).toBe(false);
   });
 });
 

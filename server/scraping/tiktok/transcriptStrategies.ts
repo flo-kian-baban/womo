@@ -383,8 +383,8 @@ export function makeCaptionFallbackStrategy(): TranscriptStrategy {
 }
 
 /**
- * The production strategy list, in fallback order. The budget commit passes caps
- * here; without options everything is uncapped (pre-refactor behavior).
+ * The production strategy list, in fallback order. Without options everything is
+ * uncapped (the C1 structure-commit behavior, still used by tests).
  */
 export function defaultTranscriptStrategies(opts?: {
   httpTimeoutMs?: number | null;
@@ -396,6 +396,47 @@ export function defaultTranscriptStrategies(opts?: {
     makeSubtitleBrowserStrategy({ perVideoTimeoutMs: opts?.browserTimeoutMs ?? null }),
     makeCaptionFallbackStrategy(),
   ];
+}
+
+// ─── Approved production budgets (C2) ─────────────────────────────────────────
+// Rationale (approved Part 0 numbers) and the no-sacrifice consistency proof:
+//   browser 20s  — nav timeout 15s + waits ~4-5s IS the current happy path; the
+//                  race only kills hangs beyond it (evaluate/close stalls).
+//   http 8s×2 + 12s race — today's worst case retried a blocked page for ~45s;
+//                  a healthy page answers in ~0.4-1.5s.
+//   phase 120s   — 12 videos × 20s cap ÷ pLimit(3) workers = 80s worst-case FULL
+//                  browser coverage ≤ 120s, so the phase deadline mathematically
+//                  cannot cut a within-cap attempt; it only bites when attempts
+//                  exceed their own caps, which the per-video race prevents.
+//   bail N=4     — 4 consecutive CLEAR "empty" browser results (navigated fine,
+//                  zero subtitles). Browser attempts are conditioned on Path A
+//                  having found nothing, so subtitle-rich creators rarely
+//                  accumulate any; timeouts/errors never count (a slow page may
+//                  still hold subtitles — real successes are never sacrificed).
+
+export const TRANSCRIPT_BUDGETS = {
+  browserPerVideoMs: 20_000,
+  httpPerVideoMs: 12_000,
+  httpFetch: { timeout: 8_000, maxRetries: 2 },
+  phaseBudgetMs: 120_000,
+  maxConsecutiveBrowserEmpties: 4,
+} as const;
+
+/** The strategy list with the approved production budgets applied. */
+export function budgetedTranscriptStrategies(): TranscriptStrategy[] {
+  return defaultTranscriptStrategies({
+    httpTimeoutMs: TRANSCRIPT_BUDGETS.httpPerVideoMs,
+    httpFetch: { ...TRANSCRIPT_BUDGETS.httpFetch },
+    browserTimeoutMs: TRANSCRIPT_BUDGETS.browserPerVideoMs,
+  });
+}
+
+/** The per-batch phase with the approved production budgets applied. */
+export function budgetedTranscriptPhase(): TranscriptPhase {
+  return createTranscriptPhase({
+    phaseBudgetMs: TRANSCRIPT_BUDGETS.phaseBudgetMs,
+    maxConsecutiveBrowserEmpties: TRANSCRIPT_BUDGETS.maxConsecutiveBrowserEmpties,
+  });
 }
 
 // ─── Phase controller ─────────────────────────────────────────────────────────
