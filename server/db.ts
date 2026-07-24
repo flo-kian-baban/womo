@@ -18,6 +18,7 @@ import {
 import { ENV } from './_core/env';
 import { currentRunId } from './_core/runContext';
 import { canonicalizeHandle } from './_core/handles';
+import { isSpeechTranscript, classifyTranscriptSource } from '@shared/transcriptSource';
 import { computeLlmCostUsd } from '../shared/llmPricing';
 
 // Re-export legacy types for routers.ts compilation
@@ -1400,10 +1401,27 @@ export async function getCreatorProfileById(subjectId: string) {
   }
   const hasDecodedSignals = decodedSignalRows.length > 0;
 
-  // ── Assemble transcript excerpts from content_items ──
-  const transcriptsArray = contentItemRows
+  // ── B3 (Session 9): order transcript EVIDENCE by value, not view count ──
+  // Speech-sourced transcripts (subtitle/audio) first, then by word count desc,
+  // so the analyst sees the strongest spoken evidence first — not whichever
+  // clip happened to go viral. (The discovered-pool and video-title lists below
+  // deliberately keep view-count order — that IS what those surfaces want.)
+  // viewCount is the final, deterministic tiebreak so ordering is stable.
+  const transcriptRows = contentItemRows
     .filter(ci => ci.transcriptText)
-    .map(ci => ({
+    .sort((a, b) => {
+      const aSpeech = isSpeechTranscript(a.transcriptSource) ? 1 : 0;
+      const bSpeech = isSpeechTranscript(b.transcriptSource) ? 1 : 0;
+      if (aSpeech !== bSpeech) return bSpeech - aSpeech;                 // speech before caption
+      const wc = (b.transcriptWordCount ?? 0) - (a.transcriptWordCount ?? 0);
+      if (wc !== 0) return wc;                                           // then word count desc
+      return (b.viewCount ?? 0) - (a.viewCount ?? 0);                    // stable tiebreak
+    });
+
+  // ── Assemble transcript excerpts from content_items ──
+  const transcriptsArray = transcriptRows.map(ci => {
+    const src = classifyTranscriptSource(ci.transcriptSource);
+    return {
       videoId: ci.platformVideoId ?? "",
       caption: ci.caption ?? "",
       transcriptText: ci.transcriptText!,
@@ -1411,7 +1429,13 @@ export async function getCreatorProfileById(subjectId: string) {
       temporalBucket: ci.temporalBucket ?? "",
       viewCount: ci.viewCount ?? 0,
       createTime: ci.createTime,
-    }));
+      // Session 9: expose provenance so the UI can distinguish speech from a
+      // post-caption fallback instead of labeling everything "Spoken Content".
+      transcriptSource: ci.transcriptSource ?? null,
+      sourceKind: src.kind,        // "speech" | "caption"
+      sourceLabel: src.label,      // e.g. "Subtitle track" | "Post caption"
+    };
+  });
 
   // ── Assemble discovered video pool from content_items ──
   const discoveredPool = contentItemRows.map(ci => ({
@@ -1500,16 +1524,14 @@ export async function getCreatorProfileById(subjectId: string) {
     // overlap — transcripts[].musicMetadata.soundName. Built from the
     // transcript-bearing content_items rows, mirroring the fresh-analysis
     // TranscriptEntry semantics (music of sampled/transcribed videos).
-    transcripts: contentItemRows
-      .filter(ci => ci.transcriptText)
-      .map(ci => ({
-        videoId: ci.platformVideoId ?? "",
-        transcript: ci.transcriptText!,
-        wordCount: ci.transcriptWordCount ?? 0,
-        musicMetadata: ci.musicTitle
-          ? { soundName: ci.musicTitle, isOriginal: ci.isOriginalAudio ?? undefined }
-          : undefined,
-      })),
+    transcripts: transcriptRows.map(ci => ({
+      videoId: ci.platformVideoId ?? "",
+      transcript: ci.transcriptText!,
+      wordCount: ci.transcriptWordCount ?? 0,
+      musicMetadata: ci.musicTitle
+        ? { soundName: ci.musicTitle, isOriginal: ci.isOriginalAudio ?? undefined }
+        : undefined,
+    })),
     recentVideoTitles: videoTitles.length > 0 ? videoTitles : null,
     // V1 compat
     location: row.creator_observations.primaryRegion ?? null,
