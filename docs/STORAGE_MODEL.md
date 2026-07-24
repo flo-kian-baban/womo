@@ -302,7 +302,7 @@ observations still persist as accepted until Session 7.
 | video_duration | real | yes | — | seconds. **Session 10:** TikTok's `video.duration` (seconds on the web item_list) was consumed as ms then ÷1000, zeroing every sub-1000s clip — `tiktokDurationToMs()` now normalizes the unit at capture so this is populated when present |
 | create_time | timestamptz | yes | — | original post time |
 | region | varchar(128) | yes | — | |
-| temporal_bucket | varchar(16) | yes | — | recent/mid/anchor (6-3-3 sampling) — **written Session 8** by `updateContentItemTranscript` during transcript wiring (previously never written; the read model + `getRunDiagnostics` already consumed it) |
+| temporal_bucket | varchar(16) | yes | — | recent/mid/anchor (6-3-3 sampling) — **written Session 8** by `updateContentItemTranscript` during transcript wiring. **Transcript-reliability session (C3):** now ALSO written at content_items INSERT for every sampled video (pool entries carry `temporalBucket` from the sampler), so sample membership survives transcript failure — a subtitle-less creator keeps its longitudinal structure |
 | like_count | **bigint** | yes | — | |
 | comment_count | **bigint** | yes | — | |
 | share_count | **bigint** | yes | — | |
@@ -379,6 +379,8 @@ Unique: `(platform, platform_video_id, subject_id)`.
 | created_at | timestamptz | no | now() | |
 
 ### 13. `scrape_events` (13 cols) — `schema.ts:558` — see [§8 Provenance](#8-provenance--cost-tables-detail)
+
+**Transcript-attempt records (transcript-reliability session, C1):** every per-video transcript strategy attempt emits one row — `url_requested` carries a `#transcript=<strategy>:<outcome>` fragment (success rows included; strategies: `subtitle_http` / `subtitle_browser` / `caption_fallback`), and `failure_reason` is set ONLY on non-success, prefixed `transcript ` (e.g. `transcript subtitle_browser: empty — navigated, no subtitles`). `scrape_method` stays within the existing enum (http→`tiktok_desktop_http`, browser→`tiktok_playwright`; caption, a local 0ms computation, is recorded under `tiktok_desktop_http` with the fragment disclosing it). `getRunDiagnostics` excludes exactly the `transcript `-prefixed rows from failed-scrape counts and consequence warnings — they are attempt outcomes, not path failures.
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |

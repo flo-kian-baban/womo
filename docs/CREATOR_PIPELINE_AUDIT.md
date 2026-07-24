@@ -100,6 +100,47 @@ Commits: `40f5871` `1673843` `8bac0d9` `fea9afb` `62d62f6` `1856afb` `43efb1f` (
 
 ---
 
+## TRANSCRIPT-RELIABILITY SESSION — ADDRESSED (strategy structure + budgets)
+
+Prompted by the post-S11 cohort audit: the per-video transcript multipath was the
+last budget/quality bottleneck — un-instrumented (blank telemetry stretches), and
+subtitle-less creators paid ~90–365s of doomed Playwright navigations for zero
+transcripts (ishowspeed ~100s/0, anatoly 365s/0), pushing transcript-heavy runs
+onto the ~300s gateway boundary (simonsquibb persisted at t+299, client saw a
+timeout). fitEngine/scoring, confidence thresholds, and what-counts-as-evidence
+**frozen** — a subtitle-less creator still comes back low-confidence/red exactly
+as before; only the wasted time discovering it is gone. **No DDL.**
+
+- **`2d0d80f` (C1, behavior-neutral)** — the multipath is now a uniform strategy
+  structure (`scraping/tiktok/transcriptStrategies.ts`): `subtitle_http` (Path A),
+  `subtitle_browser` (Path B+C as one unit), `caption_fallback` (Path E) behind one
+  `TranscriptStrategy` interface + orchestrator + shared per-batch phase controller;
+  a future STT path implements the interface and slots in without orchestrator
+  changes. **Every attempt now emits one scrape_event** (`#transcript=<name>:<outcome>`
+  URL fragment; non-success rows carry a `transcript `-prefixed failure_reason that
+  the Run-panel consequence derivation explicitly ignores — real scrape failures
+  still warn; integration-proven both directions).
+- **`f295061` (C2, the behavior change)** — approved budgets active: browser 20s
+  per video, http 12s race (fetch 8s×2), **phase 120s**, **early-bail N=4**
+  consecutive clear "empty" browser results (timeouts/errors never count).
+  No-sacrifice proof: 12×20s÷3 workers = 80s ≤ 120s (the deadline cannot cut a
+  within-cap attempt — pinned by test); subtitle-rich simulation 12/12 succeeds
+  untouched; subtitle-less simulation runs the browser exactly 4× then fails fast
+  with caption evidence still landing. Expected: ~100s/0 → ~40s; 365s/0 → ~40-60s.
+- **`9e55192` (C3)** — 6-3-3 **sample membership persists independently of
+  transcript success**: pool entries carry `temporalBucket` for all 12 sampled ids
+  and content_items writes it at insert (previously only transcript-bearing videos
+  got a bucket — ishowspeed's 12-video sample left zero longitudinal markers).
+  `alreadySampled`/`status` semantics deliberately unchanged.
+- **`3f6da3c` (C4)** — timeout-class client errors show "Analysis may still have
+  completed", re-check once after 45s via preflight, and surface the salvaged
+  profile with a Library link when found (closes the simonsquibb success-shown-
+  as-timeout UX gap).
+
+Commits: `2d0d80f` `f295061` `9e55192` `3f6da3c` (+ docs).
+
+---
+
 ## TABLE OF CONTENTS
 
 1. Stage 1 — Entry (preflight → analyze; auth, rate limiting, run-id, duplicate gate; rerun/bulk/ingest variants)
