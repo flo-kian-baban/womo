@@ -23,6 +23,7 @@ vi.mock("./scraping/tiktok/profileScraper", () => ({
 }));
 
 import { fetchTikTokVideosFromAPI } from "./webResearch";
+import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
 
 describe("fetchTikTokVideosFromAPI author guard", () => {
   it("keeps only the creator's own videos and counts the rest as rejected", async () => {
@@ -32,5 +33,16 @@ describe("fetchTikTokVideosFromAPI author guard", () => {
     expect(rejected).toBe(2);                          // juarezaale + author-less
     // duration is carried through and normalized to ms (Commit 2): 12s → 12000ms.
     expect(items.find(i => i.id === "own1")?.durationMs).toBe(12000);
+  });
+
+  // Session 11 (Commit 1): when the caller hands in a profile it already scraped,
+  // the API path must NOT scrape the same page a second time.
+  it("reuses a prefetched profile instead of scraping again", async () => {
+    const mockScrape = vi.mocked(scrapeTikTokProfile);
+    const prefetched = await scrapeTikTokProfile("testcreator");
+    mockScrape.mockClear();
+    const { items } = await fetchTikTokVideosFromAPI("testcreator", prefetched);
+    expect(mockScrape).not.toHaveBeenCalled();         // no second scrape
+    expect(items.map(i => i.id).sort()).toEqual(["own1", "own2"]);
   });
 });

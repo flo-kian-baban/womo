@@ -714,7 +714,8 @@ export interface TemporalVideoEntry {
  * Returns array of VideoItem objects with full metadata.
  */
 export async function fetchTikTokVideosFromAPI(
-  handle: string
+  handle: string,
+  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
 ): Promise<{ items: Array<{
   id: string;
   caption: string;
@@ -752,8 +753,12 @@ export async function fetchTikTokVideosFromAPI(
   }> = [];
 
   try {
-    // Combined profile scrape gets user info + video list via XHR interception
-    const profileResult = await scrapeTikTokProfile(handle);
+    // Combined profile scrape gets user info + video list via XHR interception.
+    // Session 11 (Commit 1): reuse the profile the caller (researchTikTokCreator
+    // Step 1) already scraped instead of scraping the same page a second time
+    // (~30-45s of duplicate Playwright work). Standalone callers pass nothing →
+    // self-fetch, unchanged.
+    const profileResult = prefetchedProfile ?? await scrapeTikTokProfile(handle);
 
     const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
     const user = userInfoData?.user ?? {} as Record<string, unknown>;
@@ -803,7 +808,10 @@ export async function fetchTikTokVideosFromAPI(
   return { items, rejected };
 }
 
-async function fetchTikTokTranscripts(handle: string): Promise<{
+async function fetchTikTokTranscripts(
+  handle: string,
+  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
+): Promise<{
   transcripts: TranscriptEntry[];
   videoTitles: string[];
   hashtags: string[];
@@ -860,7 +868,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   // Session 10: the API path now author-guards each item and returns the count
   // of foreign / author-less items it rejected. Track the run total so it can be
   // surfaced in the Run diagnostics ("N videos excluded — author mismatch").
-  const { items: apiVideos, rejected: apiRejectedForeign } = await fetchTikTokVideosFromAPI(handle);
+  const { items: apiVideos, rejected: apiRejectedForeign } = await fetchTikTokVideosFromAPI(handle, prefetchedProfile);
   let foreignVideosRejected = apiRejectedForeign;
   for (const v of apiVideos) {
     if (!seen.has(v.id)) {
@@ -1793,8 +1801,15 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // Step 1: Combined profile scrape (user info + video list via XHR interception)
   const htmlTitles: string[] = [];
   const popularTitles: string[] = [];
+  // Session 11 (Commit 1): scrape the profile ONCE here and hand the result to
+  // the transcript/video-collection path below, which used to run a second
+  // identical scrapeTikTokProfile inside fetchTikTokVideosFromAPI (~30-45s of
+  // duplicate Playwright work every run). If this scrape fails, the flag stays
+  // undefined and the transcript path self-fetches (a genuine retry).
+  let prefetchedProfile: Awaited<ReturnType<typeof scrapeTikTokProfile>> | undefined;
   try {
     const profileResult = await scrapeTikTokProfile(handle);
+    prefetchedProfile = profileResult;
 
     const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
     const user = userInfoData?.user ?? {} as Record<string, unknown>;
@@ -1826,8 +1841,9 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     console.warn("[webResearch] TikTok profile scrape failed:", err);
   }
 
-  // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
-  const transcriptData = await fetchTikTokTranscripts(handle);
+  // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags.
+  // Session 11 (Commit 1): reuse Step 1's profile scrape (no second scrape).
+  const transcriptData = await fetchTikTokTranscripts(handle, prefetchedProfile);
   const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts: transcriptViewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected } = transcriptData;
   if (searchQuotaExhausted) quotaExhausted = true;
   // Merge transcript view counts into main viewCounts array
