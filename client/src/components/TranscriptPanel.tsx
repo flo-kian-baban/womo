@@ -48,6 +48,10 @@ interface TranscriptEntry {
   label: string;
   text: string;
   segments: Segment[];
+  // Session 9 (B2): what this evidence actually IS — the creator's speech
+  // (subtitle/audio) or their written post caption. Set from the read model.
+  sourceKind?: "speech" | "caption";
+  sourceLabel?: string;
 }
 
 // ─── Highlight Config ─────────────────────────────────────────────────────────
@@ -400,13 +404,13 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
     // New format: array of objects from content_items
     if (Array.isArray(transcriptExcerpts)) {
       const entityMap = buildEntityMap(profile);
-      return (transcriptExcerpts as Array<{ videoId?: string; caption?: string; transcriptText: string }>)
+      return (transcriptExcerpts as Array<{ videoId?: string; caption?: string; transcriptText: string; sourceKind?: "speech" | "caption"; sourceLabel?: string }>)
         .filter(t => t.transcriptText)
         .map((t, i) => {
           const label = t.caption
             ? (t.caption.length > 50 ? t.caption.slice(0, 50) + "…" : t.caption)
             : `Video ${i + 1}`;
-          return { label, text: t.transcriptText, segments: tokenize(t.transcriptText, entityMap) };
+          return { label, text: t.transcriptText, segments: tokenize(t.transcriptText, entityMap), sourceKind: t.sourceKind, sourceLabel: t.sourceLabel };
         });
     }
     // Legacy format: concatenated string
@@ -436,6 +440,9 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
   if (entries.length === 0 && !decodedSymbols) return null;
 
   const totalHighlights = entries.reduce((acc, e) => acc + e.segments.filter(s => s.type !== null).length, 0);
+  // Session 9 (B2): only call it "spoken content / primary evidence" when at
+  // least one entry is actually speech (subtitle/audio). A post caption is not.
+  const hasSpeech = entries.some(e => e.sourceKind === "speech");
 
   return (
     <div className="space-y-0">
@@ -446,13 +453,15 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-emerald-500/15">
             <Mic className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-emerald-400">
-              Transcript Excerpts — Spoken Content
+              Transcript Evidence
             </span>
             <div className="ml-auto flex items-center gap-2">
               <span className="text-[10px] text-emerald-400/60">
                 {transcriptCount} video{transcriptCount !== 1 ? "s" : ""} · {totalHighlights} entities detected
               </span>
-              <span className="text-[10px] text-emerald-400/50 italic">Primary evidence</span>
+              {hasSpeech
+                ? <span className="text-[10px] text-emerald-400/50 italic">Primary evidence</span>
+                : <span className="text-[10px] text-amber-300/70 italic">Captions only — not speech</span>}
             </div>
           </div>
 
@@ -481,6 +490,14 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
                     <span className="text-[10px] font-semibold text-emerald-400/80 uppercase tracking-wide flex-1 truncate">
                       {entry.label}
                     </span>
+                    {entry.sourceLabel && (
+                      <span
+                        title={entry.sourceKind === "speech" ? "Transcribed speech" : "The post's written caption — not spoken content"}
+                        className={`text-[9px] px-1.5 py-0.5 rounded-full border flex-shrink-0 cursor-help ${entry.sourceKind === "speech" ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10" : "text-amber-300 border-amber-500/40 bg-amber-500/10"}`}
+                      >
+                        {entry.sourceLabel}{entry.sourceKind === "caption" ? " · not speech" : ""}
+                      </span>
+                    )}
                     {highlightCount > 0 && (
                       <span className="flex items-center gap-1 flex-shrink-0">
                         {(["place", "entity", "claim", "person"] as HighlightType[]).map(type => {

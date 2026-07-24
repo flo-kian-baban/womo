@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
+import { classifyTranscriptSource } from "@shared/transcriptSource";
 import { toast } from "sonner";
 
 // ─── Status badge ────────────────────────────────────────────────────────────
@@ -93,6 +94,56 @@ function OutcomeChip({ tone, children }: { tone: "ok" | "fail" | "noData" | "not
 function msFmt(ms: number | null | undefined): string {
   if (ms == null) return "—";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+// Session 9 (A8): color a field chip by PROVENANCE (not presence). Marks how a
+// value was arrived at — evidence-backed vs scraped vs model inference — never
+// quality.
+const PROVENANCE_STYLES: Record<string, { cls: string; tag: string; title: string }> = {
+  evidence:  { cls: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30", tag: "✓",    title: "backed by a stored evidence signal (signals / decoded symbols)" },
+  scraped:   { cls: "text-sky-400 bg-sky-400/10 border-sky-400/30",             tag: "raw",  title: "scraped directly from the platform" },
+  derived:   { cls: "text-sky-400 bg-sky-400/10 border-sky-400/30",             tag: "calc", title: "computed from scraped stats" },
+  computed:  { cls: "text-teal-300 bg-teal-400/10 border-teal-400/30",          tag: "calc", title: "computed from engagement signals (TikTok)" },
+  estimated: { cls: "text-amber-300 bg-amber-400/10 border-amber-400/40",       tag: "est",  title: "estimated by the model (no engagement signals)" },
+  inferred:  { cls: "text-violet-300 bg-violet-400/10 border-violet-400/30",    tag: "AI",   title: "model inference — no backing evidence signal is stored" },
+};
+
+function FieldProvenanceChip({ field, provenance }: { field: string; provenance: string }) {
+  const s = PROVENANCE_STYLES[provenance] ?? { cls: "text-slate-400 bg-slate-400/10 border-slate-400/30", tag: provenance, title: provenance };
+  return (
+    <span title={`${field}: ${s.title}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10.5px] cursor-help ${s.cls}`}>
+      {field}<span className="opacity-50 text-[8.5px] uppercase">{s.tag}</span>
+    </span>
+  );
+}
+
+/** A7: lazily fetch and show the exact evidence prompt the model received. */
+function EvidenceSnapshotView({ observationId }: { observationId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = trpc.creator.getEvidenceSnapshot.useQuery(
+    { observationId }, { enabled: open },
+  );
+  const prompt = data?.find(x => x.documentType === "creator_extraction_prompt");
+  return (
+    <div>
+      <button
+        className="text-[10.5px] text-muted-foreground/60 hover:text-foreground inline-flex items-center gap-1"
+        onClick={() => setOpen(v => !v)}
+      >
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} />
+        {open ? "Hide" : "Show"} the exact prompt the model received
+      </button>
+      {open && (
+        <div className="mt-1 max-h-72 overflow-auto rounded border border-border/40 bg-secondary/30 p-2">
+          {isLoading
+            ? <div className="text-[10.5px] text-muted-foreground animate-pulse">Loading…</div>
+            : prompt
+              ? <pre className="text-[10px] whitespace-pre-wrap break-words text-muted-foreground/80 font-mono">{prompt.contentText}</pre>
+              : <div className="text-[10.5px] text-muted-foreground">No evidence snapshot stored for this run.</div>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Pure renderer for the RunDiagnostics payload. */
@@ -192,14 +243,64 @@ export function RunDiagnosticsView({ d }: { d: any }) {
         </div>
       )}
 
-      {/* Videos */}
+      {/* Scrape-failure consequences (A3) */}
+      {d.scrapes.consequences.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {d.scrapes.consequences.map((c: string, i: number) => (
+            <div key={i} className="text-[10.5px] text-amber-300/80 flex gap-1.5">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /> {c}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Videos — funnel + coverage (A1/A2/A4). One partition, stated once. */}
       <SectionTitle icon={FileText}>Videos</SectionTitle>
-      <div className="font-mono text-[11px] text-foreground/80">
-        {d.videos.total} captured
-        {Object.entries(d.videos.byStatus).map(([s, n]) => ` · ${n as number} ${s}`)}
-        {" · "}{d.videos.withTranscript} with transcript, {d.videos.withoutTranscript} without
-        {Object.keys(d.videos.transcriptSources).length > 0 &&
-          ` (${Object.entries(d.videos.transcriptSources).map(([s, n]) => `${n as number}× ${s}`).join(", ")})`}
+      <div className="font-mono text-[11px] text-foreground/80 space-y-0.5">
+        <div>
+          {d.videos.total} captured
+          {d.videos.channelVideoCount != null && (
+            <span className="text-muted-foreground">
+              {" "}of {d.videos.channelVideoCount} on channel
+              {d.videos.coveragePct != null ? ` · ${d.videos.coveragePct}% coverage` : ""}
+            </span>
+          )}
+        </div>
+        <div className="text-muted-foreground/80">
+          ↳ {d.videos.withTranscript} with transcript, {d.videos.withoutTranscript} metadata-only
+          {d.videos.withTranscript > 0 && Object.keys(d.videos.transcriptSources).length > 0 &&
+            ` (${Object.entries(d.videos.transcriptSources)
+              .map(([src, n]) => `${n as number}× ${classifyTranscriptSource(src).label}`)
+              .join(", ")})`}
+        </div>
+        {d.videos.coveragePct != null && d.videos.coveragePct < 100 && (
+          <div className="text-amber-300/70 text-[10.5px]">
+            Derived stats (engagement, avg views) reflect the {d.videos.total} captured videos, not the full channel.
+          </div>
+        )}
+      </div>
+
+      {/* Confidence & provenance (A5/A6) */}
+      <SectionTitle icon={ShieldQuestion}>Confidence &amp; provenance</SectionTitle>
+      <div className="font-mono text-[11px] text-foreground/80 space-y-0.5">
+        <div>
+          confidence: <span className="uppercase font-semibold">{d.confidence.level ?? "n/a"}</span>
+          <span className="text-muted-foreground"> — {d.confidence.rationale}</span>
+        </div>
+        {d.velocity && (
+          <div>
+            velocity: {d.velocity.value}
+            <span className="text-muted-foreground"> — {d.velocity.rationale}</span>
+          </div>
+        )}
+        {d.sociologicalFieldsProvenance && (
+          <div>
+            sociological fields (parasocial / audience / capital / remix):{" "}
+            {d.sociologicalFieldsProvenance === "computed"
+              ? <span className="text-teal-300">computed from engagement signals</span>
+              : <span className="text-amber-300">estimated by the model — no engagement signals</span>}
+          </div>
+        )}
       </div>
 
       {/* LLM */}
@@ -209,6 +310,12 @@ export function RunDiagnosticsView({ d }: { d: any }) {
         {" · "}{d.llm.totalTokens.toLocaleString()} tokens ({d.llm.inputTokens.toLocaleString()} in / {d.llm.outputTokens.toLocaleString()} out)
         {" · "}{d.llm.costUsd > 0 ? `$${d.llm.costUsd.toFixed(4)}` : "unpriced"} · {d.llm.model}
       </div>
+      {d.llm.settings.length > 0 && (
+        <div className="font-mono text-[10.5px] text-muted-foreground/60 mt-0.5">
+          temperature: {d.llm.settings.map((s: { purpose: string; temperature: number | null }) =>
+            `${s.purpose.replace(/^creator_/, "").replace(/_/g, " ")}=${s.temperature ?? "default"}`).join(" · ")}
+        </div>
+      )}
       {d.llm.failures.length > 0 && (
         <div className="mt-1.5 space-y-1">
           {d.llm.failures.map((f: any, i: number) => (
@@ -228,16 +335,28 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           ))}
         </div>
       )}
+      {/* A8: provenance, not mere presence — evidence-backed vs model inference. */}
       <div className="flex flex-wrap gap-1.5">
-        {d.fields.present.map((f: string) => (
-          <OutcomeChip key={f} tone="ok">{f}</OutcomeChip>
+        {d.fields.provenance.map((p: { field: string; provenance: string }) => (
+          <FieldProvenanceChip key={p.field} field={p.field} provenance={p.provenance} />
         ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[9.5px] text-muted-foreground/60">
+        <span><span className="text-emerald-400">■</span> evidence-backed</span>
+        <span><span className="text-sky-400">■</span> scraped / derived</span>
+        <span><span className="text-teal-300">■</span> computed</span>
+        <span><span className="text-amber-300">■</span> estimated</span>
+        <span><span className="text-violet-300">■</span> model inference</span>
       </div>
       <div className="font-mono text-[10.5px] text-muted-foreground/60 mt-1.5">
         {d.fields.counts.keywords} keywords · {d.fields.counts.contentThemes} themes · {d.fields.counts.hashtags} hashtags ·{" "}
         {d.fields.counts.decodedSignals} decoded signals · {d.fields.counts.contentItems} content items ·{" "}
         {d.fields.counts.transcripts} transcripts · {d.fields.counts.temporalBuckets} temporal buckets
       </div>
+
+      {/* Evidence the model received (A7) */}
+      <SectionTitle icon={FileText}>Evidence the model received</SectionTitle>
+      <EvidenceSnapshotView observationId={d.observationId} />
     </div>
   );
 }
