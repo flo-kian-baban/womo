@@ -253,4 +253,56 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     expect(d.scrapes.consequences.some(c => /1 of 4 search queries failed/.test(c))).toBe(true);
     expect(d.scrapes.consequences.some(c => /^All /.test(c))).toBe(false);
   });
+
+  // ── Transcript-reliability session (C1): per-video transcript ATTEMPT records
+  // must not read as scrape-path failures — and REAL failures must still warn.
+  it("transcript-attempt rows don't trigger consequence warnings; real playwright failures still do", async () => {
+    const runId = newRunId();
+    let observationId = "";
+    await withAnalysisRun(runId, async () => {
+      // 12 subtitle-less browser attempt outcomes (the new per-attempt telemetry)
+      for (let i = 0; i < 12; i++) {
+        await db.insertScrapeEvent({
+          platform: "tiktok", scrapeMethod: "tiktok_playwright",
+          urlRequested: `https://www.tiktok.com/@x/video/v${i}#transcript=subtitle_browser:empty`,
+          failureReason: "transcript subtitle_browser: empty — navigated, no subtitles in page or XHR",
+          durationMs: 21000,
+        });
+      }
+      const result = await persistCreatorToV2({
+        handle: "attempt_rows_creator", platform: "TikTok", displayName: "Attempt Rows",
+        extracted: { archetype: "The Sage" }, researchData: { followerCount: 1000 },
+      });
+      if ("error" in result) throw new Error(result.error);
+      observationId = result.observationId;
+    });
+    const d1 = (await db.getRunDiagnostics(observationId))!;
+    // No false "profile scrape failed" warning, no false per-video-fetch warning,
+    // and the attempt rows don't count as failed scrapes.
+    expect(d1.scrapes.consequences.some(c => /profile scrape failed/i.test(c))).toBe(false);
+    expect(d1.scrapes.consequences.some(c => /per-video page fetches failed/i.test(c))).toBe(false);
+    expect(d1.scrapes.failed).toBe(0);
+    // The attempt records are still VISIBLE in the event list (that's the point).
+    const tiktok = d1.scrapes.byPlatform.find(p => p.platform === "tiktok")!;
+    expect(tiktok.events.filter(e => e.failureReason?.startsWith("transcript ")).length).toBe(12);
+
+    // Control: a REAL playwright failure (crash string, no prefix) still warns.
+    const runId2 = newRunId();
+    let obs2 = "";
+    await withAnalysisRun(runId2, async () => {
+      await db.insertScrapeEvent({
+        platform: "tiktok", scrapeMethod: "tiktok_playwright",
+        failureReason: "browserContext.newPage: Target page, context or browser has been closed",
+      });
+      const result = await persistCreatorToV2({
+        handle: "real_failure_creator", platform: "TikTok", displayName: "Real Failure",
+        extracted: { archetype: "The Sage" }, researchData: { followerCount: 1000 },
+      });
+      if ("error" in result) throw new Error(result.error);
+      obs2 = result.observationId;
+    });
+    const d2 = (await db.getRunDiagnostics(obs2))!;
+    expect(d2.scrapes.consequences.some(c => /profile scrape failed/i.test(c))).toBe(true);
+    expect(d2.scrapes.failed).toBe(1);
+  });
 });

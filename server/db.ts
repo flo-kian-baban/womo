@@ -1783,8 +1783,18 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   ]);
 
   // ── Scrapes per platform ──
+  // Transcript-reliability session: per-video transcript ATTEMPT records carry a
+  // "transcript "-prefixed failure_reason (e.g. `transcript subtitle_browser:
+  // empty`). They are outcome telemetry — "this video has no subtitles" — not
+  // scrape-path failures, so they must not count as failed scrapes or trigger
+  // the profile-scrape/per-video-fetch consequence warnings. ONLY that literal
+  // prefix is excluded: real playwright/http failures (crashes, blocks, HTTP
+  // errors) keep their raw reasons and still warn exactly as before.
+  const isTranscriptAttemptRecord = (e: { failureReason: string | null }) =>
+    Boolean(e.failureReason?.startsWith("transcript "));
   const isFailedScrape = (e: typeof scrapeRows[number]) =>
-    Boolean(e.failureReason) || Boolean(e.silentFailureDetected) || (e.httpStatus != null && e.httpStatus >= 400);
+    !isTranscriptAttemptRecord(e) &&
+    (Boolean(e.failureReason) || Boolean(e.silentFailureDetected) || (e.httpStatus != null && e.httpStatus >= 400));
   const platformMap = new Map<string, RunDiagnostics["scrapes"]["byPlatform"][number]>();
   for (const e of scrapeRows) {
     const key = e.platform ?? "unknown";
@@ -1814,6 +1824,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const failedMethods = new Set<string>();
   for (const p of byPlatform) {
     for (const e of p.events) {
+      if (isTranscriptAttemptRecord(e)) continue; // attempt outcomes, not path failures
       if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) failedMethods.add(e.method);
     }
   }
@@ -1829,6 +1840,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     for (const e of p.events) {
       if (e.method.includes("search")) {
         searchAttempts++;
+        if (isTranscriptAttemptRecord(e)) continue; // never emitted for search, but keep the rule uniform
         if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) searchFailed++;
       }
     }

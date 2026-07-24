@@ -29,6 +29,13 @@ import { fetchHtml, requestGovernor, recordScrapeEvent } from "./scraping/httpCl
 import { getContext, retireContext } from "./scraping/browserClient";
 import pLimit from "p-limit";
 import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
+import {
+  parseWebVTT,
+  defaultTranscriptStrategies,
+  fetchVideoTranscript,
+  createTranscriptPhase,
+  type TranscriptPhase,
+} from "./scraping/tiktok/transcriptStrategies";
 import { searchTikTokVideos } from "./scraping/tiktok/searchScraper";
 import { searchYouTube } from "./scraping/youtube/searchScraper";
 import { scrapeYouTubeChannelDetails, scrapeYouTubeChannelVideos } from "./scraping/youtube/channelScraper";
@@ -375,49 +382,22 @@ function formatNum(n: number): string {
 // and a pluggable proxy interface for Phase 3.
 
 // ─── WEBVTT Parser ────────────────────────────────────────────────────────────
-
-/**
- * Parse a WEBVTT subtitle file into plain text.
- * Removes timestamps, cue IDs, and the WEBVTT header.
- * Deduplicates consecutive identical lines (common in TikTok WEBVTT).
- */
-function parseWebVTT(vtt: string): string {
-  const lines = vtt.split("\n");
-  const textLines: string[] = [];
-  let lastLine = "";
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    // Skip: empty, WEBVTT header, timestamp lines (00:00:00.000 --> 00:00:02.000)
-    if (!line) continue;
-    if (line.startsWith("WEBVTT")) continue;
-    if (/^\d{2}:\d{2}/.test(line) && line.includes("-->")) continue;
-    // Skip pure numeric cue IDs
-    if (/^\d+$/.test(line)) continue;
-    // Skip HTML-like tags that sometimes appear
-    if (line.startsWith("<") && line.endsWith(">")) continue;
-
-    // Deduplicate consecutive identical lines
-    if (line !== lastLine) {
-      textLines.push(line);
-      lastLine = line;
-    }
-  }
-
-  return textLines.join(" ").replace(/\s+/g, " ").trim();
-}
+// parseWebVTT / downloadWebVTT / downloadAndParseSubtitle moved verbatim to
+// scraping/tiktok/transcriptStrategies.ts (transcript-reliability session) and
+// are imported at the top of this file where still needed.
 
 // ─── TikTok Transcript Fetcher — Multi-Path System ────────────────────────────
 
 /**
  * Multi-path transcript extraction for a single TikTok video.
  *
- * Path A: HTTP WEBVTT — fast path, fetch video page via HTTP, extract subtitleInfos
- * Path B+C: Playwright combined — single browser navigation, extract subtitleInfos
- *           via page.evaluate() AND intercept subtitle XHR requests simultaneously
- * Path E: Caption fallback — store the video caption as a minimal transcript
- *
- * Path D (Whisper via Playwright video URL) is deferred to Pass 2.
+ * Transcript-reliability session: the path bodies now live as named strategies in
+ * scraping/tiktok/transcriptStrategies.ts (subtitle_http = Path A,
+ * subtitle_browser = Path B+C as one unit, caption_fallback = Path E; a future
+ * STT path implements the same interface). This wrapper keeps the historical
+ * signature for callers and owns only the entry enrichment. Strategy order and
+ * effective behavior are identical to the pre-refactor multipath; every attempt
+ * now emits one scrape_event (the formerly-invisible browser stretch included).
  */
 async function fetchVideoTranscriptMultiPath(
   handle: string,
@@ -428,6 +408,8 @@ async function fetchVideoTranscriptMultiPath(
   metadata?: { musicTitle?: string; musicOriginal?: boolean; duetEnabled?: boolean; stitchEnabled?: boolean; durationMs?: number; collaborations?: string[] },
   /** Shared Playwright context — reused across the batch to avoid one browser tab per video */
   sharedCtx?: { context: Awaited<ReturnType<typeof getContext>>["context"]; page?: null },
+  /** Shared per-batch phase state (budgets + early-bail); a fresh unlimited phase when absent. */
+  phase?: TranscriptPhase,
 ): Promise<TranscriptEntry | null> {
   const videoUrl = `https://www.tiktok.com/@${handle}/video/${videoId}`;
 
@@ -439,237 +421,23 @@ async function fetchVideoTranscriptMultiPath(
     return entry;
   }
 
-  // ── PATH A: HTTP WEBVTT (fast path) ─────────────────────────────────────────
-  try {
-    const html = await fetchHtml(videoUrl, { extraHeaders: { Referer: "https://www.tiktok.com/" } });
-    const rehydrationMatch = html.match(
-      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/,
-    );
-    if (rehydrationMatch) {
-      const pageData = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
-      const defaultScope = (pageData?.["__DEFAULT_SCOPE__"] as Record<string, unknown>) ?? {};
-      const videoDetail = (defaultScope?.["webapp.video-detail"] as Record<string, unknown>) ?? {};
-      const itemStruct = (videoDetail?.itemInfo as Record<string, unknown>)?.itemStruct as Record<string, unknown> ?? {};
-      const videoObj = (itemStruct?.video as Record<string, unknown>) ?? {};
-      const subtitleInfos = (videoObj?.subtitleInfos as Array<Record<string, unknown>>) ?? [];
+  const hit = await fetchVideoTranscript(
+    { handle, videoId, videoUrl, caption, sharedContext: sharedCtx?.context },
+    defaultTranscriptStrategies(),
+    phase ?? createTranscriptPhase(),
+  );
 
-      console.log(`[transcript] ${videoId}: path-A attempted, subtitleInfos count: ${subtitleInfos.length}`);
-
-      if (subtitleInfos.length > 0) {
-        const transcript = await downloadAndParseSubtitle(subtitleInfos);
-        if (transcript) {
-          console.log(`[transcript] ${videoId}: path-A succeeded | ${transcript.wordCount} words`);
-          return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
-        }
-      }
-    } else {
-      console.log(`[transcript] ${videoId}: path-A no rehydration data`);
-    }
-  } catch (err) {
-    console.warn(`[transcript] ${videoId}: path-A failed: ${(err as Error).message}`);
-  }
-
-  // ── PATH B+C: Playwright combined (subtitle extraction + XHR interception) ──
-  try {
-    await requestGovernor("tiktok");
-
-    // Get a page from the shared context or create new
-    const ctx = sharedCtx ?? await getContext("desktop-chrome");
-    const page = await ctx.context.newPage();
-
-    try {
-      // Set up XHR interception for subtitle files BEFORE navigating
-      let capturedSubtitleText: string | null = null;
-      let subtitleCaptured = false;
-
-      await page.route(/\.(vtt|webvtt)(\?|$)|subtitle|subtitles/i, async (route) => {
-        try {
-          const url = route.request().url();
-          // Only intercept from TikTok CDN domains
-          if (url.includes("tiktokcdn.com") || url.includes("tiktokv.com") || url.includes("musical.ly") || url.includes("byteicdn.com") || url.includes("ibytedtos.com")) {
-            const response = await route.fetch();
-            const body = await response.text();
-            if (body && (body.includes("WEBVTT") || body.includes("-->")) && body.length > 20) {
-              capturedSubtitleText = body;
-              subtitleCaptured = true;
-              console.log(`[transcript] ${videoId}: path-C XHR intercepted subtitle (${body.length} bytes)`);
-            }
-            await route.fulfill({ response });
-          } else {
-            await route.continue();
-          }
-        } catch {
-          await route.continue().catch(() => { });
-        }
-      });
-
-      // Navigate to the video page
-      await page.goto(videoUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {
-        // networkidle may time out — page can still be usable
-      });
-
-      // Wait a moment for any subtitle XHR to complete
-      await page.waitForTimeout(2000);
-
-      // PATH B: Extract subtitleInfos via page.evaluate()
-      const subtitleUrls = await page.evaluate(() => {
-        try {
-          // Try reading from window object first
-          const win = window as any;
-          let rehydrationData = win.__UNIVERSAL_DATA_FOR_REHYDRATION__;
-
-          // Fallback: parse from script tag
-          if (!rehydrationData) {
-            const scriptEl = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
-            if (scriptEl?.textContent) {
-              rehydrationData = JSON.parse(scriptEl.textContent);
-            }
-          }
-
-          if (!rehydrationData) return [];
-
-          const scope = rehydrationData?.__DEFAULT_SCOPE__ ?? {};
-          const videoDetail = scope?.["webapp.video-detail"] ?? {};
-          const itemStruct = videoDetail?.itemInfo?.itemStruct ?? {};
-          const video = itemStruct?.video ?? {};
-          const subtitleInfos = video?.subtitleInfos ?? [];
-
-          if (!Array.isArray(subtitleInfos) || subtitleInfos.length === 0) return [];
-
-          // Return URLs, preferring English
-          return subtitleInfos.map((s: any) => ({
-            url: s?.Url ?? s?.url ?? "",
-            lang: s?.LanguageCodeName ?? s?.languageCodeName ?? "",
-            format: s?.Format ?? s?.format ?? "",
-          }));
-        } catch {
-          return [];
-        }
-      }) as Array<{ url: string; lang: string; format: string }>;
-
-      console.log(`[transcript] ${videoId}: path-B page.evaluate() found ${subtitleUrls.length} subtitles`);
-
-      // Try to download WEBVTT from the URLs found by page.evaluate()
-      if (subtitleUrls.length > 0) {
-        // Prefer English
-        const engSub = subtitleUrls.find(s => s.lang.startsWith("eng")) ?? subtitleUrls[0];
-        if (engSub.url) {
-          const transcript = await downloadWebVTT(engSub.url);
-          if (transcript) {
-            console.log(`[transcript] ${videoId}: path-B succeeded | ${transcript.wordCount} words`);
-            await page.close().catch(() => { });
-            return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
-          }
-        }
-      }
-
-      // PATH C: Check if XHR interception captured a subtitle file
-      // Wait a bit more for any late subtitle XHR
-      if (!subtitleCaptured) {
-        await page.waitForTimeout(2000);
-      }
-
-      if (capturedSubtitleText) {
-        const transcript = parseWebVTT(capturedSubtitleText);
-        if (transcript && transcript.length >= 10) {
-          const wordCount = transcript.split(/\s+/).length;
-          console.log(`[transcript] ${videoId}: path-C succeeded | ${wordCount} words`);
-          await page.close().catch(() => { });
-          return enrichEntry({ videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
-        }
-      }
-
-      console.log(`[transcript] ${videoId}: path-BC failed, no subtitles available`);
-      await page.close().catch(() => { });
-    } catch (innerErr) {
-      console.warn(`[transcript] ${videoId}: path-BC inner error: ${(innerErr as Error).message}`);
-      await page.close().catch(() => { });
-    }
-  } catch (err) {
-    console.warn(`[transcript] ${videoId}: path-BC failed: ${(err as Error).message}`);
-  }
-
-  // ── PATH E: Caption fallback — only use if caption has real content ──────────
-  // Require >= 8 real words (not hashtags/mentions) to prevent thin data pollution
-  if (caption && caption.trim().length >= 10) {
-    const words = caption.trim().split(/\s+/);
-    const hashtagCount = words.filter(w => w.startsWith('#') || w.startsWith('@')).length;
-    const realWordCount = words.length - hashtagCount;
-
-    if (realWordCount >= 8) {
-      console.log(`[transcript] ${videoId}: path-E caption fallback | ${realWordCount} real words (${hashtagCount} hashtags filtered)`);
-      return enrichEntry({ videoId, videoUrl, caption, transcript: caption.trim(), wordCount: words.length, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.postCaption });
-    } else {
-      console.log(`[transcript] ${videoId}: path-E rejected — caption too thin: ${realWordCount} real words, ${hashtagCount} hashtags`);
-    }
-  }
-
-  console.log(`[transcript] ${videoId}: all paths exhausted (caption: ${caption?.length ?? 0} chars)`);
-  return null;
-}
-
-/**
- * Download and parse a WEBVTT subtitle from a list of subtitleInfos.
- * Prefers English; falls back to first available.
- */
-async function downloadAndParseSubtitle(
-  subtitleInfos: Array<Record<string, unknown>>,
-): Promise<{ transcript: string; wordCount: number } | null> {
-  // Prefer English subtitle; fall back to first available
-  const engSub = subtitleInfos.find(
-    (s) => (s?.LanguageCodeName as string)?.startsWith("eng"),
-  ) ?? subtitleInfos[0];
-
-  const subtitleUrl = engSub?.Url as string;
-  if (!subtitleUrl) return null;
-
-  const transcript = await downloadWebVTT(subtitleUrl);
-  return transcript;
-}
-
-/**
- * Download a WEBVTT file and parse to plain text.
- */
-async function downloadWebVTT(url: string): Promise<{ transcript: string; wordCount: number } | null> {
-  const dlStart = Date.now();
-  try {
-    const { default: axios } = await import("axios");
-    const subResponse = await axios.get(url, {
-      headers: {
-        "Referer": "https://www.tiktok.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
-      timeout: 10000,
-      responseType: "text",
-    });
-
-    const vttText = subResponse.data as string;
-    const transcript = parseWebVTT(vttText);
-
-    // Session 7 telemetry: subtitle downloads bypass fetchHtml (axios) — record
-    // each attempt. Enum has no subtitle-specific method; tiktok_desktop_http
-    // is the closest honest label (plain HTTP GET); the URL discloses the target.
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
-      httpStatus: subResponse.status, responseSizeBytes: vttText?.length,
-      durationMs: Date.now() - dlStart,
-      failureReason: !transcript || transcript.length < 10 ? "WEBVTT downloaded but parsed to empty/too-short transcript" : undefined,
-    });
-
-    if (!transcript || transcript.length < 10) return null;
-
-    const wordCount = transcript.split(/\s+/).length;
-    return { transcript, wordCount };
-  } catch (err) {
-    console.warn(`[transcript] WEBVTT download failed: ${(err as Error).message}`);
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
-      httpStatus: (err as { response?: { status?: number } }).response?.status,
-      failureReason: (err as Error).message.slice(0, 500),
-      durationMs: Date.now() - dlStart,
-    });
+  if (!hit) {
+    console.log(`[transcript] ${videoId}: all paths exhausted (caption: ${caption?.length ?? 0} chars)`);
     return null;
   }
+
+  const t = hit.result.transcript;
+  return enrichEntry({
+    videoId, videoUrl, caption,
+    transcript: t.text, wordCount: t.wordCount,
+    bucket, createTime, transcriptSource: t.source,
+  });
 }
 
 /**
@@ -1127,6 +895,10 @@ async function fetchTikTokTranscripts(
 
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
   const transcriptLimit = pLimit(3);
+  // One shared phase for the whole batch: budgets + early-bail state common to
+  // the pLimit(3) workers. Structure commit: created without limits (inactive —
+  // identical behavior); the budget commit passes the approved caps here.
+  const transcriptPhase = createTranscriptPhase();
   // Acquire a shared Playwright context for all videos in this batch
   let sharedCtx: Awaited<ReturnType<typeof getContext>> | null = null;
   try {
@@ -1148,7 +920,7 @@ async function fetchTikTokTranscripts(
           stitchEnabled: item.stitchEnabled,
           durationMs: item.durationMs,
           collaborations: collaborations.length > 0 ? collaborations : undefined,
-        }, sharedCtx ? { context: sharedCtx.context } : undefined);
+        }, sharedCtx ? { context: sharedCtx.context } : undefined, transcriptPhase);
       } catch (err) {
         console.warn(`[transcript] ${item.id}: unexpected error: ${(err as Error).message}`);
         return null;
