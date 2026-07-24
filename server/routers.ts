@@ -332,7 +332,7 @@ export async function persistCreatorToV2(params: {
         : () => insertDecodedSignals(subjectId, observationId, decodedRows));
 
     // 7. insertContentItems (discoveredVideoPool with engagement stats)
-    type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string };
+    type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string; temporalBucket?: string };
     const rawPool = researchData.discoveredVideoPoolJson as PoolVideo[] ?? [];
     console.log(`[persist] discoveredVideoPool received: ${rawPool.length} videos`);
     const contentRows = rawPool.map(v => ({
@@ -353,6 +353,11 @@ export async function persistCreatorToV2(params: {
       transcriptText: v.transcriptText,
       transcriptSource: v.transcriptSource,
       transcriptWordCount: v.transcriptWordCount,
+      // C3: 6-3-3 sample membership persists at INSERT time for all sampled
+      // videos — previously the bucket only landed via a successful transcript
+      // (updateContentItemTranscript), so subtitle-less creators lost their
+      // longitudinal structure. status semantics unchanged (transcript-derived).
+      temporalBucket: v.temporalBucket,
       status: v.transcriptText ? "sampled" : "discovered",
     }));
     await runEnrichment(persistence, "content_items",
@@ -950,7 +955,7 @@ export const appRouter = router({
               sociologicalFieldsComputed?: boolean;
               foreignVideosRejected?: number;
               longitudinalSampleJson?: Record<string, unknown>;
-              discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
+              discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; temporalBucket?: "recent" | "mid" | "anchor" }>;
               transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
             } = {
               followerCount: research.followerCount || undefined,

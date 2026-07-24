@@ -125,6 +125,8 @@ export interface CreatorResearchResult {
     views: number; likes: number; comments: number; saves: number; shares: number;
     musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
     durationSec: number;
+    /** C3: 6-3-3 sample membership, set for all 12 sampled videos regardless of transcript success. */
+    temporalBucket?: "recent" | "mid" | "anchor";
   }>;
 }
 
@@ -595,6 +597,8 @@ async function fetchTikTokTranscripts(
     views: number; likes: number; comments: number; saves: number; shares: number;
     musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
     durationSec: number;
+    /** C3: 6-3-3 sample membership, independent of transcript success. */
+    temporalBucket?: "recent" | "mid" | "anchor";
   }>;
   /** Session 10: count of foreign / author-less videos rejected by the guard. */
   foreignVideosRejected: number;
@@ -1047,6 +1051,13 @@ async function fetchTikTokTranscripts(
     ...longitudinalMid.map(t => t.videoId),
     ...longitudinalAnchor.map(t => t.videoId),
   ]);
+  // Transcript-reliability session (C3): persist 6-3-3 SAMPLE MEMBERSHIP
+  // independently of transcript success. sampledVideos is the true selection
+  // (12 videos with buckets); the old path only stamped temporal_bucket via
+  // successful transcripts, so a subtitle-less creator lost its longitudinal
+  // structure entirely. alreadySampled keeps its historical (transcript-derived)
+  // meaning — this adds evidence, it does not re-label the UI.
+  const sampledBucketById = new Map(sampledVideos.map(sv => [sv.item.id, sv.bucket]));
   const discoveredVideoPool = videoItems
     .sort((a, b) => b.createTime - a.createTime)
     .map(v => ({
@@ -1067,6 +1078,7 @@ async function fetchTikTokTranscripts(
       musicArtist: v.musicArtist || undefined,
       durationSec: Math.round(v.durationMs / 1000),
       alreadySampled: sampledIds.has(v.id),
+      temporalBucket: sampledBucketById.get(v.id),
     }));
 
   return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected };

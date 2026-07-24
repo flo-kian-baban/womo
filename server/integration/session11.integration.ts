@@ -97,6 +97,45 @@ suite("run-outcome telemetry (ephemeral Postgres)", () => {
     expect((await readRun(runId))!.status).toBe("min_data_rejection");
   });
 
+  // Transcript-reliability session (C3): 6-3-3 sample membership persists
+  // independently of transcript success — a subtitle-less creator keeps its
+  // longitudinal structure (temporal_bucket) even with zero transcripts.
+  it("persists temporal_bucket for sampled-but-transcriptless videos", async () => {
+    const { persistCreatorToV2 } = await import("../routers");
+    const result = await persistCreatorToV2({
+      handle: "bucket_creator", platform: "TikTok", displayName: "Bucket Creator",
+      extracted: { archetype: "The Sage" },
+      researchData: {
+        followerCount: 500,
+        discoveredVideoPoolJson: [
+          // sampled, transcript SUCCEEDED (the old path already covered this)
+          { id: "vt1", url: "https://t/1", caption: "spoken one", createTime: 1700000000, views: 10, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 30, temporalBucket: "recent", transcriptText: "real words here", transcriptSource: "subtitle", transcriptWordCount: 3 },
+          // sampled, transcript FAILED — the bucket must still persist (the C3 fix)
+          { id: "vt2", url: "https://t/2", caption: "", createTime: 1690000000, views: 20, likes: 2, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 25, temporalBucket: "mid" },
+          // not sampled — no bucket
+          { id: "vt3", url: "https://t/3", caption: "", createTime: 1680000000, views: 30, likes: 3, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 20 },
+        ] as never,
+      },
+    });
+    if ("error" in result) throw new Error(result.error);
+
+    const c = new Client({ connectionString: TEST_URL });
+    await c.connect();
+    const rows = await c.query(
+      "select platform_video_id id, temporal_bucket, status, transcript_text from content_items where observation_id = $1 order by platform_video_id",
+      [result.observationId],
+    );
+    await c.end();
+    type CiRow = { id: string; temporal_bucket: string | null; status: string; transcript_text: string | null };
+    const byId = Object.fromEntries((rows.rows as CiRow[]).map((r) => [r.id, r]));
+    expect(byId.vt1.temporal_bucket).toBe("recent");
+    expect(byId.vt1.status).toBe("sampled");            // transcript-bearing, unchanged semantics
+    expect(byId.vt2.temporal_bucket).toBe("mid");        // ← the fix: bucket without transcript
+    expect(byId.vt2.status).toBe("discovered");          // status semantics untouched
+    expect(byId.vt2.transcript_text).toBeNull();
+    expect(byId.vt3.temporal_bucket).toBeNull();         // unsampled videos stay bucket-less
+  });
+
   // Stability session (Part 1): the analyze mutation attaches a per-run memory
   // summary to EVERY terminal write — including clean successes — so the
   // --single-process before/after comparison is queryable from pipeline_runs.
