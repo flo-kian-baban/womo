@@ -61,16 +61,34 @@ export interface TikTokSearchItem {
 
 // ─── Primary: Playwright XHR Interception ─────────────────────────────────────
 
-async function searchViaPlaywright(keyword: string): Promise<TikTokSearchResponse | null> {
-  let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+async function searchViaPlaywright(
+  keyword: string,
+  sharedContext?: import("playwright").BrowserContext,
+): Promise<TikTokSearchResponse | null> {
+  // Session 11 (Commit 2): when the caller runs the query batch concurrently it
+  // hands in ONE dedicated context shared across the queries. We open a fresh page
+  // on it and NEVER retire it here — closing a shared context would break sibling
+  // queries mid-flight (the retire race). The caller closes it once when the batch
+  // is done. Without a shared context we own one from the pool, exactly as before.
+  let ownedCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+  let sharedPage: import("playwright").Page | undefined;
   const scrapeStart = Date.now();
   const searchUrlForLog = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
   let navStatus: number | undefined;
 
   try {
     await requestGovernor("tiktok");
-    ctx = await getContext("desktop-chrome");
-    const { page, context } = ctx;
+    let page: import("playwright").Page;
+    let context: import("playwright").BrowserContext;
+    if (sharedContext) {
+      context = sharedContext;
+      page = await sharedContext.newPage();
+      sharedPage = page;
+    } else {
+      ownedCtx = await getContext("desktop-chrome");
+      page = ownedCtx.page;
+      context = ownedCtx.context;
+    }
 
     // Session warming: visit homepage first
     await warmSession(page, "https://www.tiktok.com/", 2000, 4000);
@@ -168,7 +186,8 @@ async function searchViaPlaywright(keyword: string): Promise<TikTokSearchRespons
       failureReason: "no results via XHR interception or HTML parse",
       durationMs: Date.now() - scrapeStart,
     });
-    await retireContext(context);
+    // Only retire a context we own; a shared context is the caller's to close.
+    if (ownedCtx) { await retireContext(context); } else { await page.close().catch(() => {}); }
     return { item_list: [], has_more: false };
   } catch (err) {
     console.warn(`[searchScraper] Playwright search failed for "${keyword}":`, (err as Error).message);
@@ -177,8 +196,11 @@ async function searchViaPlaywright(keyword: string): Promise<TikTokSearchRespons
       httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
       durationMs: Date.now() - scrapeStart,
     });
-    if (ctx) {
-      try { await ctx.page.close(); } catch { /* ignore */ }
+    // Close only the page we opened; never retire a shared context on error.
+    if (ownedCtx) {
+      try { await ownedCtx.page.close(); } catch { /* ignore */ }
+    } else if (sharedPage) {
+      try { await sharedPage.close(); } catch { /* ignore */ }
     }
     return null;
   }
@@ -306,8 +328,9 @@ function normalizeSearchItems(rawItems: unknown[]): TikTokSearchItem[] {
 export async function searchTikTokVideos(
   keyword: string,
   _options?: { cursor?: number; searchId?: string },
+  sharedContext?: import("playwright").BrowserContext,
 ): Promise<TikTokSearchResponse> {
-  const result = await searchViaPlaywright(keyword);
+  const result = await searchViaPlaywright(keyword, sharedContext);
 
   if (result) {
     return result;

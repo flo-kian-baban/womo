@@ -892,13 +892,48 @@ async function fetchTikTokTranscripts(
       `@${noDot}`,     // @kayleenhi
     ];
 
-    for (const q of queries) {
-      try {
-        const result = await searchTikTokVideos(q) as unknown as Record<string, unknown>;
+    // Session 11 (Commit 2): the 4 handle-variant search queries used to run
+    // strictly sequentially (~65s — each is a full Playwright search: warm + nav +
+    // scroll + XHR capture). Fetch them with bounded concurrency (2 at a time) over
+    // ONE dedicated shared context, then MERGE sequentially in query order so the
+    // author guard + dedup stay byte-identical to the old path. Bounded at 2 (not
+    // 4) to respect the tiktok request governor's human-pattern spacing and cap
+    // simultaneous hits; the single shared context avoids the retire race (Part 0.2).
+    const searchLimit = pLimit(2);
+    let searchCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+    try {
+      searchCtx = await getContext("desktop-chrome");
+    } catch (err) {
+      console.warn(`[webResearch] @${handle}: could not acquire shared search context (queries will self-manage):`, (err as Error).message);
+    }
 
-        const items = (result?.item_list as unknown[]) ?? [];
-        console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
+    const rawSearchResults = await Promise.all(
+      queries.map((q) =>
+        searchLimit(async () => {
+          try {
+            const result = await searchTikTokVideos(q, undefined, searchCtx?.context) as unknown as Record<string, unknown>;
+            const items = (result?.item_list as unknown[]) ?? [];
+            console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
+            return { q, items, error: null as unknown };
+          } catch (err) {
+            return { q, items: [] as unknown[], error: err as unknown };
+          }
+        })
+      )
+    );
 
+    // The shared search context is done — close it once (never per-query).
+    if (searchCtx) {
+      try { await retireContext(searchCtx.context); } catch { /* ignore */ }
+    }
+
+    // Sequential merge in query order — identical processing to the old loop.
+    for (const { q, items, error } of rawSearchResults) {
+      if (error) {
+        if (isQuotaErr(error)) searchQuotaExhausted = true;
+        console.warn(`[webResearch] TikTok search "${q}" (supplemental) failed:`, error);
+        continue;
+      }
         for (const item of items) {
           const v = item as Record<string, unknown>;
 
@@ -973,10 +1008,6 @@ async function fetchTikTokTranscripts(
             duetEnabled, stitchEnabled, isAd, durationMs,
           });
         }
-      } catch (err) {
-        if (isQuotaErr(err)) searchQuotaExhausted = true;
-        console.warn(`[webResearch] TikTok search "${q}" (supplemental) failed:`, err);
-      }
     }
   }
 
