@@ -939,7 +939,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                 <MetricTooltip
                   title="Followers — Unverified"
                   explanation="TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data (typically a very small number) rather than the real follower count."
-                  whyItMatters="This value should not be used for reach calculations. Use Total Views and Avg Views instead, which are computed from real per-video data and are accurate."
+                  whyItMatters="Don't use this for reach. Total Views / Avg Views are computed from the captured per-video data — a SAMPLE of the channel (see coverage in Run diagnostics) — so treat them as scrape-derived, not independently verified."
                   dataPoints={["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"]}
                   side="top"
                 />
@@ -956,7 +956,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                 <MetricTooltip
                   title="Total Likes — Unverified"
                   explanation="TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data rather than the real total likes count."
-                  whyItMatters="This value should not be used for engagement calculations. Use the per-video Engagement Rate instead, which is computed from real video-level data."
+                  whyItMatters="Don't use this for engagement. The Engagement Rate is computed from the captured per-video data — as reliable as the scrape, over a sample of the channel, and not independently verified."
                   dataPoints={["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"]}
                   side="top"
                 />
@@ -966,21 +966,37 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             </div>
           )}
           {(profile.totalViews ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Play className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Total Views</span>
+                <MetricTooltip
+                  title="Total Views — Derived"
+                  explanation="Summed from the per-video view counts we captured — a SAMPLE of the channel (see coverage in Run diagnostics), not an independently verified channel total."
+                  whyItMatters="As reliable as the scrape it came from, and it reflects the captured subset of videos, not the whole channel."
+                  dataPoints={["Sum of scraped per-video view counts", "Captured subset only — not the full channel"]}
+                  side="top"
+                />
               </div>
               <div className="text-base font-semibold text-foreground">{formatNum(profile.totalViews!)}</div>
+              <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
           {(profile.avgViews ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <TrendingUp className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Avg Views</span>
+                <MetricTooltip
+                  title="Avg Views — Derived"
+                  explanation="Average of the per-video view counts we captured. Computed over the captured SUBSET of videos (often a small % of the channel), so a few viral clips can skew it."
+                  whyItMatters="As reliable as the scrape it came from, and biased toward whichever videos were captured — not a channel-wide average."
+                  dataPoints={["Mean of scraped per-video view counts", "Captured subset only — see coverage"]}
+                  side="top"
+                />
               </div>
               <div className="text-base font-semibold text-foreground">{formatNum(profile.avgViews!)}</div>
+              <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
           {(profile.videoCount ?? 0) > 0 && (
@@ -1001,12 +1017,20 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             </div>
           )}
           {(profile.engagementRate ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <TrendingUp className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Engagement</span>
+                <MetricTooltip
+                  title="Engagement Rate — Derived"
+                  explanation="Computed from the per-video like/comment counts we captured (likes+comments ÷ plays, averaged over the captured videos). It is derived from scraped, bot-restricted data over a sample of the channel."
+                  whyItMatters="As reliable as the scrape it came from, and computed over the captured subset — not independently verified and not a channel-wide figure."
+                  dataPoints={["Averaged from scraped per-video like/comment/play counts", "Captured subset only — see coverage"]}
+                  side="top"
+                />
               </div>
               <div className="text-base font-semibold text-foreground">{profile.engagementRate!.toFixed(1)}%</div>
+              <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
         </div>
