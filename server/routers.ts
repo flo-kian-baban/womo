@@ -32,6 +32,7 @@ import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES 
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
+import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
@@ -368,7 +369,7 @@ export async function persistCreatorToV2(params: {
               if (t.videoId && t.transcript) {
                 const updated = await updateContentItemTranscript(
                   subjectId, t.videoId, platform,
-                  t.transcript, t.transcriptSource ?? "captions", t.wordCount,
+                  t.transcript, t.transcriptSource ?? TRANSCRIPT_SOURCE.subtitle, t.wordCount,
                   // Session 8: carry the 6-3-3 bucket onto content_items.temporal_bucket
                   t.bucket ?? null,
                 );
@@ -1277,7 +1278,10 @@ export const appRouter = router({
             caption: input.caption,
             transcriptText: transcript.transcript,
             transcriptWordCount: transcript.wordCount,
-            transcriptSource: "whisper",
+            // Session 9: use the transcript's actual source (fetchSingleTikTokTranscript
+            // returns a WEBVTT subtitle or a post-caption fallback) instead of the
+            // hardcoded "whisper" that never reflected reality.
+            transcriptSource: transcript.transcriptSource ?? TRANSCRIPT_SOURCE.subtitle,
             status: "transcribed",
           }]);
         } catch (err) {

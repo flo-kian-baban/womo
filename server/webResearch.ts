@@ -44,6 +44,7 @@ import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type Audienc
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent } from "./db";
+import { TRANSCRIPT_SOURCE, isSpeechTranscript } from "@shared/transcriptSource";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export interface TranscriptEntry {
   wordCount: number;
   bucket?: "recent" | "mid" | "anchor"; // 6-3-3 temporal bucket
   createTime?: number;   // Unix timestamp (seconds)
-  transcriptSource?: "captions" | "whisper" | "playwright-webvtt" | "playwright-xhr" | "caption"; // how transcript was obtained
+  transcriptSource?: string; // normalized via @shared/transcriptSource (subtitle | speech_to_text | post_caption)
   // Phase 1.6 metadata
   musicMetadata?: { soundName?: string; isOriginal?: boolean; isTrending?: boolean; niche?: "niche" | "mainstream" | "unknown" };
   remixMetadata?: { duetCount?: number; stitchCount?: number; remixTotal?: number };
@@ -408,7 +409,7 @@ async function fetchVideoTranscriptMultiPath(
         const transcript = await downloadAndParseSubtitle(subtitleInfos);
         if (transcript) {
           console.log(`[transcript] ${videoId}: path-A succeeded | ${transcript.wordCount} words`);
-          return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: "captions" as const });
+          return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
         }
       }
     } else {
@@ -507,7 +508,7 @@ async function fetchVideoTranscriptMultiPath(
           if (transcript) {
             console.log(`[transcript] ${videoId}: path-B succeeded | ${transcript.wordCount} words`);
             await page.close().catch(() => { });
-            return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: "playwright-webvtt" as const });
+            return enrichEntry({ ...transcript, videoId, videoUrl, caption, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
           }
         }
       }
@@ -524,7 +525,7 @@ async function fetchVideoTranscriptMultiPath(
           const wordCount = transcript.split(/\s+/).length;
           console.log(`[transcript] ${videoId}: path-C succeeded | ${wordCount} words`);
           await page.close().catch(() => { });
-          return enrichEntry({ videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: "playwright-xhr" as const });
+          return enrichEntry({ videoId, videoUrl, caption, transcript, wordCount, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.subtitle });
         }
       }
 
@@ -547,7 +548,7 @@ async function fetchVideoTranscriptMultiPath(
 
     if (realWordCount >= 8) {
       console.log(`[transcript] ${videoId}: path-E caption fallback | ${realWordCount} real words (${hashtagCount} hashtags filtered)`);
-      return enrichEntry({ videoId, videoUrl, caption, transcript: caption.trim(), wordCount: words.length, bucket, createTime, transcriptSource: "caption" as const });
+      return enrichEntry({ videoId, videoUrl, caption, transcript: caption.trim(), wordCount: words.length, bucket, createTime, transcriptSource: TRANSCRIPT_SOURCE.postCaption });
     } else {
       console.log(`[transcript] ${videoId}: path-E rejected — caption too thin: ${realWordCount} real words, ${hashtagCount} hashtags`);
     }
@@ -1304,7 +1305,7 @@ async function fetchYouTubeVideoTranscript(
     const wordCount = transcript.split(/\s+/).length;
     console.log(`[webResearch] ✅ YouTube transcript for ${videoId}: ${wordCount} words`);
 
-    return { videoId, videoUrl, caption: title, transcript, wordCount };
+    return { videoId, videoUrl, caption: title, transcript, wordCount, transcriptSource: TRANSCRIPT_SOURCE.subtitle };
   } catch (err) {
     console.warn(`[webResearch] YouTube transcript fetch failed for ${videoId}:`, (err as Error).message);
     return null;
@@ -1815,7 +1816,11 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // ── Minimum data threshold — prevent LLM from hallucinating on thin data ──
   // If we have fewer than 2 real transcripts AND fewer than 4 video titles,
   // the data is too thin for a reliable cultural analysis.
-  const realTranscripts = transcripts.filter(t => t.transcriptSource !== "caption");
+  // "real" = speech-derived (subtitle/audio); the post-caption fallback is
+  // excluded — identical set to the historical `!== "caption"` gate. This does
+  // NOT change what counts as evidence (Jason's ruling), only how the source is
+  // classified. See @shared/transcriptSource.
+  const realTranscripts = transcripts.filter(t => isSpeechTranscript(t.transcriptSource));
   const totalVideoPool = discoveredVideoPool?.length ?? 0;
   console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
 
@@ -2035,6 +2040,7 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
                   caption: reel.caption.slice(0, 100),
                   transcript: result.text.trim(),
                   wordCount,
+                  transcriptSource: TRANSCRIPT_SOURCE.speechToText, // Gemini/Whisper audio = speech
                 } as TranscriptEntry;
               } else {
                 const errDetail = result && "error" in result
@@ -2160,7 +2166,7 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
     if (poolItem) {
       poolItem.transcriptText = t.transcript;
       poolItem.transcriptWordCount = t.wordCount;
-      poolItem.transcriptSource = "gemini-2.5-flash";
+      poolItem.transcriptSource = TRANSCRIPT_SOURCE.speechToText;
       mergedCount++;
       console.log(`[webResearch] Merged transcript into pool: ${t.videoId} (${t.wordCount} words)`);
     } else {
@@ -2984,7 +2990,7 @@ export async function fetchSingleTikTokTranscript(
           if (transcript && transcript.length >= 10) {
             const wordCount = transcript.split(/\s+/).length;
             console.log(`[webResearch] ✅ Fresh subtitle transcript for supplemental video ${videoId}: ${wordCount} words`);
-            return { videoId, videoUrl, caption, transcript, wordCount };
+            return { videoId, videoUrl, caption, transcript, wordCount, transcriptSource: TRANSCRIPT_SOURCE.subtitle };
           }
         }
       }
@@ -2997,7 +3003,7 @@ export async function fetchSingleTikTokTranscript(
   if (caption && caption.trim().length >= 10) {
     const wordCount = caption.trim().split(/\s+/).length;
     console.log(`[webResearch] Supplemental video ${videoId}: caption fallback | ${wordCount} words`);
-    return { videoId, videoUrl, caption, transcript: caption.trim(), wordCount, transcriptSource: "caption" as const };
+    return { videoId, videoUrl, caption, transcript: caption.trim(), wordCount, transcriptSource: TRANSCRIPT_SOURCE.postCaption };
   }
 
   console.log(`[webResearch] Supplemental video ${videoId}: no captions available`);
