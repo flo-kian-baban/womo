@@ -163,8 +163,9 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     expect(prov["barthesMyth"]).toBe("inferred");
     expect(prov["followerCount"]).toBe("scraped");
 
-    // A3 scrape consequence derived from the failed search method.
-    expect(d.scrapes.consequences.some(c => /Search-based/.test(c))).toBe(true);
+    // A3 scrape consequence derived from the failed search method (1 attempt, 1
+    // failed → "All 1 search query failed …"). Session 10: proportionate wording.
+    expect(d.scrapes.consequences.some(c => /search quer(?:y|ies) failed/.test(c))).toBe(true);
 
     // A9 temperature recorded + surfaced.
     const ext = d.llm.settings.find(s => s.purpose === "creator_profile_extraction");
@@ -228,5 +229,28 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     if ("error" in res) throw new Error(res.error);
     expect(res.persistence.avg_video_duration.status).toBe("skipped_not_attempted");
     expect(res.persistence.avg_video_duration.reason).toMatch(/capture gap/);
+  });
+
+  // ── Session 10 (3b): proportionate search consequence ───────────────────────
+  it("reports search failures proportionately — a partial failure is a fact, not an alarm", async () => {
+    const runId = newRunId();
+    let observationId = "";
+    await withAnalysisRun(runId, async () => {
+      // anatoly's real pattern: 3 of 4 search queries succeeded, 1 crashed.
+      for (let i = 0; i < 3; i++) {
+        await db.insertScrapeEvent({ platform: "tiktok", scrapeMethod: "tiktok_search_xhr", httpStatus: 200, silentFailureDetected: false });
+      }
+      await db.insertScrapeEvent({ platform: "tiktok", scrapeMethod: "tiktok_search_xhr", failureReason: "browserContext.newPage: Target page, context or browser has been closed" });
+      const result = await persistCreatorToV2({
+        handle: "partial_creator", platform: "TikTok", displayName: "Partial Creator",
+        extracted: { archetype: "The Sage" }, researchData: { followerCount: 1000 },
+      });
+      if ("error" in result) throw new Error(result.error);
+      observationId = result.observationId;
+    });
+    const d = (await db.getRunDiagnostics(observationId))!;
+    // Factual "1 of 4", NOT the alarming "All … failed / pool limited".
+    expect(d.scrapes.consequences.some(c => /1 of 4 search queries failed/.test(c))).toBe(true);
+    expect(d.scrapes.consequences.some(c => /^All /.test(c))).toBe(false);
   });
 });

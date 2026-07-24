@@ -267,11 +267,14 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           )}
         </div>
         <div className="text-muted-foreground/80">
-          ↳ {d.videos.withTranscript} with transcript, {d.videos.withoutTranscript} metadata-only
+          {/* Session 10 (3a): the source breakdown attaches to the WITH-transcript
+              group it describes — no longer trailing after "metadata-only". */}
+          ↳ {d.videos.withTranscript} with transcript
           {d.videos.withTranscript > 0 && Object.keys(d.videos.transcriptSources).length > 0 &&
             ` (${Object.entries(d.videos.transcriptSources)
               .map(([src, n]) => `${n as number}× ${classifyTranscriptSource(src).label}`)
               .join(", ")})`}
+          {`, ${d.videos.withoutTranscript} metadata-only`}
         </div>
         {d.videos.coveragePct != null && d.videos.coveragePct < 100 && (
           <div className="text-amber-300/70 text-[10.5px]">

@@ -39,21 +39,28 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
-// In production (Vercel), set VITE_API_URL to the Railway backend URL,
-// e.g. https://your-backend.up.railway.app
-// In development, requests go to the same origin (localhost).
+// A split deployment (frontend on Vercel/Netlify, backend on Railway) needs
+// VITE_API_URL pointing at the backend. A same-origin deployment (Railway
+// serving both) needs nothing — the window.location.origin fallback is correct.
 const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
 const trpcUrl = `${apiBase}/api/trpc`;
 
-// Warn in production if VITE_API_URL is not set.
-// Without it, all tRPC calls target the Vercel origin which has no /api/trpc
-// route — every API call will fail silently with a 404.
-if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+// Session 10 (3c): warn only on a REAL misconfiguration. The old check fired
+// whenever VITE_API_URL was unset in production — including on the Railway
+// same-origin deployment where the fallback is correct (a false alarm). Warn
+// only when the app is served from a frontend-only host that has no backend at
+// its own origin.
+const FRONTEND_ONLY_HOST = /(?:^|\.)(?:vercel\.app|netlify\.app|pages\.dev|github\.io)$/i;
+if (
+  import.meta.env.PROD &&
+  !import.meta.env.VITE_API_URL &&
+  typeof window !== "undefined" &&
+  FRONTEND_ONLY_HOST.test(window.location.hostname)
+) {
   console.warn(
-    "[trpc] VITE_API_URL is not set in production. " +
-    "All API calls will go to the Vercel origin and fail. " +
-    "Set VITE_API_URL to your Railway backend URL in Vercel project settings " +
-    "(e.g. https://your-app.up.railway.app)."
+    "[trpc] VITE_API_URL is not set but the app is served from a frontend-only host — " +
+    "API calls will hit this origin, which has no /api/trpc route. " +
+    "Set VITE_API_URL to your backend URL."
   );
 }
 

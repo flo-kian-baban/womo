@@ -1775,8 +1775,24 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   }
   const fm = Array.from(failedMethods);
   const scrapeConsequences: string[] = [];
-  if (fm.some(m => m.includes("search"))) {
-    scrapeConsequences.push("Search-based video discovery failed — the captured pool is limited to the primary profile/API page, so coverage and any view-based averages (engagement, avg views) reflect that subset, not the whole channel.");
+
+  // Session 10 (3b): search discovery is reported PROPORTIONATELY. Count how many
+  // search queries ran and how many failed. Only warn about pool limitation when
+  // discovery genuinely produced nothing (every query failed); a partial failure
+  // is stated as a fact, not an alarm.
+  let searchAttempts = 0, searchFailed = 0;
+  for (const p of byPlatform) {
+    for (const e of p.events) {
+      if (e.method.includes("search")) {
+        searchAttempts++;
+        if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) searchFailed++;
+      }
+    }
+  }
+  if (searchAttempts > 0 && searchFailed >= searchAttempts) {
+    scrapeConsequences.push(`All ${searchAttempts} search ${searchAttempts === 1 ? "query" : "queries"} failed — video discovery was limited to the primary profile/API page, so coverage and view-based averages (engagement, avg views) reflect that subset, not the whole channel.`);
+  } else if (searchFailed > 0) {
+    scrapeConsequences.push(`${searchFailed} of ${searchAttempts} search ${searchAttempts === 1 ? "query" : "queries"} failed — discovery was partially degraded; the profile/API page still provided the primary pool.`);
   }
   if (fm.some(m => m.includes("playwright") && !m.includes("search"))) {
     scrapeConsequences.push("A profile scrape failed or fell back to a lower-fidelity path — follower/bio/stat coverage may be degraded.");
