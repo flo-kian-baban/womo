@@ -87,7 +87,13 @@ export default function AnalyzeCreator() {
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState<{ existing: PreflightExisting; values: FormValues } | null>(null);
+  // Timeout-salvage UX: a run that hits the ~300s gateway/race boundary may STILL
+  // have completed server-side (persistence lives inside the raced work) — after a
+  // timeout-class error we re-check once and point at the saved profile if found.
+  const [salvage, setSalvage] = useState<"idle" | "waiting" | "found" | "not_found">("idle");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const salvageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSubmittedRef = useRef<FormValues | null>(null);
   const utils = trpc.useUtils();
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormValues>({
@@ -107,15 +113,45 @@ export default function AnalyzeCreator() {
     }
   }, [handleOrUrl, platform, setValue]);
 
-  // Clear interval on unmount
+  // Clear timers on unmount
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      if (salvageTimerRef.current) {
+        clearTimeout(salvageTimerRef.current);
+        salvageTimerRef.current = null;
+      }
     };
   }, []);
+
+  /** Does this error read as the ~300s race/gateway boundary (not a real refusal)? */
+  const isTimeoutClassError = (msg: string) => {
+    const m = msg.toLowerCase();
+    return m.includes("timed out") || m.includes("timeout") || m.includes("502") ||
+      m.includes("gateway") || m.includes("failed to fetch") || m.includes("network");
+  };
+
+  /** One delayed re-check (45s): Commit-7 salvage means the observation may land
+   *  shortly AFTER the client saw the timeout. */
+  const scheduleSalvageCheck = (values: FormValues) => {
+    setSalvage("waiting");
+    if (salvageTimerRef.current) clearTimeout(salvageTimerRef.current);
+    salvageTimerRef.current = setTimeout(async () => {
+      try {
+        const pre = await utils.creator.preflight.fetch({
+          handleOrUrl: values.handleOrUrl, platform: values.platform,
+        });
+        const last = pre.existing?.lastAnalyzedAt ? new Date(pre.existing.lastAnalyzedAt).getTime() : 0;
+        const isFresh = Date.now() - last < 15 * 60 * 1000; // saved within the last 15 min
+        setSalvage(pre.existing && isFresh ? "found" : "not_found");
+      } catch {
+        setSalvage("not_found");
+      }
+    }, 45_000);
+  };
 
   const analyzeMutation = trpc.creator.analyze.useMutation({
     onSuccess: (data) => {
@@ -138,10 +174,15 @@ export default function AnalyzeCreator() {
         }
       }
     },
-    onError: () => {
+    onError: (error) => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
+      }
+      // Timeout-class errors get a salvage re-check: the run may have completed
+      // and persisted after the boundary (see the timeout card below).
+      if (isTimeoutClassError(error?.message ?? "") && lastSubmittedRef.current) {
+        scheduleSalvageCheck(lastSubmittedRef.current);
       }
       // Error is shown inline — no toast needed
     },
@@ -151,9 +192,15 @@ export default function AnalyzeCreator() {
     setResult(null);
     setPhaseIndex(0);
     setElapsedMs(0);
-    // Clear any previous interval
+    setSalvage("idle");
+    lastSubmittedRef.current = values;
+    // Clear any previous timers
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
+    }
+    if (salvageTimerRef.current) {
+      clearTimeout(salvageTimerRef.current);
+      salvageTimerRef.current = null;
     }
     // Honest progress (Session 11, Commit 4): advance the real phase highlight on a
     // realistic schedule and keep a live elapsed timer ticking. We never clear the
@@ -395,6 +442,41 @@ export default function AnalyzeCreator() {
           {analyzeMutation.isError && !analyzeMutation.isPending && (() => {
             const msg = analyzeMutation.error?.message ?? "";
             const isRateLimit = msg.toLowerCase().includes("rate-limited") || msg.toLowerCase().includes("usage exhausted") || msg.toLowerCase().includes("too many requests");
+            const isTimeout = !isRateLimit && isTimeoutClassError(msg);
+            if (isTimeout) {
+              // The run may have completed server-side after the boundary
+              // (persistence lives inside the raced work) — say so honestly and
+              // report the one delayed re-check's outcome.
+              return (
+                <div className="mt-4 rounded-xl p-5 border animate-fade-in-up bg-amber-500/10 border-amber-500/30">
+                  <div className="flex items-start gap-3">
+                    <Clock className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold mb-1 text-amber-400">
+                        Timed Out — Analysis May Still Have Completed
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        The request hit the ~5-minute limit, but the analysis keeps running server-side and is saved if it finishes.
+                        {salvage === "waiting" && " Checking the library in ~45 seconds…"}
+                        {salvage === "not_found" && " No saved profile found yet — it may still land shortly, or you can retry the analysis."}
+                      </p>
+                      {salvage === "found" && (
+                        <div className="mt-2">
+                          <p className="text-xs text-green-400 font-semibold mb-2">
+                            ✓ The profile WAS saved — the analysis completed after the timeout.
+                          </p>
+                          <Link href="/library">
+                            <Button size="sm" variant="outline" className="border-green-400/30 text-green-400 hover:bg-green-400/10">
+                              Open Library <ArrowRight className="w-3 h-3 ml-2" />
+                            </Button>
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div className={`mt-4 rounded-xl p-5 border animate-fade-in-up ${
                 isRateLimit
