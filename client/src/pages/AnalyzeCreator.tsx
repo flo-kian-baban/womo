@@ -51,21 +51,27 @@ function detectPlatform(input: string): "TikTok" | "Instagram" | null {
   return null;
 }
 
-const ANALYSIS_STEPS = [
-  "Fetching 6 most recent videos for baseline analysis...",
-  "Sampling 3 mid-period videos (~9 months ago)...",
-  "Retrieving 3 anchor posts (~18 months ago) for longitudinal baseline...",
-  "Transcribing spoken content across 12-video sample...",
-  "Identifying recurring themes and tone register...",
-  "Applying Jungian archetype classification...",
-  "Evaluating Goffman stage consistency across time periods...",
-  "Assessing Stuart Hall decoding patterns...",
-  "Mapping Rogers adoption curve position...",
-  "Detecting Turner liminal phase signals...",
-  "Calculating cultural velocity (Focusing vs. Drifting)...",
-  "Generating Barthes myth sentence...",
-  "Assembling deep cultural alignment profile...",
+// Honest progress phases (Session 11, Commit 4). These are the REAL pipeline
+// stages, in order, with rough elapsed-time marks used only to advance the
+// highlight — a live elapsed timer shows actual progress. The previous indicator
+// listed 13 fabricated per-signal "LLM steps" (Jungian / Goffman / Stuart Hall /
+// Rogers / Turner / Barthes / "Assembling…") that are in reality a SINGLE
+// extraction call, cycled them over ~23s, then froze on the last one for the
+// remaining minutes while claiming "~45–60s". The cultural analysis is one stage
+// here, not seven, and the final phase honestly holds until the run resolves.
+const ANALYSIS_PHASES: Array<{ atMs: number; label: string }> = [
+  { atMs: 0,      label: "Scraping the profile and recent videos…" },
+  { atMs: 30_000, label: "Transcribing spoken content across the video sample…" },
+  { atMs: 80_000, label: "Searching for more of the creator's videos to widen the sample…" },
+  { atMs: 110_000, label: "Running the cultural analysis (themes, symbols, archetype)…" },
+  { atMs: 150_000, label: "Finalizing and saving the profile…" },
 ];
+
+/** m:ss elapsed — keeps the indicator visibly live so it never reads as frozen. */
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} elapsed`;
+}
 
 type PreflightExisting = {
   subjectId: string;
@@ -78,7 +84,8 @@ type PreflightExisting = {
 
 export default function AnalyzeCreator() {
   const [result, setResult] = useState<{ profile: Record<string, any> & { id: string }; pipelineMetrics?: any } | null>(null);
-  const [stepIndex, setStepIndex] = useState(0);
+  const [phaseIndex, setPhaseIndex] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState<{ existing: PreflightExisting; values: FormValues } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const utils = trpc.useUtils();
@@ -142,24 +149,27 @@ export default function AnalyzeCreator() {
 
   const startAnalysis = (values: FormValues, confirmDuplicate = false) => {
     setResult(null);
-    setStepIndex(0);
+    setPhaseIndex(0);
+    setElapsedMs(0);
     // Clear any previous interval
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
-    // Cycle through steps for UX
+    // Honest progress (Session 11, Commit 4): advance the real phase highlight on a
+    // realistic schedule and keep a live elapsed timer ticking. We never clear the
+    // interval on a "done" step and never mark the run complete here — the final
+    // phase holds on "Finalizing…" until the mutation actually resolves (onSuccess/
+    // onError clear the interval). So the indicator can't freeze on a fake step.
+    const startedAt = Date.now();
     intervalRef.current = setInterval(() => {
-      setStepIndex((prev) => {
-        if (prev >= ANALYSIS_STEPS.length - 1) {
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-          }
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 1800);
+      const elapsed = Date.now() - startedAt;
+      setElapsedMs(elapsed);
+      let idx = 0;
+      for (let i = 0; i < ANALYSIS_PHASES.length; i++) {
+        if (elapsed >= ANALYSIS_PHASES[i].atMs) idx = i;
+      }
+      setPhaseIndex(idx);
+    }, 1000);
     analyzeMutation.mutate({ ...values, confirmDuplicate });
   };
 
@@ -342,34 +352,39 @@ export default function AnalyzeCreator() {
           {/* Analysis progress */}
           {analyzeMutation.isPending && (
             <div className="mt-4 fit-card rounded-xl p-5 animate-fade-in-up">
-              <div className="mb-3">
-                <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-                  Deep Anthropological Analysis in Progress
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+                    Analysis in Progress
+                  </div>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    Scraping the profile, transcribing a 12-video sample, then running the cultural analysis. Most analyses take 2–4 minutes — you can leave this open.
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground/70 mt-1">
-                  Analyzing 12-video longitudinal sample and brand semantic core. Processing time: ~45–60s.
-                </p>
+                <div className="text-xs font-mono text-muted-foreground/70 whitespace-nowrap tabular-nums pt-0.5">
+                  {formatElapsed(elapsedMs)}
+                </div>
               </div>
               <div className="space-y-2">
-                {ANALYSIS_STEPS.map((step, i) => (
+                {ANALYSIS_PHASES.map((phase, i) => (
                   <div
                     key={i}
                     className={`flex items-center gap-2 text-xs transition-all duration-300 ${
-                      i < stepIndex
+                      i < phaseIndex
                         ? "text-green-400"
-                        : i === stepIndex
+                        : i === phaseIndex
                         ? "text-foreground"
                         : "text-muted-foreground/30"
                     }`}
                   >
-                    {i < stepIndex ? (
+                    {i < phaseIndex ? (
                       <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
-                    ) : i === stepIndex ? (
+                    ) : i === phaseIndex ? (
                       <Loader2 className="w-3 h-3 flex-shrink-0 animate-spin" />
                     ) : (
                       <div className="w-3 h-3 rounded-full border border-current flex-shrink-0 opacity-30" />
                     )}
-                    {step}
+                    {phase.label}
                   </div>
                 ))}
               </div>
