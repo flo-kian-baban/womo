@@ -173,6 +173,10 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
     const capturedVideoItems: unknown[] = [];
     let capturedUserDetail: Record<string, unknown> | null = null;
     let xhrResponseCount = 0;
+    // Session 11 (Commit 5): the feed's own pagination signal, updated from each
+    // item_list response, so the scroll loop below knows when there are no more
+    // pages. Undefined until we see one; an explicit false stops paging.
+    let lastHasMore: boolean | undefined;
 
     page.on("response", async (response) => {
       try {
@@ -194,6 +198,12 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
                 capturedVideoItems.push(...items);  // APPEND, not overwrite
                 xhrResponseCount++;
                 console.log(`[profileScraper] @${handle}: XHR response #${xhrResponseCount} captured ${items.length} videos (running total: ${capturedVideoItems.length})`);
+              }
+              // Session 11 (Commit 5): capture the feed's pagination signal so the
+              // scroll loop can stop when TikTok reports no further cursor pages.
+              const b = body as Record<string, unknown>;
+              if ("hasMore" in b || "has_more" in b) {
+                lastHasMore = Boolean(b.hasMore ?? b.has_more ?? false);
               }
             }
           }
@@ -235,18 +245,44 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
       console.warn(`[tiktokScraper] @${handle}: rehydration data not found: ${err.message}`);
     });
 
-    // ── AGGRESSIVE SCROLL: 6 scroll events over ~12s ──
-    // TikTok lazy-loads the video grid; we need to scroll deep to trigger
-    // multiple item_list XHR responses (each returns ~30 videos)
-    const scrollPositions = [600, 1200, 2000, 2800, 3600, 4500];
-    for (const yPos of scrollPositions) {
-      await page.evaluate((y) => window.scrollTo(0, y), yPos);
+    // ── CURSOR PAGINATION via infinite scroll (Session 11, Commit 5) ──
+    // TikTok's item_list endpoint requires signed params we can't forge, so we
+    // drive its cursor the way the site does: scroll to the bottom and let the
+    // page fetch the next cursor page, capturing each item_list XHR above. The old
+    // code scrolled 6 fixed pixel offsets and stopped — under-sampling large
+    // channels (whatever ~6 shallow scrolls happened to load). Now we page until
+    // we hit the cap, the feed reports no more pages (hasMore=false), or two
+    // rounds add nothing (safety). Every captured item is author-guarded
+    // downstream, so a wider pool cannot admit foreign videos.
+    //
+    // Cap rationale: 6-3-3 needs 12 sampled videos (with transcripts) and D-23
+    // wants a trailing-90-day recency window. 90 videos covers the full 90 days
+    // even for a daily poster, reaches the mid bucket organically for typical
+    // 2-3x/week creators, and is a ~7x margin over the sample — far below fetching
+    // a whole back-catalogue.
+    const MAX_POOL_VIDEOS = 90;
+    const MAX_SCROLL_ROUNDS = 15; // hard safety bound (~1.2-2.2s per round)
+    let scrollRounds = 0;
+    let lastCount = -1;
+    let stagnantRounds = 0;
+    while (
+      scrollRounds < MAX_SCROLL_ROUNDS &&
+      capturedVideoItems.length < MAX_POOL_VIDEOS &&
+      lastHasMore !== false &&
+      stagnantRounds < 2
+    ) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       // Random delay between 1.2s and 2.2s to appear human
       await page.waitForTimeout(1200 + Math.floor(Math.random() * 1000));
+      scrollRounds++;
+      if (capturedVideoItems.length === lastCount) stagnantRounds++;
+      else stagnantRounds = 0;
+      lastCount = capturedVideoItems.length;
     }
 
     // Extra wait for any final XHR responses to complete
     await page.waitForTimeout(3000);
+    console.log(`[profileScraper] @${handle}: pagination stopped after ${scrollRounds} round(s) — ${capturedVideoItems.length} videos (cap ${MAX_POOL_VIDEOS}, hasMore=${String(lastHasMore)})`);
 
     console.log(`[profileScraper] @${handle}: Playwright scroll complete — ${xhrResponseCount} XHR responses, ${capturedVideoItems.length} total videos captured`);
 
