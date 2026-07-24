@@ -278,6 +278,11 @@ export function RunDiagnosticsView({ d }: { d: any }) {
             Derived stats (engagement, avg views) reflect the {d.videos.total} captured videos, not the full channel.
           </div>
         )}
+        {d.pool && d.pool.authorRejected > 0 && (
+          <div className="text-emerald-300/70 text-[10.5px]">
+            {d.pool.authorRejected} foreign video{d.pool.authorRejected === 1 ? "" : "s"} excluded — author mismatch (not this creator).
+          </div>
+        )}
       </div>
 
       {/* Confidence & provenance (A5/A6) */}

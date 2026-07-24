@@ -175,4 +175,23 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     const promptDoc = snap.find(x => x.documentType === "creator_extraction_prompt");
     expect(promptDoc?.contentText).toBe("THE EXACT PROMPT THE MODEL RECEIVED");
   });
+
+  // ── Session 10: author-rejected pool count surfaces in diagnostics ──────────
+  it("surfaces the author-rejected foreign-video count in _meta.pool + diagnostics", async () => {
+    const runId = newRunId();
+    let observationId = "";
+    await withAnalysisRun(runId, async () => {
+      const result = await persistCreatorToV2({
+        handle: "pool_creator", platform: "TikTok", displayName: "Pool Creator",
+        extracted: { archetype: "The Sage" },
+        researchData: { followerCount: 1000, foreignVideosRejected: 7, sociologicalFieldsComputed: true },
+      });
+      if ("error" in result) throw new Error(result.error);
+      observationId = result.observationId;
+    });
+    const d = (await db.getRunDiagnostics(observationId))!;
+    expect(d.pool).toEqual({ authorRejected: 7 });
+    const { rows } = await admin.query("select persistence_status from observations where id=$1", [observationId]);
+    expect((rows[0].persistence_status as Record<string, any>)._meta.pool.authorRejected).toBe(7);
+  });
 });

@@ -46,6 +46,7 @@ import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent } from "./db";
 import { TRANSCRIPT_SOURCE, isSpeechTranscript } from "@shared/transcriptSource";
 import { isStopword } from "@shared/stopwords";
+import { isAuthorMatch } from "@shared/authorMatch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,8 @@ export interface CreatorResearchResult {
   // copied by the model. false = the model estimated them from its rubric
   // (Instagram / YouTube, or a TikTok run with no engagement data).
   sociologicalFieldsComputed?: boolean;
+  /** Session 10: count of foreign / author-less videos rejected by the author guard (TikTok path). */
+  foreignVideosRejected?: number;
   // Supplemental video pool — all discovered video URLs with engagement stats
   discoveredVideoPool?: Array<{
     id: string; url: string; caption: string; createTime: number;
@@ -697,9 +700,9 @@ export interface TemporalVideoEntry {
  * Uses TikTok/get_user_post_list to fetch the full list of creator's videos.
  * Returns array of VideoItem objects with full metadata.
  */
-async function fetchTikTokVideosFromAPI(
+export async function fetchTikTokVideosFromAPI(
   handle: string
-): Promise<Array<{
+): Promise<{ items: Array<{
   id: string;
   caption: string;
   views: number;
@@ -715,7 +718,8 @@ async function fetchTikTokVideosFromAPI(
   stitchEnabled: boolean;
   isAd: boolean;
   durationMs: number;
-}>> {
+}>; rejected: number }> {
+  let rejected = 0;
   const items: Array<{
     id: string;
     caption: string;
@@ -744,7 +748,7 @@ async function fetchTikTokVideosFromAPI(
 
     if (!secUid) {
       console.log(`[webResearch] @${handle}: could not get secUid from user info`);
-      return items;
+      return { items, rejected };
     }
 
     // Get video list from the combined profile scrape
@@ -755,6 +759,11 @@ async function fetchTikTokVideosFromAPI(
     for (const item of itemList) {
       const videoId = item.id ?? "";
       if (!videoId) continue;
+
+      // Session 10 (1b): every item must pass the shared author guard before it
+      // enters the pool — fail closed. The narrowed XHR match (1a) is the primary
+      // defense; this rejects any residual foreign / author-less item.
+      if (!isAuthorMatch(handle, item.author?.uniqueId)) { rejected++; continue; }
 
       items.push({
         id: videoId,
@@ -778,7 +787,7 @@ async function fetchTikTokVideosFromAPI(
     console.warn(`[webResearch] @${handle}: API fetch failed:`, (err as Error).message);
   }
 
-  return items;
+  return { items, rejected };
 }
 
 async function fetchTikTokTranscripts(handle: string): Promise<{
@@ -796,6 +805,8 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
     musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
     durationSec: number;
   }>;
+  /** Session 10: count of foreign / author-less videos rejected by the guard. */
+  foreignVideosRejected: number;
 }> {
   const normalizedHandle = normalizeHandle(handle);
   const transcripts: TranscriptEntry[] = [];
@@ -833,7 +844,11 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
   const videoItems: VideoItem[] = [];
 
   // ─── PRIMARY SOURCE: TikTok API (get_user_post_list) ────────────────────────
-  const apiVideos = await fetchTikTokVideosFromAPI(handle);
+  // Session 10: the API path now author-guards each item and returns the count
+  // of foreign / author-less items it rejected. Track the run total so it can be
+  // surfaced in the Run diagnostics ("N videos excluded — author mismatch").
+  const { items: apiVideos, rejected: apiRejectedForeign } = await fetchTikTokVideosFromAPI(handle);
+  let foreignVideosRejected = apiRejectedForeign;
   for (const v of apiVideos) {
     if (!seen.has(v.id)) {
       seen.add(v.id);
@@ -866,18 +881,16 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
         for (const item of items) {
           const v = item as Record<string, unknown>;
 
-          // AUTHOR GUARD: only keep videos from the target creator
+          // Session 10 (1c): shared author guard — FAIL CLOSED. The old check used
+          // normalizedHandle.includes(authorNorm) (true for an empty author) plus
+          // an `authorId !== ""` escape, so foreign / author-less search results
+          // were accepted. Now a video is kept only if its author verifiably IS
+          // this creator; missing/empty/foreign authors are rejected and counted.
           const author = (v?.author as Record<string, unknown>) ?? {};
-          const authorId = ((author?.uniqueId as string) ?? (author?.unique_id as string) ?? "").toLowerCase();
-          const authorNorm = normalizeHandle(authorId);
-
-          const isMatch =
-            authorNorm === normalizedHandle ||
-            authorNorm.includes(normalizedHandle) ||
-            normalizedHandle.includes(authorNorm);
-
-          if (!isMatch && authorId !== "") {
-            continue; // Different creator — skip
+          const authorId = (author?.uniqueId as string) ?? (author?.unique_id as string) ?? "";
+          if (!isAuthorMatch(handle, authorId)) {
+            foreignVideosRejected++;
+            continue;
           }
 
           const videoId = (v?.id as string) ?? ((v?.video as Record<string, unknown>)?.id as string) ?? "";
@@ -1230,7 +1243,7 @@ async function fetchTikTokTranscripts(handle: string): Promise<{
       alreadySampled: sampledIds.has(v.id),
     }));
 
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool };
+  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -1802,7 +1815,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags
   const transcriptData = await fetchTikTokTranscripts(handle);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts: transcriptViewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool } = transcriptData;
+  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts: transcriptViewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected } = transcriptData;
   if (searchQuotaExhausted) quotaExhausted = true;
   // Merge transcript view counts into main viewCounts array
   for (const vc of transcriptViewCounts) {
@@ -1940,6 +1953,7 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     dataConfidenceLevel,
     // Session 8: computed iff the engagement-signals block was built (sampled videos).
     sociologicalFieldsComputed: engagementSignals.totalSampled > 0,
+    foreignVideosRejected,
     discoveredVideoPool,
   };
 }

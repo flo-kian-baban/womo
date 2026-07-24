@@ -430,6 +430,9 @@ export async function persistCreatorToV2(params: {
       ...persistence,
       _meta: {
         sociologicalFieldsProvenance: researchData.sociologicalFieldsComputed ? "computed" : "estimated",
+        // Session 10: videos rejected by the author guard (foreign / author-less),
+        // so an analyst can see "N videos excluded — author mismatch".
+        pool: { authorRejected: Number(researchData.foreignVideosRejected ?? 0) },
       },
     };
     try {
@@ -928,6 +931,7 @@ export const appRouter = router({
           culturalVelocity?: string;
           dataConfidenceLevel?: string;
           sociologicalFieldsComputed?: boolean;
+          foreignVideosRejected?: number;
           longitudinalSampleJson?: Record<string, unknown>;
           discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number }>;
           transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
@@ -956,6 +960,7 @@ export const appRouter = router({
           culturalVelocity: research.culturalVelocity ?? undefined,
           dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
           sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+          foreignVideosRejected: research.foreignVideosRejected,
           longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
           discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
           transcripts: research.transcripts?.length ? research.transcripts : undefined,
@@ -1164,6 +1169,7 @@ export const appRouter = router({
             culturalVelocity: research.culturalVelocity ?? undefined,
             dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
             sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+            foreignVideosRejected: research.foreignVideosRejected,
             longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
             discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
             transcripts: research.transcripts?.length ? research.transcripts : undefined,
@@ -1371,6 +1377,7 @@ export const appRouter = router({
                   culturalVelocity: research.culturalVelocity ?? undefined,
                   dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
                   sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+                  foreignVideosRejected: research.foreignVideosRejected,
                   longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
                   discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
                   transcripts: research.transcripts?.length ? research.transcripts : undefined,

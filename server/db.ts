@@ -1641,6 +1641,8 @@ export type RunDiagnostics = {
    * null = run predates the marker. Read from persistence_status._meta.
    */
   sociologicalFieldsProvenance: "computed" | "estimated" | null;
+  /** Session 10: pool integrity — count of videos rejected by the author guard (foreign / author-less). null = not recorded. */
+  pool: { authorRejected: number } | null;
   /** Session 9: why the confidence level is what it is (existing thresholds explained, not changed). */
   confidence: { level: string | null; transcriptCount: number; rationale: string };
   /** Session 9: cultural velocity + why (which temporal buckets are populated). null when absent. */
@@ -1842,12 +1844,16 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const skippedNoData: Array<{ component: string; reason: string | null }> = [];
   const skippedNotAttempted: Array<{ component: string; reason: string | null }> = [];
   let sociologicalFieldsProvenance: RunDiagnostics["sociologicalFieldsProvenance"] = null;
+  let pool: RunDiagnostics["pool"] = null;
   if (rawStatus) {
     for (const [key, value] of Object.entries(rawStatus)) {
       if (key.startsWith("_")) {
         if (key === "_meta") {
-          const p = (value as Record<string, unknown> | null)?.sociologicalFieldsProvenance;
+          const meta = value as Record<string, unknown> | null;
+          const p = meta?.sociologicalFieldsProvenance;
           if (p === "computed" || p === "estimated") sociologicalFieldsProvenance = p;
+          const rejected = (meta?.pool as Record<string, unknown> | undefined)?.authorRejected;
+          if (typeof rejected === "number") pool = { authorRejected: rejected };
         }
         continue; // reserved run metadata, not an enrichment component
       }
@@ -1982,6 +1988,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     reviewStatus: obs.reviewStatus,
     observedAt: obs.observedAt,
     sociologicalFieldsProvenance,
+    pool,
     confidence: { level: confidenceLevel, transcriptCount, rationale: confidenceRationale },
     velocity,
     scrapes: { total: scrapeRows.length, failed: scrapesFailed, consequences: scrapeConsequences, byPlatform },

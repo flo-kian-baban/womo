@@ -177,12 +177,12 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
     page.on("response", async (response) => {
       try {
         const url = response.url();
-        // Intercept video list API — ACCUMULATE all responses
-        if (
-          url.includes("/api/post/item_list/") ||
-          url.includes("/api/post/item_list?") ||
-          url.includes("item_list")
-        ) {
+        // Session 10 (1a): match ONLY the creator's own post-list endpoint.
+        // The bare `item_list` substring also matched TikTok's recommended /
+        // related / trending feeds (/api/recommend/item_list/, /api/related/…),
+        // which injected other creators' videos into the pool. Narrowed to the
+        // /api/post/item_list endpoint (covers both the trailing "/" and "?").
+        if (url.includes("/api/post/item_list")) {
           const status = response.status();
           if (status === 200) {
             const body = await response.json().catch(() => null);
@@ -652,7 +652,11 @@ function parseItemList(rawItemList: unknown[], handle: string): TikTokVideoItem[
         id: String(videoObj.id ?? videoId),
       },
       author: {
-        uniqueId: String(authorObj.uniqueId ?? handle),
+        // Session 10: do NOT fabricate the target handle for an author-less item.
+        // The old `?? handle` default stamped every author-less item as the
+        // creator, so any downstream author guard would accept it (fail open).
+        // Keep it empty so the guard can fail closed.
+        uniqueId: String(authorObj.uniqueId ?? ""),
         nickname: String(authorObj.nickname ?? ""),
         secUid: String(authorObj.secUid ?? ""),
       },
