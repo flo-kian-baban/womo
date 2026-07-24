@@ -91,6 +91,38 @@ let _browserLaunching = false;
 const _contexts: ManagedContext[] = [];
 let _cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
+// ─── Memory instrumentation (isolated stability session, Part 1) ─────────────
+// Passive counters read by scraping/memoryTelemetry.ts — measurement only.
+
+/**
+ * The exact Chromium launch args, exported so telemetry rows self-describe which
+ * flag configuration produced them (--single-process present or not). Single
+ * source of truth: ensureBrowser() launches with THIS array.
+ */
+export const BROWSER_LAUNCH_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-blink-features=AutomationControlled",
+  "--disable-infobars",
+  // Required in headless Docker to prevent GPU initialization crashes
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  "--single-process",
+] as const;
+
+const _poolStats = { browserLaunches: 0, launchTotalMs: 0, crashRecoveries: 0 };
+
+/** Cumulative launch/recovery counters (monotonic; callers diff start vs end). */
+export function getPoolStats(): { browserLaunches: number; launchTotalMs: number; crashRecoveries: number } {
+  return { ..._poolStats };
+}
+
+/** Live context-pool occupancy. */
+export function getPoolSnapshot(): { contexts: number; busyContexts: number } {
+  return { contexts: _contexts.length, busyContexts: _contexts.filter((mc) => mc.busy).length };
+}
+
 // ── FIX 4.1: Periodic cleanup of stale browser contexts ──
 // Prevents leaked contexts from accumulating until OOM.
 function startCleanupTimer(): void {
@@ -144,20 +176,14 @@ export async function ensureBrowser(): Promise<Browser> {
   try {
     console.log("[browserClient] Launching Chromium with stealth plugin...");
 
+    // Part 1 instrumentation: time every launch so relaunch cost is measurable.
+    const launchStart = Date.now();
     _browser = await chromium.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-infobars",
-        // Required in headless Docker to prevent GPU initialization crashes
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--single-process",
-      ],
+      args: [...BROWSER_LAUNCH_ARGS],
     });
+    _poolStats.browserLaunches++;
+    _poolStats.launchTotalMs += Date.now() - launchStart;
 
     // Auto-restart on disconnect
     _browser.on("disconnected", () => {
@@ -232,6 +258,7 @@ export async function getContext(
     return await acquireContextPage(preset, maxUses);
   } catch (err) {
     if (!isBrowserDeadError(err)) throw err;
+    _poolStats.crashRecoveries++; // Part 1 instrumentation
     console.warn(`[browserClient] Browser looks dead (${(err as Error).message.slice(0, 80)}) — hard-resetting and retrying once`);
     await hardResetBrowser();
     return await acquireContextPage(preset, maxUses);

@@ -96,4 +96,22 @@ suite("run-outcome telemetry (ephemeral Postgres)", () => {
     await db.recordRunOutcome(runId, "min_data_rejection", { detail: { message: "Insufficient data" } });
     expect((await readRun(runId))!.status).toBe("min_data_rejection");
   });
+
+  // Stability session (Part 1): the analyze mutation attaches a per-run memory
+  // summary to EVERY terminal write — including clean successes — so the
+  // --single-process before/after comparison is queryable from pipeline_runs.
+  it("round-trips the memory instrumentation summary on a success row", async () => {
+    const runId = newRunId();
+    const memory = {
+      singleProcess: true, samples: 12,
+      peakNodeRssMb: 412.5, peakNodeHeapMb: 180.2,
+      peakChromiumProcs: 1, peakChromiumRssMb: 640.0, peakContexts: 3,
+      browserRelaunches: 1, relaunchTotalMs: 1450, crashRecoveries: 1,
+    };
+    await db.recordRunOutcome(runId, "success", { detail: { memory } });
+    const row = await readRun(runId);
+    expect(row!.status).toBe("success");
+    const log = row!.error_log as { memory?: Record<string, unknown> };
+    expect(log.memory).toMatchObject({ singleProcess: true, peakNodeRssMb: 412.5, peakChromiumProcs: 1, crashRecoveries: 1 });
+  });
 });

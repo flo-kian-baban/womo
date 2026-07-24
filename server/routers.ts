@@ -34,6 +34,7 @@ import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
 import { isBrowserDeadError } from "./scraping/browserClient";
+import { startRunMemoryTracker } from "./scraping/memoryTelemetry";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
@@ -881,6 +882,9 @@ export const appRouter = router({
         return withAnalysisRun(runId, async () => {
         const pipelineStart = Date.now();
         const stepTimings: Array<{ step: string; durationMs: number }> = [];
+        // Part 1 (stability session): passive memory sampling for the whole run —
+        // summary lands in pipeline_runs.error_log.memory on every terminal write.
+        const memTracker = startRunMemoryTracker();
 
         // ── FIX 1.1: Global analysis timeout ──
         // Wrap research + extraction in Promise.race with a 3-minute timeout
@@ -1007,15 +1011,20 @@ export const appRouter = router({
             const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
 
             // Terminal telemetry — the authoritative outcome for this run.
+            // Part 1 (stability session): every terminal write carries the run's
+            // peak-memory summary (error_log.memory) for the --single-process call.
             await recordRunOutcome(
               runId,
               persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none",
               {
                 startedAt: new Date(pipelineStart),
-                detail: persistence.saved === "full" ? undefined : {
-                  saved: persistence.saved,
-                  error: persistence.error ?? null,
-                  failedComponents: persistence.failedComponents ?? [],
+                detail: {
+                  ...(persistence.saved === "full" ? {} : {
+                    saved: persistence.saved,
+                    error: persistence.error ?? null,
+                    failedComponents: persistence.failedComponents ?? [],
+                  }),
+                  memory: memTracker.stop(),
                 },
               },
             );
@@ -1042,7 +1051,10 @@ export const appRouter = router({
             // it belongs to the outer racer below.
             await recordRunOutcome(runId, classifyRunFailure(err), {
               startedAt: new Date(pipelineStart),
-              detail: { message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) },
+              detail: {
+                message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+                memory: memTracker.stop(),
+              },
             });
             throw err;
           }
@@ -1068,7 +1080,12 @@ export const appRouter = router({
             // outcome, superseding this. A timed-out run is no longer lost work.
             await recordRunOutcome(runId, "timeout", {
               startedAt: new Date(pipelineStart),
-              detail: { note: "5-min race timeout; extraction may still complete and persist out-of-band" },
+              detail: {
+                note: "5-min race timeout; extraction may still complete and persist out-of-band",
+                // Non-terminal snapshot: workPromise is still running and owns the
+                // tracker's final stop() on its own success/failure path.
+                memory: memTracker.summarySoFar(),
+              },
             });
           }
           // If the timeout won, don't let workPromise's later settlement surface as

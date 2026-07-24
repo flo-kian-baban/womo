@@ -486,7 +486,7 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | total_items | integer | yes | 0 | (unused by the analyze path) |
 | completed_items | integer | yes | 0 | (unused) |
 | failed_items | integer | yes | 0 | (unused) |
-| error_log | jsonb | yes | — | **Session 11:** failure detail (message / persistence-failure components) when not a clean success |
+| error_log | jsonb | yes | — | **Session 11:** failure detail (message / persistence-failure components) when not a clean success. **Stability session (Part 1):** every terminal row — including successes — also carries `memory` (per-run peaks: node RSS/heap, chromium proc count + tree RSS, contexts; relaunch/crash-recovery counters; `singleProcess` flag marker) from `scraping/memoryTelemetry.ts`, for the `--single-process` before/after comparison |
 | started_at | timestamptz | yes | — | pipeline start |
 | completed_at | timestamptz | yes | — | terminal write time |
 | created_at | timestamptz | no | now() | |
