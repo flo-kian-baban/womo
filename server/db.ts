@@ -607,6 +607,24 @@ export async function getEvidenceSnapshotsByRunId(runId: string) {
     .orderBy(semanticDocuments.documentType);
 }
 
+/**
+ * Session 9 (A7): fetch a run's evidence snapshot(s) by observation id, so an
+ * analyst can read exactly what the model received (structured inputs + the
+ * verbatim extraction prompt, plus any longitudinal snapshot). Read-only.
+ */
+export async function getEvidenceSnapshotByObservation(observationId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select({
+    documentType: semanticDocuments.documentType,
+    contentText: semanticDocuments.contentText,
+    metadata: semanticDocuments.metadata,
+    createdAt: semanticDocuments.createdAt,
+  }).from(semanticDocuments)
+    .where(eq(semanticDocuments.observationId, observationId))
+    .orderBy(semanticDocuments.documentType);
+}
+
 /** semantic_documents.document_type for the verbatim 6-3-3 longitudinal sample. */
 export const LONGITUDINAL_SAMPLE_DOC_TYPE = "creator_longitudinal_sample";
 
@@ -1623,9 +1641,15 @@ export type RunDiagnostics = {
    * null = run predates the marker. Read from persistence_status._meta.
    */
   sociologicalFieldsProvenance: "computed" | "estimated" | null;
+  /** Session 9: why the confidence level is what it is (existing thresholds explained, not changed). */
+  confidence: { level: string | null; transcriptCount: number; rationale: string };
+  /** Session 9: cultural velocity + why (which temporal buckets are populated). null when absent. */
+  velocity: { value: string | null; rationale: string } | null;
   scrapes: {
     total: number;
     failed: number;
+    /** Session 9: plain-language consequences derived from which scrape METHODS failed. */
+    consequences: string[];
     byPlatform: Array<{
       platform: string;
       attempts: number;
@@ -1648,12 +1672,18 @@ export type RunDiagnostics = {
     withTranscript: number;
     withoutTranscript: number;
     transcriptSources: Record<string, number>;
+    /** Session 9: total videos on the channel (creator_observations.video_count). */
+    channelVideoCount: number | null;
+    /** Session 9: captured / channelVideoCount as a percentage (coverage of the channel). null if unknown. */
+    coveragePct: number | null;
   };
   llm: {
     calls: number;
     failed: number;
     failures: Array<{ purpose: string; errorMessage: string | null; durationMs: number | null; at: Date }>;
     byPurpose: Record<string, number>;
+    /** Session 9: per-call model settings (temperature) so run configuration is auditable. */
+    settings: Array<{ purpose: string; temperature: number | null }>;
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
@@ -1671,6 +1701,8 @@ export type RunDiagnostics = {
   fields: {
     present: string[];
     missing: string[];
+    /** Session 9: per-field provenance so the panel can distinguish evidence-backed from model-inferred values. */
+    provenance: Array<{ field: string; provenance: "scraped" | "derived" | "evidence" | "computed" | "estimated" | "inferred" }>;
     counts: { keywords: number; contentThemes: number; hashtags: number; decodedSignals: number; contentItems: number; transcripts: number; temporalBuckets: number };
   };
   summary: string[];
@@ -1731,6 +1763,32 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const byPlatform = Array.from(platformMap.values());
   const scrapesFailed = byPlatform.reduce((s, p) => s + p.failed, 0);
 
+  // ── Scrape-failure consequences (Session 9): derived from which METHODS failed,
+  // not hardcoded to any one run. Tells the analyst what a failure cost.
+  const failedMethods = new Set<string>();
+  for (const p of byPlatform) {
+    for (const e of p.events) {
+      if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) failedMethods.add(e.method);
+    }
+  }
+  const fm = Array.from(failedMethods);
+  const scrapeConsequences: string[] = [];
+  if (fm.some(m => m.includes("search"))) {
+    scrapeConsequences.push("Search-based video discovery failed — the captured pool is limited to the primary profile/API page, so coverage and any view-based averages (engagement, avg views) reflect that subset, not the whole channel.");
+  }
+  if (fm.some(m => m.includes("playwright") && !m.includes("search"))) {
+    scrapeConsequences.push("A profile scrape failed or fell back to a lower-fidelity path — follower/bio/stat coverage may be degraded.");
+  }
+  if (fm.some(m => m === "tiktok_desktop_http" || m === "tiktok_mobile_http" || m === "tiktok_google_cache")) {
+    scrapeConsequences.push("Some per-video page fetches failed — fewer transcripts than videos were sampled.");
+  }
+  if (fm.some(m => m.startsWith("instagram"))) {
+    scrapeConsequences.push("An Instagram scrape failed — profile, posts, or reel transcription may be incomplete.");
+  }
+  if (fm.some(m => m.startsWith("youtube"))) {
+    scrapeConsequences.push("A YouTube fetch failed — channel stats or captions may be incomplete.");
+  }
+
   // ── Video funnel ──
   const byStatus: Record<string, number> = {};
   const transcriptSources: Record<string, number> = {};
@@ -1746,16 +1804,27 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     if (ci.temporalBucket) temporalBuckets.add(ci.temporalBucket);
   }
 
+  // ── Coverage (Session 9): captured videos vs the channel's total ──
+  // Derived stats (engagement, avg views) are computed over the CAPTURED subset,
+  // so low coverage means those numbers describe a sample, not the channel.
+  const channelVideoCount = creatorObsRows[0]?.videoCount ?? null;
+  const coveragePct = channelVideoCount && channelVideoCount > 0
+    ? Math.round((contentRows.length / channelVideoCount) * 1000) / 10
+    : null;
+
   // ── LLM ──
   let inputTokens = 0, outputTokens = 0, llmFailed = 0;
   let model = "unknown";
   const byPurpose: Record<string, number> = {};
   const llmFailures: RunDiagnostics["llm"]["failures"] = [];
+  const llmSettings: RunDiagnostics["llm"]["settings"] = [];
   for (const r of llmRows) {
     inputTokens += r.inputTokens ?? 0;
     outputTokens += r.outputTokens ?? 0;
     if (r.model) model = r.model;
     byPurpose[r.purpose] = (byPurpose[r.purpose] ?? 0) + 1;
+    // Session 9: surface per-call temperature (null = provider default was used).
+    llmSettings.push({ purpose: r.purpose, temperature: r.temperature ?? null });
     if (r.status === "failed") {
       llmFailed++;
       llmFailures.push({ purpose: r.purpose, errorMessage: r.errorMessage, durationMs: r.durationMs, at: r.createdAt });
@@ -1814,6 +1883,63 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const present = fieldChecks.filter(([, ok]) => ok).map(([name]) => name);
   const missing = fieldChecks.filter(([, ok]) => !ok).map(([name]) => name);
 
+  // ── Confidence rationale (Session 9): explains the EXISTING thresholds
+  // (>=6 high, >=3 medium, else low) — it does NOT change them (Jason's ruling). ──
+  const transcriptCount = obs.transcriptCount ?? 0;
+  const confidenceLevel = obs.dataConfidenceLevel ?? null;
+  const confidenceRationale =
+    confidenceLevel === "high" ? `${transcriptCount} transcripts (>= 6) → high.`
+    : confidenceLevel === "medium" ? `${transcriptCount} transcripts (3-5) → medium; 6+ needed for high.`
+    : confidenceLevel === "low" ? `${transcriptCount} transcript${transcriptCount === 1 ? "" : "s"} (< 3) → low; 3+ needed for medium, 6+ for high.`
+    : `confidence not recorded (${transcriptCount} transcripts).`;
+
+  // ── Velocity rationale (Session 9): why the cultural-velocity label is what it is. ──
+  const velocityValue = co?.culturalVelocity ?? null;
+  const velocity = velocityValue
+    ? (velocityValue !== "Insufficient Data"
+        ? { value: velocityValue, rationale: `theme overlap across time buckets with transcripts: ${Array.from(temporalBuckets).join(", ") || "none"}.` }
+        : (() => {
+            const missingBuckets = ["recent", "mid", "anchor"].filter(b => !temporalBuckets.has(b));
+            return { value: velocityValue, rationale: `requires speech in the recent bucket plus mid or anchor; buckets with transcripts: ${Array.from(temporalBuckets).join(", ") || "none"}${missingBuckets.length ? ` (empty: ${missingBuckets.join(", ")})` : ""}.` };
+          })())
+    : null;
+
+  // ── Per-field provenance (Session 9): evidence-backed vs model-inferred, using
+  // ONLY data already stored — signal_values (themes/keywords/hashtags),
+  // decoded_signals (symbols), and persistence_status._meta (sociological). This
+  // marks PROVENANCE, not quality. Fields with no backing signal are "inferred". ──
+  const socioProv: "computed" | "estimated" = sociologicalFieldsProvenance ?? "estimated";
+  const ev = (n: number): "evidence" | "inferred" => (n > 0 ? "evidence" : "inferred");
+  const fieldProvenance: RunDiagnostics["fields"]["provenance"] = [
+    { field: "bio", provenance: "scraped" },
+    { field: "followerCount", provenance: "scraped" },
+    { field: "followingCount", provenance: "scraped" },
+    { field: "engagementRate", provenance: "derived" },
+    { field: "contentThemes", provenance: ev(signalCounts["content_theme"] ?? 0) },
+    { field: "recurringThemes", provenance: ev(signalCounts["theme"] ?? 0) },
+    { field: "keywords", provenance: ev(signalCounts["keyword"] ?? 0) },
+    { field: "hashtags", provenance: ev(signalCounts["hashtag"] ?? 0) },
+    { field: "decodedSymbols", provenance: ev(decodedCount) },
+    { field: "symbolicSummary", provenance: ev(decodedCount) },
+    { field: "parasocialBondStrength", provenance: socioProv },
+    { field: "audienceRelationshipType", provenance: socioProv },
+    { field: "culturalCapital", provenance: socioProv },
+    { field: "remixRate", provenance: socioProv },
+    { field: "archetype", provenance: "inferred" },
+    { field: "toneRegister", provenance: "inferred" },
+    { field: "barthesMyth", provenance: "inferred" },
+    { field: "nicheTopicNode", provenance: "inferred" },
+    { field: "driftSignal", provenance: "inferred" },
+    { field: "goffmanStageConsistency", provenance: "inferred" },
+    { field: "stuartHallDecoding", provenance: "inferred" },
+    { field: "rogersAdopterStage", provenance: "inferred" },
+    { field: "creatorNichePosition", provenance: "inferred" },
+    { field: "lifecyclePhase", provenance: "inferred" },
+    { field: "turnerLiminalPhase", provenance: "inferred" },
+    { field: "barthesNicheMeaning", provenance: "inferred" },
+    { field: "aiSummary", provenance: "inferred" },
+  ];
+
   // ── Plain factual summary ──
   const summary: string[] = [];
   if (raw) {
@@ -1856,19 +1982,24 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     reviewStatus: obs.reviewStatus,
     observedAt: obs.observedAt,
     sociologicalFieldsProvenance,
-    scrapes: { total: scrapeRows.length, failed: scrapesFailed, byPlatform },
+    confidence: { level: confidenceLevel, transcriptCount, rationale: confidenceRationale },
+    velocity,
+    scrapes: { total: scrapeRows.length, failed: scrapesFailed, consequences: scrapeConsequences, byPlatform },
     videos: {
       total: contentRows.length,
       byStatus,
       withTranscript,
       withoutTranscript: contentRows.length - withTranscript,
       transcriptSources,
+      channelVideoCount,
+      coveragePct,
     },
     llm: {
       calls: llmRows.length,
       failed: llmFailed,
       failures: llmFailures,
       byPurpose,
+      settings: llmSettings,
       inputTokens,
       outputTokens,
       totalTokens: inputTokens + outputTokens,
@@ -1876,7 +2007,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
       costUsd: computeLlmCostUsd(model, inputTokens, outputTokens),
     },
     enrichments: { raw, succeeded, failed: failedComponents, skippedNoData, skippedNotAttempted },
-    fields: { present, missing, counts: {
+    fields: { present, missing, provenance: fieldProvenance, counts: {
       keywords: signalCounts["keyword"] ?? 0,
       contentThemes: signalCounts["content_theme"] ?? 0,
       hashtags: signalCounts["hashtag"] ?? 0,

@@ -308,6 +308,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
         purpose: purpose ?? "unknown",
         model: modelName,
         promptVersion: "1.0",
+        // Session 9: record the temperature actually sent so run config is
+        // auditable. undefined/null = no temperature set → provider default.
+        temperature: temperature ?? undefined,
         inputTokens: outcome.inputTokens,
         outputTokens: outcome.outputTokens,
         durationMs: Date.now() - startTime,

@@ -14,6 +14,7 @@ import { Client } from "pg";
 import * as db from "../db";
 import { persistCreatorToV2 } from "../routers";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
+import { newRunId, withAnalysisRun } from "../_core/runContext";
 
 const TEST_URL = process.env.TEST_DATABASE_URL;
 if (TEST_URL) process.env.DATABASE_URL = TEST_URL;
@@ -83,5 +84,95 @@ suite("session 9: panel truthfulness (ephemeral Postgres)", () => {
     // The music round-trip array (fit.calculate input) is order-agnostic but must
     // still contain both, unaffected by the reorder.
     expect((profile.transcripts as Array<any>).map(t => t.videoId).sort()).toEqual(["v_speech", "v_viral"]);
+  });
+
+  // ── A3/A4/A5/A6/A8/A9: getRunDiagnostics richer + honest ────────────────────
+  it("diagnostic returns coverage, confidence/velocity rationale, provenance, field-provenance, consequences, temperature", async () => {
+    const runId = newRunId();
+    let observationId = "";
+    await withAnalysisRun(runId, async () => {
+      // A failed search scrape (→ consequence) + a temperature-tagged LLM call.
+      await db.insertScrapeEvent({
+        platform: "tiktok", scrapeMethod: "tiktok_search_html", httpStatus: 200,
+        silentFailureDetected: true, failureReason: "no results via XHR interception or HTML parse",
+      });
+      await db.insertLlmInvocation({
+        purpose: "creator_profile_extraction", model: "gemini-2.5-flash",
+        temperature: 0, status: "success", inputTokens: 6960, outputTokens: 477,
+      });
+      const result = await persistCreatorToV2({
+        handle: "diag_creator", platform: "TikTok", displayName: "Diag Creator",
+        extracted: { archetype: "The Sage" },
+        researchData: {
+          followerCount: 187200, videoCount: 322, // channel has 322; we capture 2
+          culturalVelocity: "Insufficient Data",
+          sociologicalFieldsComputed: true,
+          rawKeywords: ["god", "jesus"],
+          contentThemeLabels: ["Christian Prophecy"],
+          topHashtags: ["#christiantiktok"],
+          decodedSymbols: {
+            identityClaims: [{ phrase: "as a Christian", meaning: "faith identity", informs: ["Archetype"] }],
+            statusSignals: [], communityReferences: [], aspirationDrivers: [], symbolicSummary: "devout creator",
+          },
+          discoveredVideoPoolJson: [
+            { id: "vd1", url: "u1", caption: "prophecy", createTime: 1690000000, views: 400000, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 300 },
+            { id: "vd2", url: "u2", caption: "viral", createTime: 1699000000, views: 95000000, likes: 1, comments: 0, saves: 0, shares: 0, musicOriginal: false, durationSec: 20 },
+          ],
+          transcripts: [
+            { videoId: "vd1", transcript: "long prophecy transcript", wordCount: 1645, transcriptSource: TRANSCRIPT_SOURCE.subtitle, bucket: "anchor" },
+            { videoId: "vd2", transcript: "short caption", wordCount: 20, transcriptSource: TRANSCRIPT_SOURCE.postCaption, bucket: "mid" },
+          ],
+          evidenceSummary: "EVIDENCE",
+        },
+        evidenceSnapshot: {
+          inputsJson: JSON.stringify({ schemaVersion: 1, handleOrUrl: "diag_creator" }),
+          promptText: "THE EXACT PROMPT THE MODEL RECEIVED",
+          promptMeta: { systemPrompt: "SYS", model: "gemini-2.5-flash", purpose: "creator_profile_extraction", temperature: 0 },
+        },
+      });
+      if ("error" in result) throw new Error(result.error);
+      observationId = result.observationId;
+    });
+
+    const d = (await db.getRunDiagnostics(observationId))!;
+    expect(d).toBeTruthy();
+
+    // A4 coverage: 2 captured of 322 channel videos.
+    expect(d.videos.channelVideoCount).toBe(322);
+    expect(d.videos.coveragePct).toBeGreaterThan(0);
+    expect(d.videos.coveragePct!).toBeLessThan(2);
+
+    // A5 confidence rationale (2 transcripts → low, thresholds explained).
+    expect(d.confidence.level).toBe("low");
+    expect(d.confidence.transcriptCount).toBe(2);
+    expect(d.confidence.rationale).toMatch(/< 3|low/);
+
+    // A5 velocity rationale: Insufficient Data, recent bucket empty.
+    expect(d.velocity?.value).toBe("Insufficient Data");
+    expect(d.velocity?.rationale).toMatch(/recent/);
+
+    // A6 provenance marker.
+    expect(d.sociologicalFieldsProvenance).toBe("computed");
+
+    // A8 field provenance: evidence-backed vs computed vs pure inference.
+    const prov = Object.fromEntries(d.fields.provenance.map(p => [p.field, p.provenance]));
+    expect(prov["contentThemes"]).toBe("evidence");
+    expect(prov["decodedSymbols"]).toBe("evidence");
+    expect(prov["parasocialBondStrength"]).toBe("computed");
+    expect(prov["archetype"]).toBe("inferred");
+    expect(prov["barthesMyth"]).toBe("inferred");
+    expect(prov["followerCount"]).toBe("scraped");
+
+    // A3 scrape consequence derived from the failed search method.
+    expect(d.scrapes.consequences.some(c => /Search-based/.test(c))).toBe(true);
+
+    // A9 temperature recorded + surfaced.
+    const ext = d.llm.settings.find(s => s.purpose === "creator_profile_extraction");
+    expect(ext?.temperature).toBe(0);
+
+    // A7 evidence snapshot readable by observation.
+    const snap = await db.getEvidenceSnapshotByObservation(observationId);
+    const promptDoc = snap.find(x => x.documentType === "creator_extraction_prompt");
+    expect(promptDoc?.contentText).toBe("THE EXACT PROMPT THE MODEL RECEIVED");
   });
 });

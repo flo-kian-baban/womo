@@ -18,7 +18,7 @@ import {
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
-  setObservationReviewStatus, getRunDiagnostics,
+  setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
@@ -1086,6 +1086,13 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: "Observation not found" });
         }
         return diagnostics;
+      }),
+
+    // Session 9 (A7): let the analyst read exactly what the model received.
+    getEvidenceSnapshot: protectedProcedure
+      .input(z.object({ observationId: z.string() }))
+      .query(async ({ input }) => {
+        return getEvidenceSnapshotByObservation(input.observationId);
       }),
 
     getProvenance: protectedProcedure
