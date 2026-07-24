@@ -148,7 +148,9 @@ The two skip statuses are deliberately distinct: `skipped_no_data` is a data-leg
 signal about the subject; `skipped_not_attempted` marks incomplete collection on our side.
 `NULL` (whole column) = the row predates womo_0005 tracking.
 
-**Reserved keys (Session 8):** keys prefixed with `_` are **not** enrichment components — they carry run metadata and can never collide with a component name. Currently `_meta.sociologicalFieldsProvenance` (`"computed" | "estimated"`) marks whether the creator's sociological fields (parasocialBondStrength / audienceRelationshipType / culturalCapital / remixRate) were data-derived from TikTok engagement signals or LLM-estimated (Instagram / YouTube). `getRunDiagnostics` skips `_`-prefixed keys in its component loop and surfaces `sociologicalFieldsProvenance`; the clean component map is still what the API returns.
+**Reserved keys (Session 8+):** keys prefixed with `_` are **not** enrichment components — they carry run metadata and can never collide with a component name. `getRunDiagnostics` skips `_`-prefixed keys in its component loop and surfaces them separately; the clean component map is still what the API returns. Current `_meta` keys:
+- `_meta.sociologicalFieldsProvenance` (`"computed" | "estimated"`, Session 8) — whether the creator's sociological fields (parasocialBondStrength / audienceRelationshipType / culturalCapital / remixRate) were data-derived from TikTok engagement signals or LLM-estimated (Instagram / YouTube). Surfaced as `sociologicalFieldsProvenance`.
+- `_meta.pool.authorRejected` (number, **Session 10**) — count of foreign / author-less videos rejected by the author guard before they could enter the pool. Surfaced as `pool` ("N foreign videos excluded — author mismatch").
 
 #### 3b. Review gate (womo_0006)
 
@@ -297,7 +299,7 @@ observations still persist as accepted until Session 7.
 | transcript_text | text | yes | — | full transcript |
 | transcript_source | varchar(32) | yes | — | **normalized Session 9**: `subtitle` \| `speech_to_text` \| `post_caption` — states what the evidence IS (speech vs post caption). Legacy values (captions/caption/whisper/gemini-2.5-flash/playwright-*) are classified by `@shared/transcriptSource` at read time, so no backfill was needed |
 | transcript_word_count | integer | yes | — | |
-| video_duration | real | yes | — | seconds |
+| video_duration | real | yes | — | seconds. **Session 10:** TikTok's `video.duration` (seconds on the web item_list) was consumed as ms then ÷1000, zeroing every sub-1000s clip — `tiktokDurationToMs()` now normalizes the unit at capture so this is populated when present |
 | create_time | timestamptz | yes | — | original post time |
 | region | varchar(128) | yes | — | |
 | temporal_bucket | varchar(16) | yes | — | recent/mid/anchor (6-3-3 sampling) — **written Session 8** by `updateContentItemTranscript` during transcript wiring (previously never written; the read model + `getRunDiagnostics` already consumed it) |

@@ -49,6 +49,28 @@ Commits: `cdad30d` `ab534f9` `6428884` `bd212bf` `b69ed88` `dfcdcb1` `93f88f3` (
 
 ---
 
+## SESSION 10 — ADDRESSED (pool integrity + capture correctness)
+
+Prompted by the cross-run audit (@juarezaale, @kaylee.nhi, @alkvlogs, @anatolypranks91 + two failed attempts), which found **cross-creator contamination**: viral videos (e.g. the 95.3M-view #hooverdam clip `7615724915156667679`, and `7621991999251467550`) leaked into *every* creator's pool. fitEngine/scoring, confidence thresholds, velocity heuristics, and what-counts-as-evidence were left **frozen** (Jason's rulings). All on `main`; **no DDL, no migration**.
+
+**Pool integrity (Commit `2294706`) — stop foreign videos entering the pool:**
+- Root cause was three compounding fail-*opens*: (a) the scrape XHR interceptor matched the bare substring `item_list`, capturing TikTok's *recommended* feed responses, not just the creator's own posts; (b) the profile/API collection path applied **no** author check; (c) the search path's guard `normalizedHandle.includes(authorNorm)` returned `true` for an empty author.
+- Fix: author verification implemented **once** as `@shared/authorMatch` (`isAuthorMatch` / `normalizeCreatorHandle`), **fail-closed** — an empty/missing author is a non-match, never a pass. Applied to every TikTok collection path (API/profile, 4-query search). XHR interception narrowed to `/api/post/item_list`; `parseItemList` no longer fabricates the target handle as the author default (`?? ""`, was `?? handle`).
+- Rejected foreign items are counted per run in `persistence_status._meta.pool.authorRejected` and surfaced in the Run panel ("N foreign videos excluded — author mismatch").
+- Collection paths audited: TikTok API/profile (**guarded** + XHR narrowed), TikTok search (**guarded**), Instagram (target-profile-only, no discovery vector), YouTube (channel-by-id, no discovery vector), `ingestSupplementalVideo` (analyst-selected, out of the automated pool).
+
+**Capture correctness (Commit `03b3af5`) — video duration:**
+- TikTok's `video.duration` is **seconds** on the web item_list; it was consumed as milliseconds then ÷1000, zeroing every sub-1000s clip (all 397 content_items were 0). `tiktokDurationToMs()` normalizes the unit at capture; `avg_video_duration` now carries an honest **capture-gap** skip label when the payload genuinely lacked it, distinct from "no videos captured".
+
+**Panel residuals (Commit `8ef3748`):**
+- (3a) transcript-source breakdown re-attached to the with-transcript group (was rendered against "metadata-only").
+- (3b) search-failure consequence made **proportionate**: the pool-limitation warning fires only when *every* query failed; a partial failure is stated as fact ("1 of 4 … partially degraded; the profile/API page still provided the primary pool").
+- (3c) the `VITE_API_URL`-unset warning fires only on a frontend-only host (vercel/netlify/pages.dev/github.io), not on the same-origin Railway deployment where the fallback is correct.
+
+Commits: `2294706` `03b3af5` `8ef3748` (+ docs).
+
+---
+
 ## TABLE OF CONTENTS
 
 1. Stage 1 — Entry (preflight → analyze; auth, rate limiting, run-id, duplicate gate; rerun/bulk/ingest variants)
