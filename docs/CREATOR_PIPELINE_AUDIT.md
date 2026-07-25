@@ -900,3 +900,42 @@ Common theme: **almost every break is soft (empty/null/wrong-data), not a throw.
 ---
 
 *End of audit. Diagnosis only — no fixes proposed. Items flagged "could not determine": live scrape success rates per strategy; whether post-Session-7 `scrape_events` rows exist for a real run (needs DB read); Gemini's actual determinism at temp 0; runtime frequency of each transcript path.*
+
+---
+
+## ADDENDUM — Scraper-reliability session (2026-07-25)
+
+Capture-reliability changes only; interpretation (thresholds, confidence,
+scoring) untouched. Full failure taxonomy: 1,005 scrape_events 2026-06-19→07-25.
+
+**Strategy chains** (transcriptStrategies pattern extended): TikTok profile
+capture (`profile_rehydration_http` + `profile_xhr_scroll`, profileScraper.ts)
+and search (`search_xhr_scroll` + one bounded transient-retry, searchScraper.ts)
+are named, individually instrumented units. Superseded attempts carry
+`"search "`/`"profile "`-prefixed failure_reasons; the run-panel query math
+skips those prefixes (one query/path = one unmarked terminal record). This
+addresses prioritized finding **#5** (single fragile video strategy with soft
+failure): an empty capture is now classified and retried once before rejection.
+
+**Empty-capture discriminator** (`classifyEmptyCapture`): only a videoCount of
+0 confirmed by a healthy structured read (XHR user-detail or rehydration JSON)
+is genuine-empty → clean fast reject. Stated >0, absent, unreadable, or
+regex-only 0 → one retry on a fresh context. Rejection messages now distinguish
+"profile reports 0 posts" from "capture blocked — retry in a minute; do not
+delete the profile."
+
+**Removed fallbacks (do not restore without fresh evidence):**
+- TikTok search HTML-parse leg — **0 successes in 38 lifetime attempts**; the
+  SIGI_STATE parse target no longer exists on search pages.
+- Google webcache profile leg — 3/12 lifetime, then 429-walled; Google retired
+  webcache in 2024.
+- Path A desktop-HTTP profile fetch — dead code since FIX 3.4 skipped it.
+
+**Instagram/YouTube caveat (read this before the next taxonomy):** those paths
+show **zero observed failures** in telemetry (instagram_oembed 16/16,
+youtube_html 18/18) — but that reflects **near-zero exercise** (almost no
+local-era Instagram/YouTube creator runs), **not proven health**. Their fetch
+paths are download-instrumented via `fetchHtml`'s auto-record plus explicit
+events in the Instagram scrapers; no fallback chains were built for them, per
+the design-against-observed-failures rule. Expect their true failure modes to
+surface only once they get real use.
