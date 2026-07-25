@@ -1956,12 +1956,25 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   }
 
   // ── Capture health (scraper-reliability Part 3, reporting only) ──
-  // Derived live so historical runs get it too. Evidence proxy for the thin
-  // tier: transcripts = captured videos with transcript text; titles =
-  // captured videos with a non-empty caption (captions are what the pipeline's
-  // title evidence is built from).
+  // Source of truth: the assessment STORED at the run's terminal write
+  // (recordRunOutcome computed it with the pipeline's true evidence counts).
+  // Live derivation is the fallback for historical runs that predate the
+  // signal — its evidence proxy (transcripted videos / captioned videos) is
+  // honest but coarser, so the stored value always wins when present.
+  let storedHealth: CaptureHealth | undefined;
+  if (runId) {
+    try {
+      const [runRow] = await db
+        .select({ errorLog: pipelineRuns.errorLog })
+        .from(pipelineRuns)
+        .where(eq(pipelineRuns.id, runId))
+        .limit(1);
+      const candidate = (runRow?.errorLog as { captureHealth?: CaptureHealth } | null)?.captureHealth;
+      if (candidate && typeof candidate.status === "string") storedHealth = candidate;
+    } catch { /* fall through to live derivation */ }
+  }
   const captionCount = contentRows.filter(ci => (ci.caption ?? "").trim().length > 0).length;
-  const captureHealth = deriveCaptureHealth(
+  const captureHealth = storedHealth ?? deriveCaptureHealth(
     scrapeRows.map(e => ({
       failureReason: e.failureReason,
       silentFailure: Boolean(e.silentFailureDetected),
