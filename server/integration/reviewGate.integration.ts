@@ -208,7 +208,7 @@ suite("review gate + run provenance (ephemeral Postgres)", () => {
     // Default list shows the pending profile (marked); matchableOnly excludes it
     const defaultList = await db.listCreatorProfiles();
     expect(defaultList.some((c: any) => c.handle === "pending_matcher" && c.reviewStatus === "pending")).toBe(true);
-    const matchable = await db.listCreatorProfiles(undefined, undefined, { matchableOnly: true });
+    const matchable = await db.listCreatorProfiles(undefined, { matchableOnly: true });
     expect(matchable.some((c: any) => c.handle === "pending_matcher")).toBe(false);
 
     // Seed a brand (ungated this session — persists as accepted)

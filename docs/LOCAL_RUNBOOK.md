@@ -1,11 +1,11 @@
 # Womo — Local Runbook (macOS)
 
-Womo runs **local-first**: the whole app (UI + analysis engine) runs on your
+Womo is **local-only**: the whole app (UI + analysis engine) runs on your
 laptop and connects to the **shared cloud Supabase** database. Analyses you run
 locally are saved to the same database every analyst uses. Your residential IP
-and full local memory make scraping *more* reliable than the hosted fallback —
-and the local browser profile removes the container's crash-prone
-`--single-process` mode automatically.
+and full local memory make scraping reliable — and the local browser profile
+avoids the container-era crash-prone `--single-process` mode automatically.
+There is no login: the app opens directly.
 
 This guide takes you from `git clone` to a running app. No prior knowledge of
 the codebase is assumed.
@@ -49,12 +49,8 @@ Kian / the team vault — they are never committed to the repo):
 - `DATABASE_URL` — the shared Supabase **connection-pooler** URL
 - `GEMINI_API_KEY` — Google AI Studio key (the analysis LLM)
 - `GOOGLE_MAPS_API_KEY` — brand analysis
-- `PIN_CODE` — what you'll type on the login screen (yours to choose)
-- `JWT_SECRET` — generate with:
-  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 
-Everything else in the template is optional or hosted-only. **Never commit
-`.env`.**
+Everything else in the template is optional tuning. **Never commit `.env`.**
 
 ## 5. Run
 
@@ -62,9 +58,9 @@ Everything else in the template is optional or hosted-only. **Never commit
 pnpm start:local
 ```
 
-Wait for `serving on port 3000`, then open **<http://localhost:3000>** and log
-in with your `PIN_CODE`. That's the whole loop — analyses run on your machine
-and persist to the shared database.
+Wait for `serving on port 3000`, then open **<http://localhost:3000>** — the
+app opens directly (no login). That's the whole loop — analyses run on your
+machine and persist to the shared database.
 
 To stop: `Ctrl-C` in the terminal. To run again later: `pnpm start:local`.
 
@@ -75,10 +71,10 @@ To stop: `Ctrl-C` in the terminal. To run again later: `pnpm start:local`.
 - **Start of a work session:** `git pull` then `pnpm start:local`. If
   `package.json`/`pnpm-lock.yaml` changed in the pull, run `pnpm install` first.
 - **Analyses appear for everyone** — the database is shared. The Library shows
-  runs from every analyst (and from the hosted fallback, if used).
+  runs from every analyst.
 - **Timeout tuning:** a hard creator that exceeds the 5-minute analysis window
   can be given more room locally — set `ANALYSIS_TIMEOUT_MS=600000` in `.env`
-  and restart. (The hosted app cannot do this; its gateway cuts at ~5 min.)
+  and restart.
 
 ## Version discipline (multi-analyst)
 
@@ -98,15 +94,8 @@ must stay compatible:
 
 | Symptom | Fix |
 |---|---|
-| `Missing required env vars` on startup | You're running the production build. Use `pnpm start:local` (development mode) — it only needs the [required] values above. |
-| Login does nothing / loops | Wrong `PIN_CODE` in `.env` vs what you typed; or restart after editing `.env` (env is read at boot). |
 | `browserType.launch: Executable doesn't exist` | Step 3 was skipped — run `pnpm exec playwright install chromium`. |
 | Database errors on every page | `DATABASE_URL` wrong or the pooler string lost its password when pasted. Test with step 5's boot log — a dead DB warns at startup. |
 | Analysis times out on a huge creator | Raise `ANALYSIS_TIMEOUT_MS` (see Day-to-day) and retry. Also check the run's diagnostics panel — "insufficient data" is TikTok returning nothing, not a timeout; just retry those. |
 | Port 3000 already in use | Set `PORT=3001` in `.env` (or quit the other process). |
-
-## What the hosted deployment is now
-
-The Railway/Vercel deployment is an **unused fallback**, left configured but
-not required for anything in this runbook. It shares the same database, so if
-it's ever turned back on, it sees the same library.
+| LLM errors (`401 Unauthorized`) on every analysis | The `GEMINI_API_KEY` is invalid or was revoked — issue a new key in Google AI Studio and update `.env`, then restart. |

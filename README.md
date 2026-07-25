@@ -4,15 +4,15 @@ Womo analyzes TikTok/Instagram/YouTube creators and brands (scraping →
 transcript capture → LLM cultural extraction → scored F.I.T. matching) and
 stores every run, with full provenance, in a shared cloud Supabase database.
 
-**The app runs local-first**: each analyst runs the whole app on their own
-laptop against the shared database. The Railway/Vercel deployment is an unused
-fallback.
+**The app is local-only**: each analyst runs the whole app on their own laptop
+against the shared database. There is no hosted deployment and no login — the
+app opens directly.
 
 ## Run it
 
 → **[docs/LOCAL_RUNBOOK.md](docs/LOCAL_RUNBOOK.md)** — clone → `pnpm install` →
 `pnpm exec playwright install chromium` → `.env` from
-[.env.example](.env.example) → **`pnpm start:local`** → log in at
+[.env.example](.env.example) → **`pnpm start:local`** → open
 <http://localhost:3000>.
 
 ## How it's put together
@@ -29,9 +29,7 @@ drizzle/schema.ts        types mirror of the Supabase schema (see below)
 docs/                    the real documentation (see pointers below)
 ```
 
-- **Auth:** shared-PIN login sets an HMAC-signed cookie (`JWT_SECRET`);
-  `protectedProcedure` checks it. No OAuth. Cookies are per-origin, so local
-  and hosted logins are independent.
+- **Auth:** none — internal local-only app; every tRPC procedure is public.
 - **Database:** one shared cloud Supabase for all analysts. **Schema changes go
   through reviewed Supabase migrations only** — `pnpm db:push` is intentionally
   blocked (no drizzle ledger exists); mirror applied migrations into
@@ -44,11 +42,10 @@ docs/                    the real documentation (see pointers below)
 
 | Command | What |
 |---|---|
-| `pnpm start:local` | run the app locally (THE run command; alias of `dev`) |
+| `pnpm start:local` | run the app (THE run command; alias of `dev`) |
 | `pnpm check` | typecheck |
 | `pnpm test` | unit tests (includes the frozen-scoring golden suite) |
 | `pnpm test:db:up` / `pnpm test:integration` / `pnpm test:db:down` | integration tests against a disposable Docker Postgres |
-| `pnpm build` / `pnpm start` | production build/serve (hosted fallback path) |
 
 ## Documentation map
 

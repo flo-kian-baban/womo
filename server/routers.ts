@@ -845,9 +845,8 @@ export const appRouter = router({
 
         // ── FIX 1.1: Global analysis timeout ──
         // Wrap the raced work in Promise.race with a timeout so hung Playwright
-        // pages can't block the request forever. Local-first C2: the deadline is
-        // config (ANALYSIS_TIMEOUT_MS env; default 300s = the historical hosted
-        // value, which must stay below Railway's ~300s gateway cutoff there).
+        // pages can't block the request forever. The deadline is config
+        // (ANALYSIS_TIMEOUT_MS env; default 300s — raise for hard creators).
         const ANALYSIS_TIMEOUT_MS = ENV.analysisTimeoutMs;
 
         const workPromise = (async () => {
@@ -1062,7 +1061,7 @@ export const appRouter = router({
         matchableOnly: z.boolean().optional(),
       }))
       .query(async ({ input }) => {
-        return listCreatorProfiles(undefined, input.search, { matchableOnly: input.matchableOnly });
+        return listCreatorProfiles(input.search, { matchableOnly: input.matchableOnly });
       }),
 
     // Archived (declined) runs — retained, never deleted; browsable for
@@ -1649,7 +1648,7 @@ export const appRouter = router({
     list: publicProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(async ({ input }) => {
-        return listBrandProfiles(undefined, input.search);
+        return listBrandProfiles(input.search);
       }),
 
     get: publicProcedure

@@ -3,14 +3,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { createHash } from "crypto";
 import {
-  users,
   subjects, observations, creatorObservations, brandObservations,
   signalValues, decodedSignals, contentItems,
   nicheTaxonomy, archetypeTransitions, audienceMentions,
   llmInvocations, scrapeEvents,
   matchScores, matchNarratives, matchWarnings, matchOverlaps, matchContentDirections,
   semanticDocuments, pipelineRuns, platformHandles,
-  type InsertUser, type InsertSubject, type InsertObservation,
+  type InsertSubject, type InsertObservation,
   type InsertCreatorObservation, type InsertBrandObservation,
   type InsertSignalValue, type InsertDecodedSignal, type InsertContentItem,
   type InsertMatchScore, type InsertAudienceMention,
@@ -20,9 +19,6 @@ import { currentRunId } from './_core/runContext';
 import { canonicalizeHandle } from './_core/handles';
 import { isSpeechTranscript, classifyTranscriptSource } from '@shared/transcriptSource';
 import { computeLlmCostUsd } from '../shared/llmPricing';
-
-// Re-export legacy types for routers.ts compilation
-export type { InsertUser } from "../drizzle/schema";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DATABASE-DOWN POLICY (uniform — Session 5)
@@ -160,46 +156,6 @@ export async function withTransaction<T>(fn: (tx: DbTransaction) => Promise<T>):
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(fn);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// USERS (auth layer — migrated from V1)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  try {
-    const values: InsertUser = { openId: user.openId };
-    const updateSet: Record<string, unknown> = {};
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-    textFields.forEach(assignNullable);
-    if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
-    if (user.role !== undefined) { values.role = user.role; updateSet.role = user.role; }
-    else if (user.openId === ENV.ownerOpenId) { values.role = 'admin'; updateSet.role = 'admin'; }
-    if (!values.lastSignedIn) values.lastSignedIn = new Date();
-    if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-    await db.insert(users).values(values).onConflictDoUpdate({
-      target: users.openId,
-      set: updateSet,
-    });
-  } catch (error) { console.error("[Database] Failed to upsert user:", error); throw error; }
-}
-
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2144,7 +2100,6 @@ export async function getProvenance(observationId: string) {
 }
 
 export async function listCreatorProfiles(
-  userId?: number,
   search?: string,
   opts?: {
     /** true = accepted only (matching eligibility); default lists accepted + pending */
@@ -2622,7 +2577,7 @@ export async function getBrandProfileById(subjectId: string) {
   };
 }
 
-export async function listBrandProfiles(userId?: number, search?: string) {
+export async function listBrandProfiles(search?: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -2889,7 +2844,7 @@ export async function insertMatchContentDirections(
 // PHASE C — READ FUNCTIONS (Match)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export async function listMatchRecords(userId?: number) {
+export async function listMatchRecords() {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { notifyOwner } from "./notification";
 import { publicProcedure, router } from "./trpc";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
 import { getContext, retireContext } from "../scraping/browserClient";
@@ -108,20 +107,6 @@ export const systemRouter = router({
     .query(() => ({
       ok: true,
     })),
-
-  notifyOwner: publicProcedure
-    .input(
-      z.object({
-        title: z.string().min(1, "title is required"),
-        content: z.string().min(1, "content is required"),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const delivered = await notifyOwner(input);
-      return {
-        success: delivered,
-      } as const;
-    }),
 
   apiStatus: publicProcedure.query(async () => {
     // Run all three probes in parallel — each has its own timeout/error handling
