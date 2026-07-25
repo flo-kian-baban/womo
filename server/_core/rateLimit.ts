@@ -10,7 +10,6 @@
  */
 
 import { TRPCError } from "@trpc/server";
-import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { t } from "./trpc";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -107,16 +106,6 @@ function createRateLimitMiddleware(config: RateLimitConfig) {
   });
 }
 
-// ─── Pilot auth middleware (cookie check) ────────────────────────────────────
-
-const requirePilotAuth = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
-  if (!ctx.authenticated) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-  }
-  return next({ ctx });
-});
-
 // ─── Pre-Built Rate-Limited Procedures ───────────────────────────────────────
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -136,43 +125,37 @@ export const loginRateLimitedProcedure = t.procedure.use(
 );
 
 /**
- * Procedure: auth required + rate limited at 10 requests/hour.
+ * Procedure: rate limited at 10 requests/hour.
  * Used for: creator.analyze, brand.analyze
  */
-export const analysisRateLimitedProcedure = t.procedure
-  .use(requirePilotAuth)
-  .use(
-    createRateLimitMiddleware({
-      maxRequests: 10,
-      windowMs: ONE_HOUR_MS,
-      procedureName: "analysis",
-    })
-  );
+export const analysisRateLimitedProcedure = t.procedure.use(
+  createRateLimitMiddleware({
+    maxRequests: 10,
+    windowMs: ONE_HOUR_MS,
+    procedureName: "analysis",
+  })
+);
 
 /**
- * Procedure: auth required + rate limited at 20 requests/hour.
+ * Procedure: rate limited at 20 requests/hour.
  * Used for: fit.calculate
  */
-export const fitRateLimitedProcedure = t.procedure
-  .use(requirePilotAuth)
-  .use(
-    createRateLimitMiddleware({
-      maxRequests: 20,
-      windowMs: ONE_HOUR_MS,
-      procedureName: "fit.calculate",
-    })
-  );
+export const fitRateLimitedProcedure = t.procedure.use(
+  createRateLimitMiddleware({
+    maxRequests: 20,
+    windowMs: ONE_HOUR_MS,
+    procedureName: "fit.calculate",
+  })
+);
 
 /**
- * Procedure: auth required + rate limited at 2 requests/hour.
+ * Procedure: rate limited at 2 requests/hour.
  * Used for: creator.bulkAnalyze
  */
-export const bulkRateLimitedProcedure = t.procedure
-  .use(requirePilotAuth)
-  .use(
-    createRateLimitMiddleware({
-      maxRequests: 2,
-      windowMs: ONE_HOUR_MS,
-      procedureName: "creator.bulkAnalyze",
-    })
-  );
+export const bulkRateLimitedProcedure = t.procedure.use(
+  createRateLimitMiddleware({
+    maxRequests: 2,
+    windowMs: ONE_HOUR_MS,
+    procedureName: "creator.bulkAnalyze",
+  })
+);

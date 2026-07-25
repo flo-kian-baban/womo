@@ -4,8 +4,11 @@
  * Locks in the PIN → HMAC-cookie auth so it can't silently regress to the old
  * forgeable literal-"authenticated" scheme:
  *   - createContext validates the HMAC-signed `womo_pilot_auth` cookie
- *   - protectedProcedure rejects unauthenticated callers
  *   - login sets the cookie with hardened flags; logout clears it; check reflects state
+ *
+ * (The protectedProcedure-gate tests were removed in Phase A of the internal
+ * local-only conversion — the gate itself is gone; this whole file goes with
+ * the auth system in Phase B.)
  *
  * JWT_SECRET / PIN_CODE come from vitest.config.ts test.env.
  */
@@ -14,7 +17,6 @@ import { describe, it, expect } from "vitest";
 import { createHmac } from "crypto";
 import { createContext } from "./_core/context";
 import type { TrpcContext } from "./_core/context";
-import { protectedProcedure, router } from "./_core/trpc";
 import { appRouter, pilotCookieAttributes } from "./routers";
 
 const SECRET = process.env.JWT_SECRET!;
@@ -51,19 +53,6 @@ describe("createContext HMAC cookie validation", () => {
     const tampered = validCookie.slice(0, -1) + (last === "a" ? "b" : "a");
     const ctx = await createContext({ req: mockReq(`womo_pilot_auth=${tampered}`), res: noRes } as never);
     expect(ctx.authenticated).toBe(false);
-  });
-});
-
-// ─── protectedProcedure gate ─────────────────────────────────────────────────
-describe("protectedProcedure gate", () => {
-  const testRouter = router({ ping: protectedProcedure.query(() => "pong") });
-  it("rejects with UNAUTHORIZED when ctx.authenticated is false", async () => {
-    const caller = testRouter.createCaller({ req: mockReq(), res: noRes, authenticated: false });
-    await expect(caller.ping()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-  it("allows the call when ctx.authenticated is true", async () => {
-    const caller = testRouter.createCaller({ req: mockReq(), res: noRes, authenticated: true });
-    await expect(caller.ping()).resolves.toBe("pong");
   });
 });
 
