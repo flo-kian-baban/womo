@@ -80,12 +80,9 @@ export async function getDb() {
  * Eager connectivity probe — a lightweight `select 1` run once at server
  * startup so a dead database surfaces immediately rather than at first query.
  *
- * Chosen failure policy:
- *  - production: FATAL (exit 1) — the platform (Railway) surfaces and restarts
- *    the dead deploy instead of serving an app whose every DB route 500s.
- *  - development: non-fatal warning — local work without a database (UI work,
- *    scraping experiments) stays possible; DB-touching routes throw per the
- *    policy above.
+ * Chosen failure policy: non-fatal warning — local work without a database
+ * (UI work, scraping experiments) stays possible; DB-touching routes throw
+ * per the policy above.
  */
 export async function probeDatabaseConnectivity(): Promise<boolean> {
   if (!process.env.DATABASE_URL) {
@@ -100,9 +97,6 @@ export async function probeDatabaseConnectivity(): Promise<boolean> {
     return true;
   } catch (err) {
     console.error("[Database] Startup connectivity probe FAILED — database unreachable:", err instanceof Error ? err.message : err);
-    if (process.env.NODE_ENV === "production") {
-      process.exit(1);
-    }
     return false;
   }
 }

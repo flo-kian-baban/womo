@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { setupVite } from "./vite";
 
 // ─── Process-level safety net ────────────────────────────────────────────────
 // A single unhandled rejection or uncaught exception must not silently wedge or
@@ -36,12 +36,9 @@ async function startServer() {
     })
   );
 
-  // development mode uses Vite, production mode uses static files
-  if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
+  // Local-only app: always serve the client through Vite middleware (no build
+  // step, no static dist). Runs the same regardless of NODE_ENV.
+  await setupVite(app, server);
 
   // ─── Port binding ────────────────────────────────────────────────────────────
   // Bind directly to process.env.PORT (default 3000) — no port scanning.
@@ -54,7 +51,7 @@ async function startServer() {
 
     // Eager DB connectivity probe (select 1) — the pg Pool constructor never
     // connects, so without this a dead database only surfaces at first query.
-    // Fatal in production (exit 1 → platform restarts), warning in dev.
+    // Non-fatal: logs a warning so a bad DATABASE_URL is visible at boot.
     import("../db").then(({ probeDatabaseConnectivity }) =>
       probeDatabaseConnectivity().catch(err =>
         console.error("[startup] DB connectivity probe threw unexpectedly:", err),
