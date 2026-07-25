@@ -38,10 +38,6 @@ export const ENV = {
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
 
-  // ─── CORS — comma-separated list of allowed origins ───────────────────────
-  // In Railway, set to your Vercel URL: https://your-app.vercel.app
-  allowedOrigins: process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://localhost:3001",
-
   // ─── Analysis timeout (local-first, C2) ────────────────────────────────────
   // The analyze race deadline. Default 300s = the historical hosted value
   // (must stay below Railway's ~300s gateway cutoff there). Locally there is
@@ -74,24 +70,14 @@ const REQUIRED_IN_PRODUCTION = [
   "GEMINI_API_KEY",
   "DATABASE_URL",
   "JWT_SECRET",
-  "ALLOWED_ORIGINS",
 ] as const;
 
 if (process.env.NODE_ENV === "production") {
   const missing = REQUIRED_IN_PRODUCTION.filter((k) => !process.env[k]);
   if (missing.length > 0) {
     console.error(
-      `[env] FATAL: Missing required env vars in production: ${missing.join(", ")}\n` +
-      `[env] Set these in Railway's Variables panel before deploying.`
+      `[env] FATAL: Missing required env vars in production: ${missing.join(", ")}`
     );
     process.exit(1);
-  }
-  // Warn if ALLOWED_ORIGINS still contains localhost in production
-  if (ENV.allowedOrigins.includes("localhost")) {
-    console.warn(
-      "[env] ⚠️  ALLOWED_ORIGINS contains 'localhost' in production — " +
-      "cross-origin requests from your Vercel frontend will be blocked. " +
-      "Set ALLOWED_ORIGINS to your Vercel deployment URL."
-    );
   }
 }
