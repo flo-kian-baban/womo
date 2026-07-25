@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
     "start:local": "NODE_ENV=development tsx watch server/_core/index.ts",
+    "spike:electron": "electron electron/main.cjs",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
@@ -99,6 +100,7 @@
     "add": "^2.0.6",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.5",
+    "electron": "^43.2.0",
     "esbuild": "^0.25.0",
     "pnpm": "^10.15.1",
     "postcss": "^8.4.47",
@@ -113,6 +115,9 @@
   },
   "packageManager": "pnpm@10.4.1+sha512.c753b6c3ad7afa13af388fa6d808035a008e30ea9993f58c6663e2bc5ff21679aa834db094987129aa4d488b86df57f7b634981b2f827cdcacc698cc0cfb88af",
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ],
     "patchedDependencies": {
       "wouter@3.7.1": "patches/wouter@3.7.1.patch"
     },
