@@ -18,7 +18,6 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
-  recordRunOutcome,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -31,8 +30,8 @@ import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES 
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand } from "./webResearch";
-import { isBrowserDeadError } from "./scraping/browserClient";
-import { startRunMemoryTracker } from "./scraping/memoryTelemetry";
+import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
+import type { RunOutcomeStatus } from "./db";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
@@ -40,27 +39,9 @@ import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, ma
 import { newRunId, withAnalysisRun } from "./_core/runContext";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
-import pLimit from "p-limit";
-
-// ─── Concurrency limiter ─────────────────────────────────────────────────────
-// Limits simultaneous full creator/brand analyses to 2.
-// Each analysis holds Playwright browser contexts + LLM API slots.
-// Without this, 3+ concurrent requests can exhaust the browser pool (max 5 contexts)
-// and cause context eviction mid-analysis.
-const analysisConcurrencyLimit = pLimit(2);
-
-// Session 11 (Commit 7): map a run failure to a terminal-outcome status for
-// pipeline_runs telemetry. TIMEOUT is owned by the outer racer; here we classify
-// the work's own failure — a min-data rejection (PRECONDITION_FAILED), a browser
-// crash surfacing to the mutation, or an otherwise-unclassified error.
-function classifyRunFailure(err: unknown): "timeout" | "min_data_rejection" | "crash" | "error" {
-  if (err instanceof TRPCError) {
-    if (err.code === "TIMEOUT") return "timeout";
-    if (err.code === "PRECONDITION_FAILED") return "min_data_rejection";
-  }
-  if (isBrowserDeadError(err)) return "crash";
-  return "error";
-}
+// Run machinery (concurrency limiter, failure classification, timeout race,
+// terminal telemetry) moved to ./_core/instrumentedRun (scraper-reliability
+// Part 4) — shared by analyze and reanalyze, pinned by instrumentedRun.test.ts.
 
 // ─── V2 Pipeline Helpers ─────────────────────────────────────────────────────
 
@@ -836,21 +817,17 @@ export const appRouter = router({
         // and llm_invocation below inherits it via AsyncLocalStorage (see
         // _core/runContext.ts), and the observation is stamped with it.
         const runId = newRunId();
-        return withAnalysisRun(runId, async () => {
-        const pipelineStart = Date.now();
-        const stepTimings: Array<{ step: string; durationMs: number }> = [];
-        // Part 1 (stability session): passive memory sampling for the whole run —
-        // summary lands in pipeline_runs.error_log.memory on every terminal write.
-        const memTracker = startRunMemoryTracker();
-
-        // ── FIX 1.1: Global analysis timeout ──
-        // Wrap the raced work in Promise.race with a timeout so hung Playwright
-        // pages can't block the request forever. The deadline is config
-        // (ANALYSIS_TIMEOUT_MS env; default 300s — raise for hard creators).
-        const ANALYSIS_TIMEOUT_MS = ENV.analysisTimeoutMs;
-
-        const workPromise = (async () => {
-          try {
+        // Scraper-reliability Part 4: the run machinery (memory tracker, global
+        // timeout race with in-race persistence/salvage, shared concurrency
+        // pool, terminal telemetry on all three exits) lives in
+        // runInstrumentedAnalysis — extracted VERBATIM from this endpoint and
+        // pinned by instrumentedRun.test.ts. The work below is unchanged.
+        return runInstrumentedAnalysis({
+          runId,
+          runType: "creator_analysis",
+          timeoutMs: ENV.analysisTimeoutMs,
+          timeoutMessage: `Analysis timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
+          work: async ({ pipelineStart, stepTimings }) => {
             // Step 1: Research
             const t1 = Date.now();
             const research = await researchCreator(input.handleOrUrl, input.platform);
@@ -968,89 +945,37 @@ export const appRouter = router({
             }
             const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
 
-            // Terminal telemetry — the authoritative outcome for this run.
-            // Part 1 (stability session): every terminal write carries the run's
-            // peak-memory summary (error_log.memory) for the --single-process call.
-            await recordRunOutcome(
-              runId,
-              persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none",
-              {
-                startedAt: new Date(pipelineStart),
-                detail: {
-                  ...(persistence.saved === "full" ? {} : {
-                    saved: persistence.saved,
-                    error: persistence.error ?? null,
-                    failedComponents: persistence.failedComponents ?? [],
-                  }),
-                  memory: memTracker.stop(),
-                },
-              },
-            );
-
-            // Return saved profile + persistence outcome + pipeline metrics
+            // Terminal telemetry (status/detail) is written by the wrapper on
+            // return; the payload below is identical to the old inline
+            // recordRunOutcome, plus Part 3's captureEvidence for the
+            // capture-health thin tier (reporting only).
             const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
             return {
-              profile: saved,
-              persistence,
-              extracted,
-              runId,
-              pipelineMetrics: {
-                totalDurationMs,
-                steps: stepTimings,
-                tokens: tokenMetrics,
-                transcriptCount: researchData.transcriptCount ?? 0,
-                videosScraped: researchData.discoveredVideoPoolJson?.length ?? 0,
+              status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
+              detail: persistence.saved === "full" ? {} : {
+                saved: persistence.saved,
+                error: persistence.error ?? null,
+                failedComponents: persistence.failedComponents ?? [],
+              },
+              captureEvidence: {
+                transcripts: researchData.transcriptCount ?? 0,
+                titles: researchData.recentVideoTitles?.length ?? 0,
+              },
+              value: {
+                profile: saved,
+                persistence,
+                extracted,
+                runId,
+                pipelineMetrics: {
+                  totalDurationMs,
+                  steps: stepTimings,
+                  tokens: tokenMetrics,
+                  transcriptCount: researchData.transcriptCount ?? 0,
+                  videosScraped: researchData.discoveredVideoPoolJson?.length ?? 0,
+                },
               },
             };
-          } catch (err) {
-            // The work itself failed (research / extraction / persist). Record the
-            // true terminal cause so a persist-time bail leaves telemetry instead of
-            // the old nothing (Part 0.3, run a8c1833e). TIMEOUT is not raised here —
-            // it belongs to the outer racer below.
-            await recordRunOutcome(runId, classifyRunFailure(err), {
-              startedAt: new Date(pipelineStart),
-              detail: {
-                message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
-                memory: memTracker.stop(),
-              },
-            });
-            throw err;
-          }
-        })();
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(
-            new TRPCError({
-              code: "TIMEOUT",
-              message: `Analysis timed out after ${Math.round(ANALYSIS_TIMEOUT_MS / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
-            })
-          ), ANALYSIS_TIMEOUT_MS)
-        );
-
-        try {
-          return await analysisConcurrencyLimit(() =>
-            Promise.race([workPromise, timeoutPromise])
-          );
-        } catch (err) {
-          if (err instanceof TRPCError && err.code === "TIMEOUT") {
-            // Provisional: the client sees a timeout, but workPromise keeps running
-            // and — if the extraction finishes — persists and upserts the real
-            // outcome, superseding this. A timed-out run is no longer lost work.
-            await recordRunOutcome(runId, "timeout", {
-              startedAt: new Date(pipelineStart),
-              detail: {
-                note: `race timeout at ${ENV.analysisTimeoutMs}ms; extraction may still complete and persist out-of-band`,
-                // Non-terminal snapshot: workPromise is still running and owns the
-                // tracker's final stop() on its own success/failure path.
-                memory: memTracker.summarySoFar(),
-              },
-            });
-          }
-          // If the timeout won, don't let workPromise's later settlement surface as
-          // an unhandled rejection.
-          void workPromise.catch(() => {});
-          throw err;
-        }
+          },
         });
       }),
 
@@ -1171,9 +1096,19 @@ export const appRouter = router({
     reanalyze: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
-        // womo_0006: reanalyze is its own analysis run
+        // womo_0006: reanalyze is its own analysis run.
+        // Scraper-reliability Part 4: PARITY with analyze — the same
+        // instrumented wrapper (shared 2-slot concurrency pool, memory tracker,
+        // timeout race with in-race persistence, terminal pipeline_runs
+        // telemetry on all three exits; run_type "creator_reanalysis"), plus
+        // analyze's extraction retry and the followingCount field it dropped.
         const runId = newRunId();
-        return withAnalysisRun(runId, async () => {
+        return runInstrumentedAnalysis({
+          runId,
+          runType: "creator_reanalysis",
+          timeoutMs: ENV.analysisTimeoutMs,
+          timeoutMessage: `Re-analysis timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
+          work: async () => {
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new Error("Creator profile not found");
 
@@ -1187,6 +1122,9 @@ export const appRouter = router({
           researchedProfileUrl = research.profileUrl;
           researchData = {
             followerCount: research.followerCount || undefined,
+            // Part 4 parity: analyze threads followingCount (I1); reanalyze
+            // dropped it, orphaning the field on every rerun observation.
+            followingCount: research.followingCount || undefined,
             totalLikes: research.totalLikes || undefined,
             videoCount: research.videoCount || undefined,
             totalViews: research.totalViews || undefined,
@@ -1233,7 +1171,23 @@ export const appRouter = router({
           });
         }
 
-        const extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+        // Part 4 parity: same one-retry extraction analyze has (transient LLM
+        // hiccups should not kill an otherwise-good rerun).
+        let extracted;
+        try {
+          extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+        } catch (firstErr) {
+          console.warn("[creator.reanalyze] First extraction attempt failed, retrying:", firstErr);
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+          } catch (secondErr) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Creator extraction failed after retry. Please try again.",
+            });
+          }
+        }
 
         // V2: reanalyze creates a new observation (append-only)
         const reanalyzePersistResult = await persistCreatorToV2({
@@ -1257,7 +1211,20 @@ export const appRouter = router({
         // NOTE: on saved === "none" this returns the PREVIOUS profile — the
         // persistence field is what tells the caller the rerun was not saved.
         const updated = await getCreatorProfileById(input.id);
-        return { profile: updated, persistence, extracted, runId };
+        return {
+          status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
+          detail: persistence.saved === "full" ? {} : {
+            saved: persistence.saved,
+            error: persistence.error ?? null,
+            failedComponents: persistence.failedComponents ?? [],
+          },
+          captureEvidence: {
+            transcripts: researchData.transcriptCount ?? 0,
+            titles: researchData.recentVideoTitles?.length ?? 0,
+          },
+          value: { profile: updated, persistence, extracted, runId },
+        };
+          },
         });
       }),
 
