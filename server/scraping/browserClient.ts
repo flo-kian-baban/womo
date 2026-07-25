@@ -16,6 +16,7 @@
 import { chromium } from "playwright-extra";
 import type { Browser, BrowserContext, Page, Route } from "playwright";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { existsSync } from "fs";
 
 // Apply stealth plugin at module level
 chromium.use(StealthPlugin());
@@ -117,22 +118,68 @@ let _cleanupTimer: ReturnType<typeof setInterval> | null = null;
 // ─── Memory instrumentation (isolated stability session, Part 1) ─────────────
 // Passive counters read by scraping/memoryTelemetry.ts — measurement only.
 
-/**
- * The exact Chromium launch args, exported so telemetry rows self-describe which
- * flag configuration produced them (--single-process present or not). Single
- * source of truth: ensureBrowser() launches with THIS array.
- */
-export const BROWSER_LAUNCH_ARGS = [
+// ─── Environment-profiled launch args (local-first session, C1) ──────────────
+//
+// The container flags — above all --single-process — exist for headless Docker
+// on Railway ("GPU initialization crashes", 1bb2d2d). --single-process is also
+// the MEASURED crash root cause (a renderer crash kills the whole browser;
+// ~1-2 recoveries/run, storms of 7-8). On a normal macOS laptop none of that
+// medicine is needed, so the local profile drops every container-only flag and
+// keeps only the stealth flags. memoryTelemetry's `singleProcess` marker reads
+// the active args, so telemetry rows self-label their era automatically.
+
+export type BrowserProfile = "container" | "local";
+
+/** Stealth flags — both profiles. */
+const STEALTH_ARGS = [
+  "--disable-blink-features=AutomationControlled",
+  "--disable-infobars",
+] as const;
+
+/** Container-only medicine (headless Docker on Railway). */
+const CONTAINER_ARGS = [
   "--no-sandbox",
   "--disable-setuid-sandbox",
   "--disable-dev-shm-usage",
-  "--disable-blink-features=AutomationControlled",
-  "--disable-infobars",
   // Required in headless Docker to prevent GPU initialization crashes
   "--disable-gpu",
   "--disable-software-rasterizer",
   "--single-process",
 ] as const;
+
+/** The launch args for a given profile. Pure — exported for tests. */
+export function launchArgsForProfile(profile: BrowserProfile): readonly string[] {
+  return profile === "container" ? [...CONTAINER_ARGS, ...STEALTH_ARGS] : [...STEALTH_ARGS];
+}
+
+/**
+ * Resolve the active profile. Pure (deps injectable) — exported for tests.
+ * Precedence:
+ *   1. BROWSER_PROFILE env ("container" | "local") — explicit override, both ways;
+ *   2. container markers already present in the deployed image with ZERO Railway
+ *      changes: /.dockerenv (standard Docker) or PLAYWRIGHT_BROWSERS_PATH (set in
+ *      our Dockerfile);
+ *   3. default: local (an analyst laptop needs no configuration at all).
+ */
+export function resolveBrowserProfile(
+  env: Record<string, string | undefined> = process.env,
+  fileExists: (p: string) => boolean = existsSync,
+): BrowserProfile {
+  const override = (env.BROWSER_PROFILE ?? "").toLowerCase();
+  if (override === "container" || override === "local") return override;
+  if (fileExists("/.dockerenv") || Boolean(env.PLAYWRIGHT_BROWSERS_PATH)) return "container";
+  return "local";
+}
+
+/** The active profile, resolved once at module load (env is stable per process). */
+export const BROWSER_PROFILE: BrowserProfile = resolveBrowserProfile();
+
+/**
+ * The exact Chromium launch args, exported so telemetry rows self-describe which
+ * flag configuration produced them (--single-process present or not). Single
+ * source of truth: ensureBrowser() launches with THIS array.
+ */
+export const BROWSER_LAUNCH_ARGS: readonly string[] = launchArgsForProfile(BROWSER_PROFILE);
 
 const _poolStats = { browserLaunches: 0, launchTotalMs: 0, crashRecoveries: 0 };
 
@@ -250,7 +297,7 @@ export async function ensureBrowser(): Promise<Browser> {
 
   _browserLaunching = true;
   try {
-    console.log("[browserClient] Launching Chromium with stealth plugin...");
+    console.log(`[browserClient] Launching Chromium with stealth plugin (profile: ${BROWSER_PROFILE})...`);
 
     // Part 1 instrumentation: time every launch so relaunch cost is measurable.
     const launchStart = Date.now();

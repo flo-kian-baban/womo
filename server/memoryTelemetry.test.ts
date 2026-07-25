@@ -66,6 +66,19 @@ describe("startRunMemoryTracker", () => {
     expect(s.peakChromiumProcs).toBeNull();
     expect(s.peakChromiumRssMb).toBeNull();
   });
+
+  // Local-first C1: telemetry rows must self-label their flag era. The test
+  // environment is by definition off-container (no /.dockerenv, no
+  // PLAYWRIGHT_BROWSERS_PATH), so the active profile is local and the marker
+  // must read FALSE — and it must always agree with the active launch args.
+  it("singleProcess marker reads false on the local profile (and tracks the active args)", async () => {
+    const { BROWSER_LAUNCH_ARGS, BROWSER_PROFILE } = await import("./scraping/browserClient");
+    const tracker = startRunMemoryTracker({ intervalMs: 60_000, snapshotFn: () => snap({}) });
+    const s = tracker.stop();
+    expect(s.singleProcess).toBe(BROWSER_LAUNCH_ARGS.includes("--single-process")); // always consistent
+    expect(BROWSER_PROFILE).toBe("local");
+    expect(s.singleProcess).toBe(false); // the local era labels itself
+  });
 });
 
 describe("parsePsChromium", () => {

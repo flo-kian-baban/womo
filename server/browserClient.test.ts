@@ -16,6 +16,8 @@ import {
   reapStaleContexts,
   isWarmContextReusable,
   BROWSER_LAUNCH_ARGS,
+  launchArgsForProfile,
+  resolveBrowserProfile,
   getPoolSnapshot,
   __testPool,
 } from "./scraping/browserClient";
@@ -106,15 +108,64 @@ describe("isWarmContextReusable (FIX 1: no near-TTL handouts)", () => {
   });
 });
 
-describe("launch args (FIX 2: verified present + pinned)", () => {
-  it("carries --disable-dev-shm-usage (already present — pinned so it can't be dropped)", () => {
-    expect(BROWSER_LAUNCH_ARGS).toContain("--disable-dev-shm-usage");
+describe("launch-arg profiles (local-first C1)", () => {
+  const container = launchArgsForProfile("container");
+  const local = launchArgsForProfile("local");
+
+  it("container profile MUST keep --single-process and --disable-dev-shm-usage (Docker medicine intact)", () => {
+    expect(container).toContain("--single-process");
+    expect(container).toContain("--disable-dev-shm-usage");
+    expect(container).toContain("--no-sandbox");
+    expect(container).toContain("--disable-setuid-sandbox");
+    expect(container).toContain("--disable-gpu");
   });
-  it("still carries --single-process (explicitly unchanged this session)", () => {
-    expect(BROWSER_LAUNCH_ARGS).toContain("--single-process");
+
+  it("local profile MUST NOT carry --single-process or sandbox/container flags (the crash-root fix)", () => {
+    expect(local).not.toContain("--single-process");
+    expect(local).not.toContain("--no-sandbox");
+    expect(local).not.toContain("--disable-setuid-sandbox");
+    expect(local).not.toContain("--disable-dev-shm-usage");
+    expect(local).not.toContain("--disable-gpu");
   });
-  it("has no duplicate flags", () => {
-    expect(new Set(BROWSER_LAUNCH_ARGS).size).toBe(BROWSER_LAUNCH_ARGS.length);
+
+  it("stealth flags present in BOTH profiles", () => {
+    for (const args of [container, local]) {
+      expect(args).toContain("--disable-blink-features=AutomationControlled");
+      expect(args).toContain("--disable-infobars");
+    }
+  });
+
+  it("no duplicate flags in either profile", () => {
+    expect(new Set(container).size).toBe(container.length);
+    expect(new Set(local).size).toBe(local.length);
+  });
+});
+
+describe("resolveBrowserProfile (detection precedence)", () => {
+  const noFile = () => false;
+  const dockerenvOnly = (p: string) => p === "/.dockerenv";
+
+  it("BROWSER_PROFILE env override wins in BOTH directions", () => {
+    // force local inside a container…
+    expect(resolveBrowserProfile({ BROWSER_PROFILE: "local", PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" }, dockerenvOnly)).toBe("local");
+    // …and force container on a laptop
+    expect(resolveBrowserProfile({ BROWSER_PROFILE: "container" }, noFile)).toBe("container");
+  });
+
+  it("the deployed Railway image auto-detects container with ZERO config: /.dockerenv marker", () => {
+    expect(resolveBrowserProfile({}, dockerenvOnly)).toBe("container");
+  });
+
+  it("PLAYWRIGHT_BROWSERS_PATH (set in our Dockerfile) also marks container", () => {
+    expect(resolveBrowserProfile({ PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" }, noFile)).toBe("container");
+  });
+
+  it("defaults to LOCAL off-container — an analyst laptop needs no configuration", () => {
+    expect(resolveBrowserProfile({}, noFile)).toBe("local");
+  });
+
+  it("garbage override is ignored, detection proceeds", () => {
+    expect(resolveBrowserProfile({ BROWSER_PROFILE: "banana" }, noFile)).toBe("local");
   });
 });
 
