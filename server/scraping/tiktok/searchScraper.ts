@@ -1,14 +1,36 @@
 /**
- * TikTok Search Scraper — Phase 2
+ * TikTok Search Scraper — strategy-chain structure (scraper-reliability session).
  *
- * Replaces the Phase 1 searchStub.ts with a real Playwright-based
- * TikTok video search scraper.
+ * One real path, one named strategy, mirroring transcriptStrategies.ts:
  *
- * Strategy:
- *   1. Navigate to https://www.tiktok.com/search/video?q={query}
- *   2. Intercept XHR responses via page.route() to capture the search
- *      API response JSON directly
- *   3. Fallback: if no XHR captured, parse rendered page HTML
+ *   search_xhr_scroll — Playwright navigation to the search page, XHR
+ *                       interception of the search API (accumulated across
+ *                       in-page scroll pagination).
+ *
+ * plus ONE bounded transient-retry owned by the orchestrator: when an attempt
+ * dies from a transient runtime failure (context/page death, navigation abort),
+ * the query is retried once on a FRESH owned context. A clean zero-result
+ * response is NOT transient and is never retried here (the empty-capture
+ * discriminator lives in the profile phase, where profile stats exist to
+ * distinguish transient empties from genuinely postless creators).
+ *
+ * REMOVED (scraper-reliability Part 0, telemetry 2026-06-19 → 2026-07-25):
+ *   - HTML-parse fallback (SIGI_STATE / rehydration parse of the search page):
+ *     0 successes in 38 lifetime attempts — it has never parsed a single result
+ *     on today's TikTok search pages, and cost ~19s of futility per invocation.
+ *     Do not restore it without fresh evidence that the parse target exists.
+ *
+ * Telemetry contract (Session 9/10 run-panel math depends on it):
+ *   - Exactly ONE UNMARKED terminal scrape_event per query:
+ *       success    → clean tiktok_search_xhr row
+ *       zero-items → silent tiktok_search_xhr row ("no results via XHR capture";
+ *                    formerly logged under tiktok_search_html — same 1-attempt/
+ *                    1-failure panel accounting, method label now truthful)
+ *       error      → tiktok_search_xhr row with the raw failure reason
+ *   - A superseded transient attempt (one that a retry replaced) is recorded
+ *     with failure_reason prefixed "search " — the run-panel query math skips
+ *     that prefix exactly as it skips "transcript " attempt records, so a
+ *     retried-then-recovered query still counts as ONE attempted, ZERO failed.
  *
  * Powers:
  *   - Supplemental video discovery in webResearch.ts
@@ -59,12 +81,37 @@ export interface TikTokSearchItem {
   textExtra?: Array<{ hashtagName?: string }>;
 }
 
-// ─── Primary: Playwright XHR Interception ─────────────────────────────────────
+// ─── Strategy result (attempt-level; the orchestrator owns all telemetry) ─────
 
-async function searchViaPlaywright(
+export type SearchAttemptOutcome = "success" | "empty" | "error";
+
+interface SearchAttemptResult {
+  outcome: SearchAttemptOutcome;
+  response?: TikTokSearchResponse;
+  navStatus?: number;
+  errorMessage?: string;
+  durationMs: number;
+}
+
+/**
+ * Transient = the attempt died from runtime plumbing (context/page death,
+ * navigation abort/timeout, socket reset) — conditions where a fresh context
+ * plausibly succeeds. A clean zero-result page is NOT transient. Exported for
+ * tests.
+ */
+export function isTransientSearchFailure(message: string | undefined): boolean {
+  if (!message) return false;
+  return /Target (page|context|browser)|browser has been closed|has been closed|Navigation failed|net::ERR|Timeout \d+ms exceeded|frame was detached/i.test(
+    message,
+  );
+}
+
+// ─── The one real strategy: search_xhr_scroll ────────────────────────────────
+
+async function attemptSearchXhrScroll(
   keyword: string,
   sharedContext?: import("playwright").BrowserContext,
-): Promise<TikTokSearchResponse | null> {
+): Promise<SearchAttemptResult> {
   // Session 11 (Commit 2): when the caller runs the query batch concurrently it
   // hands in ONE dedicated context shared across the queries. We open a fresh page
   // on it and NEVER retire it here — closing a shared context would break sibling
@@ -73,7 +120,6 @@ async function searchViaPlaywright(
   let ownedCtx: Awaited<ReturnType<typeof getContext>> | null = null;
   let sharedPage: import("playwright").Page | undefined;
   const scrapeStart = Date.now();
-  const searchUrlForLog = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
   let navStatus: number | undefined;
 
   try {
@@ -129,7 +175,7 @@ async function searchViaPlaywright(
     });
 
     // Navigate to search page
-    const searchUrl = searchUrlForLog;
+    const searchUrl = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
     const navResponse = await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
     navStatus = navResponse?.status();
 
@@ -154,111 +200,36 @@ async function searchViaPlaywright(
     if (capturedItems.length > 0) {
       console.log(`[searchScraper] Captured ${capturedItems.length} total results for "${keyword}" (${xhrResponseCount} XHR batches)`);
       await page.close();
-      recordScrapeEvent({
-        platform: "tiktok", scrapeMethod: "tiktok_search_xhr", urlRequested: searchUrlForLog,
-        httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
-      });
       return {
-        item_list: normalizeSearchItems(capturedItems),
-        has_more: lastHasMore,
-        cursor: lastCursor,
-        search_id: lastSearchId,
+        outcome: "success",
+        navStatus,
+        durationMs: Date.now() - scrapeStart,
+        response: {
+          item_list: normalizeSearchItems(capturedItems),
+          has_more: lastHasMore,
+          cursor: lastCursor,
+          search_id: lastSearchId,
+        },
       };
     }
 
-    // Fallback: parse from rendered HTML
-    const htmlResult = await parseSearchFromHtml(page);
-    await page.close();
-
-    if (htmlResult && htmlResult.item_list.length > 0) {
-      console.log(`[searchScraper] HTML parse found ${htmlResult.item_list.length} results for "${keyword}"`);
-      recordScrapeEvent({
-        platform: "tiktok", scrapeMethod: "tiktok_search_html", urlRequested: searchUrlForLog,
-        httpStatus: navStatus, durationMs: Date.now() - scrapeStart,
-      });
-      return htmlResult;
-    }
-
-    console.warn(`[searchScraper] No results found for "${keyword}" via either method`);
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_search_html", urlRequested: searchUrlForLog,
-      httpStatus: navStatus, silentFailureDetected: true,
-      failureReason: "no results via XHR interception or HTML parse",
-      durationMs: Date.now() - scrapeStart,
-    });
+    // Zero items captured on a page that otherwise loaded — a clean empty, not
+    // a transient failure. (The HTML-parse fallback that used to run here was
+    // removed: 0/38 lifetime successes — see module header.)
+    console.warn(`[searchScraper] No results captured for "${keyword}"`);
     // Only retire a context we own; a shared context is the caller's to close.
-    if (ownedCtx) { await retireContext(context); } else { await page.close().catch(() => {}); }
-    return { item_list: [], has_more: false };
+    if (ownedCtx) { await retireContext(ownedCtx.context); } else { await page.close().catch(() => {}); }
+    return { outcome: "empty", navStatus, durationMs: Date.now() - scrapeStart };
   } catch (err) {
-    console.warn(`[searchScraper] Playwright search failed for "${keyword}":`, (err as Error).message);
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_search_xhr", urlRequested: searchUrlForLog,
-      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
-      durationMs: Date.now() - scrapeStart,
-    });
+    const message = (err as Error).message;
+    console.warn(`[searchScraper] Playwright search failed for "${keyword}":`, message);
     // Close only the page we opened; never retire a shared context on error.
     if (ownedCtx) {
       try { await ownedCtx.page.close(); } catch { /* ignore */ }
     } else if (sharedPage) {
       try { await sharedPage.close(); } catch { /* ignore */ }
     }
-    return null;
-  }
-}
-
-// ─── HTML Fallback Parser ─────────────────────────────────────────────────────
-
-async function parseSearchFromHtml(page: import("playwright").Page): Promise<TikTokSearchResponse | null> {
-  try {
-    // Try to extract search results from the page's script data
-    const pageContent = await page.content();
-
-    // Look for SIGI_STATE or search result data in page source
-    const sigiMatch = pageContent.match(/<script id="SIGI_STATE"[^>]*>([\s\S]*?)<\/script>/);
-    if (sigiMatch) {
-      try {
-        const sigiData = JSON.parse(sigiMatch[1]) as Record<string, unknown>;
-        const itemModule = sigiData.ItemModule as Record<string, Record<string, unknown>> | undefined;
-        if (itemModule) {
-          const items = Object.values(itemModule).map((item) => ({
-            id: String(item.id ?? ""),
-            desc: String(item.desc ?? ""),
-            createTime: Number(item.createTime ?? 0),
-            stats: {
-              playCount: Number((item.stats as Record<string, unknown>)?.playCount ?? 0),
-              diggCount: Number((item.stats as Record<string, unknown>)?.diggCount ?? 0),
-              commentCount: Number((item.stats as Record<string, unknown>)?.commentCount ?? 0),
-              collectCount: Number((item.stats as Record<string, unknown>)?.collectCount ?? 0),
-              shareCount: Number((item.stats as Record<string, unknown>)?.shareCount ?? 0),
-            },
-            author: {
-              uniqueId: String((item.author as string) ?? ""),
-            },
-          }));
-          return { item_list: items, has_more: false };
-        }
-      } catch { /* parse failure */ }
-    }
-
-    // Try rehydration data
-    const rehydrationMatch = pageContent.match(
-      /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/,
-    );
-    if (rehydrationMatch) {
-      try {
-        const data = JSON.parse(rehydrationMatch[1]) as Record<string, unknown>;
-        const defaultScope = data.__DEFAULT_SCOPE__ as Record<string, unknown> | undefined;
-        const searchResult = defaultScope?.["webapp.search-detail"] as Record<string, unknown> | undefined;
-        const itemList = searchResult?.itemList as unknown[] | undefined;
-        if (Array.isArray(itemList) && itemList.length > 0) {
-          return { item_list: normalizeSearchItems(itemList), has_more: false };
-        }
-      } catch { /* parse failure */ }
-    }
-
-    return null;
-  } catch {
-    return null;
+    return { outcome: "error", navStatus, errorMessage: message, durationMs: Date.now() - scrapeStart };
   }
 }
 
@@ -319,24 +290,75 @@ function normalizeSearchItems(rawItems: unknown[]): TikTokSearchItem[] {
   return items;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Orchestrator / Public API ────────────────────────────────────────────────
+
+const STRATEGY_NAME = "search_xhr_scroll";
 
 /**
  * Search TikTok for videos matching a keyword.
- * Uses Playwright with XHR interception, falling back to HTML parsing.
+ *
+ * Runs the search_xhr_scroll strategy; on a TRANSIENT failure (context/page
+ * death, nav abort — see isTransientSearchFailure) retries ONCE on a fresh
+ * owned context, never reusing the possibly-dead shared context. Clean empties
+ * are terminal. The orchestrator records all scrape_events (see module header
+ * for the marking contract).
  */
 export async function searchTikTokVideos(
   keyword: string,
   _options?: { cursor?: number; searchId?: string },
   sharedContext?: import("playwright").BrowserContext,
 ): Promise<TikTokSearchResponse> {
-  const result = await searchViaPlaywright(keyword, sharedContext);
+  const searchUrlForLog = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
 
-  if (result) {
-    return result;
+  const first = await attemptSearchXhrScroll(keyword, sharedContext);
+
+  let final = first;
+  let retried = false;
+  if (first.outcome === "error" && isTransientSearchFailure(first.errorMessage)) {
+    // Record the superseded attempt with the "search " prefix so the run-panel
+    // query math skips it (one query = one terminal record).
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_search_xhr",
+      urlRequested: `${searchUrlForLog}#search=${STRATEGY_NAME}:transient-retry`,
+      httpStatus: first.navStatus,
+      failureReason: `search ${STRATEGY_NAME}: transient — ${String(first.errorMessage).slice(0, 400)}`,
+      durationMs: first.durationMs,
+    });
+    console.warn(`[searchScraper] "${keyword}": transient failure — retrying once on a fresh context`);
+    await randomDelay(2000, 4000);
+    retried = true;
+    // Fresh owned context on purpose: the shared context is the prime suspect.
+    final = await attemptSearchXhrScroll(keyword, undefined);
   }
 
-  // All paths exhausted — return empty gracefully
-  console.warn(`[searchScraper] All search paths exhausted for "${keyword}"`);
+  // Exactly one unmarked terminal event per query (Session 9/10 panel contract).
+  const fragment = `#search=${STRATEGY_NAME}:${final.outcome}${retried ? "-after-retry" : ""}`;
+  if (final.outcome === "success") {
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_search_xhr",
+      urlRequested: `${searchUrlForLog}${fragment}`,
+      httpStatus: final.navStatus, durationMs: final.durationMs,
+    });
+    return final.response!;
+  }
+  if (final.outcome === "empty") {
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_search_xhr",
+      urlRequested: `${searchUrlForLog}${fragment}`,
+      httpStatus: final.navStatus, silentFailureDetected: true,
+      failureReason: "no results via XHR capture",
+      durationMs: final.durationMs,
+    });
+    console.warn(`[searchScraper] All search attempts exhausted for "${keyword}"`);
+    return { item_list: [], has_more: false };
+  }
+  recordScrapeEvent({
+    platform: "tiktok", scrapeMethod: "tiktok_search_xhr",
+    urlRequested: `${searchUrlForLog}${fragment}`,
+    httpStatus: final.navStatus,
+    failureReason: String(final.errorMessage ?? "unknown error").slice(0, 500),
+    durationMs: final.durationMs,
+  });
+  console.warn(`[searchScraper] All search attempts exhausted for "${keyword}"`);
   return { item_list: [], has_more: false };
 }

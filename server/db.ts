@@ -1733,17 +1733,28 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   ]);
 
   // ── Scrapes per platform ──
-  // Transcript-reliability session: per-video transcript ATTEMPT records carry a
-  // "transcript "-prefixed failure_reason (e.g. `transcript subtitle_browser:
-  // empty`). They are outcome telemetry — "this video has no subtitles" — not
-  // scrape-path failures, so they must not count as failed scrapes or trigger
-  // the profile-scrape/per-video-fetch consequence warnings. ONLY that literal
-  // prefix is excluded: real playwright/http failures (crashes, blocks, HTTP
-  // errors) keep their raw reasons and still warn exactly as before.
-  const isTranscriptAttemptRecord = (e: { failureReason: string | null }) =>
-    Boolean(e.failureReason?.startsWith("transcript "));
+  // Attempt-outcome records vs path failures. Strategy chains emit one record
+  // per ATTEMPT with a prefixed failure_reason:
+  //   "transcript " — per-video transcript attempts (transcript-reliability
+  //                   session), e.g. `transcript subtitle_browser: empty`;
+  //   "search "     — a superseded search attempt that a transient-retry
+  //                   replaced (scraper-reliability session);
+  //   "profile "    — a superseded profile-capture attempt (empty-capture
+  //                   retry, scraper-reliability session).
+  // These are outcome telemetry ("this video has no subtitles", "this attempt
+  // was retried") — not scrape-path failures, so they must not count as failed
+  // scrapes or trigger the consequence warnings; the query/path math below
+  // counts only UNMARKED terminal records. ONLY these literal prefixes are
+  // excluded: real playwright/http failures (crashes, blocks, HTTP errors)
+  // keep their raw reasons and still warn exactly as before.
+  const isAttemptOutcomeRecord = (e: { failureReason: string | null }) =>
+    Boolean(
+      e.failureReason?.startsWith("transcript ") ||
+      e.failureReason?.startsWith("search ") ||
+      e.failureReason?.startsWith("profile "),
+    );
   const isFailedScrape = (e: typeof scrapeRows[number]) =>
-    !isTranscriptAttemptRecord(e) &&
+    !isAttemptOutcomeRecord(e) &&
     (Boolean(e.failureReason) || Boolean(e.silentFailureDetected) || (e.httpStatus != null && e.httpStatus >= 400));
   const platformMap = new Map<string, RunDiagnostics["scrapes"]["byPlatform"][number]>();
   for (const e of scrapeRows) {
@@ -1774,7 +1785,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const failedMethods = new Set<string>();
   for (const p of byPlatform) {
     for (const e of p.events) {
-      if (isTranscriptAttemptRecord(e)) continue; // attempt outcomes, not path failures
+      if (isAttemptOutcomeRecord(e)) continue; // attempt outcomes, not path failures
       if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) failedMethods.add(e.method);
     }
   }
@@ -1789,8 +1800,11 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   for (const p of byPlatform) {
     for (const e of p.events) {
       if (e.method.includes("search")) {
+        // Superseded transient attempts ("search "-prefixed) are excluded from
+        // BOTH counts: one query = one unmarked terminal record, so a
+        // retried-then-recovered query counts as 1 attempted / 0 failed.
+        if (isAttemptOutcomeRecord(e)) continue;
         searchAttempts++;
-        if (isTranscriptAttemptRecord(e)) continue; // never emitted for search, but keep the rule uniform
         if (e.failureReason || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400)) searchFailed++;
       }
     }
