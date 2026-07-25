@@ -1,16 +1,42 @@
 /**
- * TikTok Profile Scraper — Phase 2 (Multi-Path)
+ * TikTok Profile Scraper — strategy-chain structure (scraper-reliability session).
  *
- * Replaces:
- *   - callDataApi("TikTok/get_user_info")
- *   - callDataApi("TikTok/get_user_post_list")
- *   - callDataApi("TikTok/get_user_popular_posts")
+ * Two named strategies with distinct roles, orchestrated by fetchProfileHtml:
  *
- * Multi-path fallback chain:
- *   Path A: Desktop HTTP (Phase 1 — same as before)
- *   Path B: Mobile web (m.tiktok.com — lighter CF protection)
- *   Path C: Playwright desktop (headless Chromium + stealth)
- *   Path D: oEmbed + Google cache (partial data, last resort)
+ *   profile_rehydration_http — fast HTTP fetch of the mobile profile page for
+ *                              user info (bio, stats, secUid) via rehydration
+ *                              JSON. Supplementary; never yields video lists
+ *                              (TikTok strips itemList from SSR HTML).
+ *   profile_xhr_scroll       — Playwright navigation + /api/post/item_list XHR
+ *                              interception with cursor-pagination scrolling.
+ *                              The PRIMARY (and only reliable) video source.
+ *
+ * Empty-capture retry (scraper-reliability Part 2): when profile_xhr_scroll
+ * comes back with ZERO videos, the orchestrator classifies the empty before
+ * giving up — see classifyEmptyCapture(). Only a CONFIRMED videoCount of 0
+ * from a healthy structured read (XHR user-detail or rehydration JSON) means
+ * "genuinely no content" (clean fast reject downstream, no retry). A stated
+ * videoCount > 0, an ABSENT/unreadable videoCount, or a hard attempt failure
+ * all mean the empty is not proven → ONE bounded retry on a fresh context.
+ * Rationale (approved amendment): a wasted retry costs seconds; a false
+ * "no public content" rejection has caused subject deletions twice.
+ *
+ * REMOVED (scraper-reliability Part 0, telemetry 2026-06-19 → 2026-07-25):
+ *   - Path A desktop HTTP: dead code since FIX 3.4 skipped it (TikTok returns
+ *     a JS shell page with no data; wasted 8-15s of retries per run).
+ *   - Path D Google webcache: 3 successes in 12 lifetime attempts, the rest
+ *     HTTP 429 (all-failed in 5 of the 7 runs that reached it). Google retired
+ *     webcache in 2024 — do not restore without evidence it exists again.
+ *
+ * Telemetry contract (Session 9/10 run-panel math depends on it):
+ *   - ONE UNMARKED terminal scrape_event per profile_xhr_scroll invocation
+ *     (tiktok_playwright; success / silent-failure / error, as before, now with
+ *     a `#profile=profile_xhr_scroll:<outcome>` fragment on url_requested).
+ *   - A superseded attempt that the empty-capture retry replaced is recorded
+ *     with failure_reason prefixed "profile " — excluded from the run-panel's
+ *     path-failure math exactly like "transcript " attempt records.
+ *   - profile_rehydration_http download telemetry is emitted by httpClient
+ *     (tiktok_desktop_http rows), unchanged.
  *
  * Each path runs detectSilentFailure() before returning.
  * requestGovernor("tiktok") enforces human-pattern timing.
@@ -98,30 +124,7 @@ interface RehydrationData {
   };
 }
 
-// ─── Path A: Desktop HTTP (Phase 1) ──────────────────────────────────────────
-
-async function fetchViaDesktopHttp(handle: string): Promise<{ html: string; source: string } | null> {
-  try {
-    await requestGovernor("tiktok");
-    const url = `https://www.tiktok.com/@${handle}`;
-    const html = await fetchHtml(url, {
-      extraHeaders: { Referer: "https://www.tiktok.com/" },
-    });
-
-    const check = detectSilentFailure("tiktok", html, url);
-    if (check.isFailed) {
-      console.warn(`[profileScraper] Path A (desktop HTTP) silent failure: ${check.reason}`);
-      return null;
-    }
-
-    return { html, source: "desktop-http" };
-  } catch (err) {
-    console.warn(`[profileScraper] Path A (desktop HTTP) failed:`, (err as Error).message);
-    return null;
-  }
-}
-
-// ─── Path B: Mobile Web ──────────────────────────────────────────────────────
+// ─── Strategy: profile_rehydration_http (mobile web) ─────────────────────────
 
 async function fetchViaMobileWeb(handle: string): Promise<{ html: string; source: string } | null> {
   try {
@@ -147,7 +150,7 @@ async function fetchViaMobileWeb(handle: string): Promise<{ html: string; source
   }
 }
 
-// ─── Path C: Playwright Desktop with XHR Interception ────────────────────────
+// ─── Strategy: profile_xhr_scroll (Playwright + XHR interception) ────────────
 
 interface PlaywrightResult {
   html: string;
@@ -158,7 +161,19 @@ interface PlaywrightResult {
   xhrUserDetail?: Record<string, unknown>;
 }
 
-async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | null> {
+/** Attempt-level event payload; the ORCHESTRATOR records it (so a superseded
+ * attempt can be marked with the "profile " prefix — see module header). */
+interface ProfileAttemptEvent {
+  httpStatus?: number;
+  responseSizeBytes?: number;
+  silentFailureDetected?: boolean;
+  failureReason?: string;
+  durationMs: number;
+}
+
+async function attemptProfileXhrScroll(
+  handle: string,
+): Promise<{ result: PlaywrightResult | null; event: ProfileAttemptEvent }> {
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
   const scrapeStart = Date.now();
   const profileUrl = `https://www.tiktok.com/@${handle}`;
@@ -290,62 +305,46 @@ async function fetchViaPlaywright(handle: string): Promise<PlaywrightResult | nu
 
     const check = detectSilentFailure("tiktok", html, url, page.url());
     if (check.isFailed && capturedVideoItems.length === 0 && !capturedUserDetail) {
-      console.warn(`[profileScraper] Path C (Playwright) silent failure: ${check.reason}`);
-      recordScrapeEvent({
-        platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: url,
-        httpStatus: navStatus, responseSizeBytes: html.length,
-        silentFailureDetected: true, failureReason: check.reason,
-        durationMs: Date.now() - scrapeStart,
-      });
+      console.warn(`[profileScraper] profile_xhr_scroll silent failure: ${check.reason}`);
       await retireContext(context);
-      return null;
+      return {
+        result: null,
+        event: {
+          httpStatus: navStatus, responseSizeBytes: html.length,
+          silentFailureDetected: true, failureReason: check.reason,
+          durationMs: Date.now() - scrapeStart,
+        },
+      };
     }
 
     await page.close();
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: url,
-      httpStatus: navStatus, responseSizeBytes: html.length,
-      silentFailureDetected: check.isFailed,
-      failureReason: check.isFailed ? check.reason : undefined,
-      durationMs: Date.now() - scrapeStart,
-    });
     return {
-      html,
-      source: "playwright-desktop",
-      xhrVideoItems: capturedVideoItems.length > 0 ? capturedVideoItems : undefined,
-      xhrUserDetail: capturedUserDetail ?? undefined,
+      result: {
+        html,
+        source: "playwright-desktop",
+        xhrVideoItems: capturedVideoItems.length > 0 ? capturedVideoItems : undefined,
+        xhrUserDetail: capturedUserDetail ?? undefined,
+      },
+      event: {
+        httpStatus: navStatus, responseSizeBytes: html.length,
+        silentFailureDetected: check.isFailed,
+        failureReason: check.isFailed ? check.reason : undefined,
+        durationMs: Date.now() - scrapeStart,
+      },
     };
   } catch (err) {
-    console.warn(`[profileScraper] Path C (Playwright) failed:`, (err as Error).message);
-    recordScrapeEvent({
-      platform: "tiktok", scrapeMethod: "tiktok_playwright", urlRequested: profileUrl,
-      httpStatus: navStatus, failureReason: (err as Error).message.slice(0, 500),
-      durationMs: Date.now() - scrapeStart,
-    });
+    console.warn(`[profileScraper] profile_xhr_scroll failed:`, (err as Error).message);
     if (ctx) {
       try { await ctx.page.close(); } catch { /* ignore */ }
     }
-    return null;
-  }
-}
-
-// ─── Path D: oEmbed + Google Cache ───────────────────────────────────────────
-
-async function fetchViaGoogleCache(handle: string): Promise<{ html: string; source: string } | null> {
-  try {
-    await requestGovernor("tiktok");
-    const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:tiktok.com/@${handle}`;
-    const html = await fetchHtml(cacheUrl, { timeout: 10000, maxRetries: 1 });
-
-    if (!html.includes("__UNIVERSAL_DATA_FOR_REHYDRATION__")) {
-      console.warn(`[profileScraper] Path D (Google cache) no rehydration data`);
-      return null;
-    }
-
-    return { html, source: "google-cache" };
-  } catch (err) {
-    console.warn(`[profileScraper] Path D (Google cache) failed:`, (err as Error).message);
-    return null;
+    return {
+      result: null,
+      event: {
+        httpStatus: navStatus,
+        failureReason: (err as Error).message.slice(0, 500),
+        durationMs: Date.now() - scrapeStart,
+      },
+    };
   }
 }
 
@@ -368,6 +367,78 @@ async function fetchOEmbed(handle: string, videoId: string): Promise<OEmbedRespo
   }
 }
 
+// ─── Empty-capture discriminator (scraper-reliability Part 2) ────────────────
+
+/** How the stated videoCount was read; structured sources are "healthy" reads. */
+export type StatedCountSource = "xhr" | "rehydration" | "regex" | null;
+
+export interface ProfileCaptureAssessment {
+  /** Videos in the final capture (XHR + rehydration supplement). */
+  videosCaptured: number;
+  /** The profile's own stated videoCount, when readable; null = absent/unreadable. */
+  statedVideoCount: number | null;
+  statedCountSource: StatedCountSource;
+  /** True when the bounded empty-capture retry ran. */
+  emptyCaptureRetried: boolean;
+  /** True only for a CONFIRMED 0 from a healthy structured read. */
+  genuineEmpty: boolean;
+}
+
+/**
+ * Decide what an empty video capture means (approved amendment 1):
+ *   - statedVideoCount === 0 from a HEALTHY structured read (XHR user-detail or
+ *     rehydration JSON) → "genuine_empty": the creator truly has no public
+ *     posts; reject cleanly and fast, never retry.
+ *   - anything else — stated > 0, or ABSENT/unreadable (degraded captures lose
+ *     profile fields), or only a weak regex read of 0 — → "retry": the empty is
+ *     unproven. A wasted retry costs seconds; a false "no public content"
+ *     rejection has caused subject deletions and orphaned telemetry twice.
+ * Exported for tests.
+ */
+export function classifyEmptyCapture(input: {
+  statedVideoCount: number | null;
+  statedCountSource: StatedCountSource;
+}): "genuine_empty" | "retry" {
+  if (
+    input.statedVideoCount === 0 &&
+    (input.statedCountSource === "xhr" || input.statedCountSource === "rehydration")
+  ) {
+    return "genuine_empty";
+  }
+  return "retry";
+}
+
+/** Read the profile's own stated videoCount from the best available source. */
+function readStatedVideoCount(
+  xhrUserDetail: Record<string, unknown> | undefined,
+  html: string | null,
+): { statedVideoCount: number | null; statedCountSource: StatedCountSource } {
+  // 1. XHR user-detail (structured)
+  const xhrInfo = xhrUserDetail?.userInfo as Record<string, unknown> | undefined;
+  const xhrStats = (xhrInfo?.stats ?? (xhrUserDetail as Record<string, unknown> | undefined)?.stats) as
+    | Record<string, unknown>
+    | undefined;
+  if (xhrStats && xhrStats.videoCount != null && Number.isFinite(Number(xhrStats.videoCount))) {
+    return { statedVideoCount: Number(xhrStats.videoCount), statedCountSource: "xhr" };
+  }
+  // 2. Rehydration JSON (structured)
+  if (html) {
+    const pageData = extractRehydrationData(html);
+    const stats = pageData?.__DEFAULT_SCOPE__?.["webapp.user-detail"]?.userInfo?.stats as
+      | Record<string, unknown>
+      | undefined;
+    if (stats && stats.videoCount != null && Number.isFinite(Number(stats.videoCount))) {
+      return { statedVideoCount: Number(stats.videoCount), statedCountSource: "rehydration" };
+    }
+    // 3. Regex (weak — a 0 here never proves genuine-empty)
+    const m = html.match(/"videoCount":(\d+)/);
+    if (m?.[1]) {
+      return { statedVideoCount: parseInt(m[1], 10), statedCountSource: "regex" };
+    }
+  }
+  return { statedVideoCount: null, statedCountSource: null };
+}
+
 // ─── Multi-Path Orchestrator ─────────────────────────────────────────────────
 
 interface FetchResult {
@@ -375,62 +446,118 @@ interface FetchResult {
   source: string;
   xhrVideoItems?: unknown[];
   xhrUserDetail?: Record<string, unknown>;
+  /** Present when video capture ran (retryEmptyCapture callers). */
+  capture?: ProfileCaptureAssessment;
+}
+
+/** Record one profile_xhr_scroll attempt event (see module-header contract). */
+function recordProfileAttempt(
+  handle: string,
+  event: ProfileAttemptEvent,
+  outcome: string,
+  opts: { superseded: boolean },
+): void {
+  const url = `https://www.tiktok.com/@${handle}#profile=profile_xhr_scroll:${outcome}`;
+  recordScrapeEvent({
+    platform: "tiktok",
+    scrapeMethod: "tiktok_playwright",
+    urlRequested: url,
+    httpStatus: event.httpStatus,
+    responseSizeBytes: event.responseSizeBytes,
+    silentFailureDetected: opts.superseded ? undefined : event.silentFailureDetected,
+    failureReason: opts.superseded
+      ? `profile profile_xhr_scroll: superseded by retry — ${event.failureReason ?? "empty capture"}`.slice(0, 500)
+      : event.failureReason,
+    durationMs: event.durationMs,
+  });
 }
 
 /**
  * Two-phase profile fetch:
- *   Phase 1: HTTP for user info (fast — gets bio, stats, secUid)
- *   Phase 2: ALWAYS Playwright for video collection (scrolls, accumulates XHRs)
+ *   Phase 1: profile_rehydration_http for user info (fast — bio, stats, secUid)
+ *   Phase 2: ALWAYS profile_xhr_scroll for video collection
  *
- * The HTTP paths almost never have video lists (TikTok strips itemList from SSR HTML).
- * Playwright is the ONLY reliable way to get videos via XHR interception.
+ * The HTTP path never has video lists (TikTok strips itemList from SSR HTML).
+ * Playwright XHR interception is the ONLY reliable video source.
+ *
+ * opts.retryEmptyCapture (creator pipeline): when Phase 2 produces ZERO videos
+ * or fails outright, classify via classifyEmptyCapture() and run ONE bounded
+ * retry on a fresh context unless the empty is a confirmed genuine-empty.
+ * User-info-only callers (brand path) leave it off — no behavior change there.
  */
-async function fetchProfileHtml(handle: string): Promise<FetchResult> {
+async function fetchProfileHtml(
+  handle: string,
+  opts?: { retryEmptyCapture?: boolean },
+): Promise<FetchResult> {
   // ── Phase 1: Fast HTTP for user info (bio, stats, secUid) ──
   let httpHtml: string | null = null;
   let httpSource = "";
 
-  // FIX 3.4: Skip Path A (desktop HTTP) — TikTok consistently returns a JS shell
-  // page that has no data. This wastes 8-15 seconds on retries before falling through.
-  // Go directly to Path B (mobile web) which has better success rates.
-  const pathB = await fetchViaMobileWeb(handle);
-  if (pathB) {
-    httpHtml = pathB.html;
-    httpSource = pathB.source;
+  const pathHttp = await fetchViaMobileWeb(handle);
+  if (pathHttp) {
+    httpHtml = pathHttp.html;
+    httpSource = pathHttp.source;
     console.log(`[profileScraper] @${handle}: Phase 1 — HTTP user info via mobile web`);
   }
 
-  // ── Phase 2: ALWAYS run Playwright for video collection ──
-  // This is NOT a fallback — it's the primary video source.
-  console.log(`[profileScraper] @${handle}: Phase 2 — Playwright for video collection (always runs)`);
-  const pathC = await fetchViaPlaywright(handle);
+  // ── Phase 2: ALWAYS run profile_xhr_scroll for video collection ──
+  console.log(`[profileScraper] @${handle}: Phase 2 — profile_xhr_scroll for video collection (always runs)`);
+  let attempt = await attemptProfileXhrScroll(handle);
+  let emptyCaptureRetried = false;
 
-  if (pathC) {
-    const videoCount = pathC.xhrVideoItems?.length ?? 0;
-    console.log(`[profileScraper] @${handle}: Phase 2 — Playwright succeeded: ${videoCount} videos`);
+  // ── Empty-capture classification + bounded retry (Part 2) ──
+  const capturedCount = attempt.result?.xhrVideoItems?.length ?? 0;
+  let stated = readStatedVideoCount(attempt.result?.xhrUserDetail, attempt.result?.html ?? httpHtml);
+  if (opts?.retryEmptyCapture && capturedCount === 0) {
+    const classification = classifyEmptyCapture(stated);
+    if (classification === "retry") {
+      // Mark the superseded attempt, then retry once on a fresh context.
+      recordProfileAttempt(handle, attempt.event, attempt.result ? "empty-retrying" : "error-retrying", { superseded: true });
+      console.warn(
+        `[profileScraper] @${handle}: empty capture (stated videoCount=${stated.statedVideoCount ?? "unknown"}, source=${stated.statedCountSource ?? "none"}) — retrying once`,
+      );
+      await new Promise((r) => setTimeout(r, 2000 + Math.floor(Math.random() * 2000)));
+      emptyCaptureRetried = true;
+      attempt = await attemptProfileXhrScroll(handle);
+      stated = readStatedVideoCount(attempt.result?.xhrUserDetail, attempt.result?.html ?? httpHtml);
+    } else {
+      console.log(`[profileScraper] @${handle}: confirmed genuine-empty (stated videoCount=0 via ${stated.statedCountSource}) — no retry`);
+    }
+  }
 
+  const finalCount = attempt.result?.xhrVideoItems?.length ?? 0;
+  const terminalOutcome = attempt.result
+    ? (finalCount > 0 ? "success" : "empty")
+    : (attempt.event.silentFailureDetected ? "silent_failure" : "error");
+  recordProfileAttempt(handle, attempt.event, `${terminalOutcome}${emptyCaptureRetried ? "-after-retry" : ""}`, { superseded: false });
+
+  const capture: ProfileCaptureAssessment = {
+    videosCaptured: finalCount,
+    statedVideoCount: stated.statedVideoCount,
+    statedCountSource: stated.statedCountSource,
+    emptyCaptureRetried,
+    genuineEmpty: finalCount === 0 && classifyEmptyCapture(stated) === "genuine_empty",
+  };
+
+  if (attempt.result) {
+    console.log(`[profileScraper] @${handle}: Phase 2 — profile_xhr_scroll succeeded: ${finalCount} videos`);
     // Merge: use Playwright HTML + videos, but keep HTTP user info if Playwright didn't capture it
-    // The result carries both XHR videos and the best HTML for rehydration
     return {
-      html: pathC.html,
-      source: httpSource ? `${httpSource}+${pathC.source}` : pathC.source,
-      xhrVideoItems: pathC.xhrVideoItems,
-      xhrUserDetail: pathC.xhrUserDetail,
+      html: attempt.result.html,
+      source: httpSource ? `${httpSource}+${attempt.result.source}` : attempt.result.source,
+      xhrVideoItems: attempt.result.xhrVideoItems,
+      xhrUserDetail: attempt.result.xhrUserDetail,
+      capture,
     };
   }
 
-  console.warn(`[profileScraper] @${handle}: Phase 2 — Playwright failed, falling back to HTTP-only`);
+  console.warn(`[profileScraper] @${handle}: Phase 2 — profile_xhr_scroll failed, falling back to HTTP-only`);
 
-  // Playwright failed entirely — fall back to HTTP HTML only
+  // Playwright failed entirely — fall back to HTTP HTML only.
+  // (The Google-webcache last resort that used to follow was removed — see
+  // module header: 3/12 lifetime, 429-walled, webcache retired by Google.)
   if (httpHtml) {
-    return { html: httpHtml, source: httpSource };
-  }
-
-  // Last resort: Google cache
-  const pathD = await fetchViaGoogleCache(handle);
-  if (pathD) {
-    console.log(`[profileScraper] @${handle}: Google cache fallback succeeded`);
-    return pathD;
+    return { html: httpHtml, source: httpSource, capture };
   }
 
   throw new Error(`[profileScraper] All scrape paths failed for @${handle}`);
@@ -523,13 +650,16 @@ export async function scrapeTikTokPopularPosts(
 }
 
 /**
- * Combined scrape: single HTTP request, returns both user info and post list.
+ * Combined scrape: returns user info, post list, and the capture assessment
+ * (scraper-reliability Part 2 — the creator pipeline uses it to distinguish a
+ * transient empty capture from a genuinely postless creator).
  */
 export async function scrapeTikTokProfile(handle: string): Promise<{
   userInfo: TikTokUserInfoResponse;
   posts: TikTokPostListResponse;
+  capture?: ProfileCaptureAssessment;
 }> {
-  const fetchResult = await fetchProfileHtml(handle);
+  const fetchResult = await fetchProfileHtml(handle, { retryEmptyCapture: true });
   const { html, source, xhrVideoItems, xhrUserDetail } = fetchResult;
   const pageData = extractRehydrationData(html);
   const userDetail = pageData?.__DEFAULT_SCOPE__?.["webapp.user-detail"];
@@ -625,9 +755,16 @@ export async function scrapeTikTokProfile(handle: string): Promise<{
   const confidence = itemList.length >= 20 ? "high" : itemList.length >= 5 ? "medium" : "low";
   console.log(`[profileScraper] @${handle}: final result — ${itemList.length} videos, confidence: ${confidence}, via ${finalSource}`);
 
+  // The assessment's videosCaptured reflects the FINAL pool (XHR capture plus
+  // the rehydration supplement merged above), not just the XHR attempt.
+  const capture: ProfileCaptureAssessment | undefined = fetchResult.capture
+    ? { ...fetchResult.capture, videosCaptured: itemList.length, genuineEmpty: itemList.length === 0 && fetchResult.capture.genuineEmpty }
+    : undefined;
+
   return {
     userInfo,
     posts: { data: { itemList, hasMore: false } },
+    capture,
   };
 }
 

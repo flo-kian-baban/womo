@@ -1595,6 +1595,33 @@ RULE 4: If data confidence is LOW, set identityCoherenceScore to 40 or below and
 
 // ─── TikTok Creator Research ──────────────────────────────────────────────────
 
+/**
+ * Scraper-reliability Part 2: explain an empty/thin capture honestly.
+ * Three cases, from the profile scrape's capture assessment:
+ *   genuine-empty — the profile's own stats confirmed 0 posts (clean fact);
+ *   transient     — the profile states videos exist (or its stats were
+ *                   unreadable) but capture got none, even after the bounded
+ *                   retry → "retry in a minute", NOT "verify the handle";
+ *   unknown       — no assessment available (prefetch itself failed) → generic.
+ */
+function emptyCaptureMessage(
+  handle: string,
+  capture: { videosCaptured: number; statedVideoCount: number | null; emptyCaptureRetried: boolean; genuineEmpty: boolean } | undefined,
+  generic: string,
+): string {
+  if (capture?.genuineEmpty) {
+    return `@${handle}'s profile reports 0 public posts — there is no content to analyze. (Confirmed by the profile's own stats; this is not a scraping failure.)`;
+  }
+  if (capture && capture.videosCaptured === 0) {
+    const stated = capture.statedVideoCount != null && capture.statedVideoCount > 0
+      ? `the profile reports ${capture.statedVideoCount} videos`
+      : "the profile's video count could not be read";
+    const retried = capture.emptyCaptureRetried ? " even after an automatic retry" : "";
+    return `TikTok blocked video capture for @${handle} (${stated}, but capture returned none${retried}). This is usually transient — wait a minute and retry. Do not delete the profile.`;
+  }
+  return generic;
+}
+
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
 
@@ -1624,9 +1651,14 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   // duplicate Playwright work every run). If this scrape fails, the flag stays
   // undefined and the transcript path self-fetches (a genuine retry).
   let prefetchedProfile: Awaited<ReturnType<typeof scrapeTikTokProfile>> | undefined;
+  // Scraper-reliability Part 2: the profile scrape's capture assessment lets the
+  // min-data rejections below say WHY the capture is empty (transient vs the
+  // creator genuinely having no posts). Absent when the prefetch itself failed.
+  let captureAssessment: Awaited<ReturnType<typeof scrapeTikTokProfile>>["capture"];
   try {
     const profileResult = await scrapeTikTokProfile(handle);
     prefetchedProfile = profileResult;
+    captureAssessment = profileResult.capture;
 
     const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
     const user = userInfoData?.user ?? {} as Record<string, unknown>;
@@ -1698,11 +1730,16 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
   }
 
-  // Hard error when truly nothing is available
+  // Hard error when truly nothing is available.
+  // Scraper-reliability Part 2: say WHY — a confirmed genuine-empty (the
+  // profile's own stats report 0 posts) reads differently from a transient
+  // capture failure. The old one-size message ("verify the handle") caused
+  // unnecessary subject deletions on transient failures.
   if (!hasAnyData) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: `No public content found for @${handle}. TikTok does not expose this creator's profile through the available APIs. Please verify the handle is correct and that the account is public.`,
+      message: emptyCaptureMessage(handle, captureAssessment,
+        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
     });
   }
 
@@ -1718,9 +1755,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
 
   if (realTranscripts.length < 2 && allTitles.length < 4) {
+    // Same threshold as always (frozen); only the explanation is smarter — see
+    // emptyCaptureMessage. Counts stay in the message for the analyst.
+    const counts = `${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles.`;
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: `Insufficient data for @${handle}: ${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles. The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`,
+      message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, captureAssessment,
+        `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
     });
   }
 
