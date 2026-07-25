@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
-import { protectedProcedure, publicProcedure, router } from "./trpc";
+import { publicProcedure, router } from "./trpc";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
 import { getContext, retireContext } from "../scraping/browserClient";
 
@@ -109,7 +109,7 @@ export const systemRouter = router({
       ok: true,
     })),
 
-  notifyOwner: protectedProcedure
+  notifyOwner: publicProcedure
     .input(
       z.object({
         title: z.string().min(1, "title is required"),

@@ -220,7 +220,6 @@ suite("review gate + run provenance (ephemeral Postgres)", () => {
 
     // fit.calculate rejects the pending creator BEFORE any scoring/LLM work
     const caller = appRouter.createCaller({
-      authenticated: true,
       req: { ip: "127.0.0.1", headers: {} },
       res: {},
     } as any);

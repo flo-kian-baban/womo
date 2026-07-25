@@ -24,14 +24,10 @@ if (process.env.BUILT_IN_FORGE_API_URL || process.env.BUILT_IN_FORGE_API_KEY) {
 
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
-
-  // ─── Pilot PIN auth ────────────────────────────────────────────────────────
-  pinCode: process.env.PIN_CODE ?? "1234",
 
   // ─── New direct API keys (Phase 1) ────────────────────────────────────────
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
@@ -53,23 +49,14 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 };
 
-// ─── Development warnings ──────────────────────────────────────────────────
-
-// Warn if using default PIN
-if (!process.env.PIN_CODE) {
-  console.warn("[auth] ⚠️  Using default PIN code — set PIN_CODE env var for production");
-}
-
 // ─── Production required-variable check ───────────────────────────────────────
 // Crash fast on startup if critical env vars are missing in production.
 // This prevents a misconfigured deployment from passing the health check
 // and then failing mysteriously on the first real request.
 
 const REQUIRED_IN_PRODUCTION = [
-  "PIN_CODE",
   "GEMINI_API_KEY",
   "DATABASE_URL",
-  "JWT_SECRET",
 ] as const;
 
 if (process.env.NODE_ENV === "production") {

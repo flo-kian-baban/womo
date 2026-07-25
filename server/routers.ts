@@ -1,9 +1,7 @@
 import { z } from "zod";
-import { createHmac } from "crypto";
 import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { analysisRateLimitedProcedure, fitRateLimitedProcedure, bulkRateLimitedProcedure, loginRateLimitedProcedure } from "./_core/rateLimit";
+import { publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import {
   // Transaction plumbing (atomic identity core)
@@ -792,76 +790,15 @@ function computeEngagementTierLocal(followers: number | undefined | null): strin
   return "mega";
 }
 
-// ─── Auth Cookie Helpers ────────────────────────────────────────────────────
-
-/**
- * Returns an HMAC-SHA256 signature of "womo_pilot_auth" using JWT_SECRET.
- * The cookie is set to this value on login and compared against it on every
- * authenticated request. Anyone who does not know JWT_SECRET cannot forge it.
- */
-function signedCookieValue(secret: string): string {
-  return createHmac("sha256", secret)
-    .update("womo_pilot_auth")
-    .digest("hex");
-}
-
-/**
- * The pilot-auth cookie attributes — the ONE source login and logout both use
- * (drift between them would leave logout unable to clear the cookie).
- *
- * Production (hosted Railway/Vercel): sameSite "none" + secure — required for
- * the cross-origin split (Vercel frontend → Railway backend); byte-identical to
- * the historical hardcoded values.
- *
- * Development (local-first, http://localhost): "lax" + insecure — Safari
- * rejects Secure cookies over plain http, so the hardcoded prod attributes were
- * the one real blocker to local login. Exported for tests.
- */
-export function pilotCookieAttributes(isProduction: boolean = ENV.isProduction): {
-  httpOnly: true; path: "/"; sameSite: "none" | "lax"; secure: boolean;
-} {
-  return isProduction
-    ? { httpOnly: true, path: "/", sameSite: "none", secure: true }
-    : { httpOnly: true, path: "/", sameSite: "lax", secure: false };
-}
-
 export const appRouter = router({
   system: systemRouter,
-  auth: router({
-    login: loginRateLimitedProcedure
-      .input(z.object({ pin: z.string().min(1) }))
-      .mutation(({ input, ctx }) => {
-        if (input.pin === ENV.pinCode) {
-          // Set an HMAC-signed cookie value — cannot be forged without JWT_SECRET.
-          // Attributes come from the ONE shared helper (pilotCookieAttributes) so
-          // login and logout can never drift — a mismatch would leave logout
-          // unable to clear the cookie.
-          ctx.res.cookie("womo_pilot_auth", signedCookieValue(ENV.cookieSecret), {
-            ...pilotCookieAttributes(),
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-          });
-          return { success: true as const };
-        }
-        return { success: false as const, error: "Invalid PIN" };
-      }),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      // Must pass same sameSite/secure options when clearing, otherwise browsers
-      // with strict security won't treat it as the same cookie. Same helper as
-      // login — cannot drift.
-      ctx.res.clearCookie("womo_pilot_auth", pilotCookieAttributes());
-      return { success: true } as const;
-    }),
-    check: publicProcedure.query(({ ctx }) => {
-      return { authenticated: ctx.authenticated };
-    }),
-  }),
 
   // ─── Creator Routes ─────────────────────────────────────────────────────────
   creator: router({
     // Duplicate pre-flight (Session 7): read-only check the client calls BEFORE
     // starting an analysis. Returns the existing profile summary when the
     // canonicalized handle already exists as a creator subject.
-    preflight: protectedProcedure
+    preflight: publicProcedure
       .input(z.object({
         handleOrUrl: z.string().min(1),
         platform: z.enum(["TikTok", "Instagram"]),
@@ -871,7 +808,7 @@ export const appRouter = router({
         return { existing };
       }),
 
-    analyze: analysisRateLimitedProcedure
+    analyze: publicProcedure
       .input(z.object({
         handleOrUrl: z.string().min(1),
         platform: z.enum(["TikTok", "Instagram"]),
@@ -1118,7 +1055,7 @@ export const appRouter = router({
         });
       }),
 
-    list: protectedProcedure
+    list: publicProcedure
       .input(z.object({
         search: z.string().optional(),
         /** true = accepted only — for matching/creator-selection surfaces (womo_0006) */
@@ -1130,12 +1067,12 @@ export const appRouter = router({
 
     // Archived (declined) runs — retained, never deleted; browsable for
     // scraper-failure analysis (womo_0006).
-    listArchived: protectedProcedure
+    listArchived: publicProcedure
       .query(async () => {
         return listArchivedCreatorRuns();
       }),
 
-    get: protectedProcedure
+    get: publicProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         const profile = await getCreatorProfileById(input.id);
@@ -1143,14 +1080,14 @@ export const appRouter = router({
         return profile;
       }),
 
-    delete: protectedProcedure
+    delete: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteCreatorProfile(input.id);
         return { success: true };
       }),
 
-    getContentItems: protectedProcedure
+    getContentItems: publicProcedure
       .input(z.object({ subjectId: z.string() }))
       .query(async ({ input }) => {
         return getContentItemsBySubject(input.subjectId);
@@ -1161,9 +1098,7 @@ export const appRouter = router({
     // observation (is_latest transfers to it).
     // Decline: status change ONLY — the run is archived with full provenance,
     // never deleted.
-    // Plain protectedProcedure (like list/get/delete): review actions are
-    // cheap DB updates; rate limits here guard expensive analysis/LLM paths.
-    acceptObservation: protectedProcedure
+    acceptObservation: publicProcedure
       .input(z.object({
         observationId: z.string().uuid(),
         reviewedBy: z.string().min(1).max(64),
@@ -1172,7 +1107,7 @@ export const appRouter = router({
         return setObservationReviewStatus(input.observationId, "accepted", input.reviewedBy);
       }),
 
-    declineObservation: protectedProcedure
+    declineObservation: publicProcedure
       .input(z.object({
         observationId: z.string().uuid(),
         reviewedBy: z.string().min(1).max(64),
@@ -1184,7 +1119,7 @@ export const appRouter = router({
     // Factual diagnostic breakdown for an observation/run (womo_0006) — the
     // data an analyst reviews before accepting or declining. Facts and counts
     // only; no derived quality metrics.
-    getDiagnostics: protectedProcedure
+    getDiagnostics: publicProcedure
       .input(z.object({ observationId: z.string().uuid() }))
       .query(async ({ input }) => {
         const diagnostics = await getRunDiagnostics(input.observationId);
@@ -1195,19 +1130,19 @@ export const appRouter = router({
       }),
 
     // Session 9 (A7): let the analyst read exactly what the model received.
-    getEvidenceSnapshot: protectedProcedure
+    getEvidenceSnapshot: publicProcedure
       .input(z.object({ observationId: z.string() }))
       .query(async ({ input }) => {
         return getEvidenceSnapshotByObservation(input.observationId);
       }),
 
-    getProvenance: protectedProcedure
+    getProvenance: publicProcedure
       .input(z.object({ observationId: z.string() }))
       .query(async ({ input }) => {
         return getProvenance(input.observationId);
       }),
 
-    getPipelineMetrics: protectedProcedure
+    getPipelineMetrics: publicProcedure
       .input(z.object({ subjectId: z.string(), observedAt: z.string().optional() }))
       .query(async ({ input }) => {
         // Exact per-run lookup when the observation carries a run_id (womo_0006);
@@ -1234,7 +1169,7 @@ export const appRouter = router({
         return { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" };
       }),
 
-    reanalyze: protectedProcedure
+    reanalyze: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         // womo_0006: reanalyze is its own analysis run
@@ -1330,7 +1265,7 @@ export const appRouter = router({
     // ─── Supplemental Video Ingestion ─────────────────────────────────────────
     // Fetches transcript for a single TikTok video URL and appends it to the
     // creator profile's transcript pool, then updates the profile's data.
-    ingestSupplementalVideo: protectedProcedure
+    ingestSupplementalVideo: publicProcedure
       .input(z.object({
         creatorProfileId: z.string(),
         videoUrl: z.string().url(),
@@ -1415,7 +1350,7 @@ export const appRouter = router({
   }),
 
 
-    bulkAnalyze: bulkRateLimitedProcedure
+    bulkAnalyze: publicProcedure
       .input(z.object({
         handles: z.array(z.string().min(1)).max(10, "Bulk analysis is limited to 10 handles per request"),
         platform: z.enum(["TikTok", "Instagram"]),
@@ -1504,7 +1439,7 @@ export const appRouter = router({
 
     // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
-    analyze: analysisRateLimitedProcedure
+    analyze: publicProcedure
       .input(z.object({
         brandNameOrUrl: z.string().min(1),
         tiktokChannelUrl: z.string().optional().or(z.literal("")),
@@ -1711,13 +1646,13 @@ export const appRouter = router({
         return { profile: saved, persistence, extracted, weights };
       }),
 
-    list: protectedProcedure
+    list: publicProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(async ({ input }) => {
         return listBrandProfiles(undefined, input.search);
       }),
 
-    get: protectedProcedure
+    get: publicProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         const profile = await getBrandProfileById(input.id);
@@ -1725,14 +1660,14 @@ export const appRouter = router({
         return profile;
       }),
 
-    delete: protectedProcedure
+    delete: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteBrandProfile(input.id);
         return { success: true };
       }),
 
-    reanalyze: protectedProcedure
+    reanalyze: publicProcedure
       .input(z.object({ id: z.string(), instagramHandle: z.string().optional().or(z.literal("")), googleMapsUrl: z.string().optional().or(z.literal("")) }))
       .mutation(async ({ input }) => {
         const existing = await getBrandProfileById(input.id);
@@ -1893,7 +1828,7 @@ export const appRouter = router({
         return { profile: updated, persistence, extracted, weights };
       }),
 
-    weightTable: protectedProcedure.query(() => {
+    weightTable: publicProcedure.query(() => {
       return Object.entries(BRAND_WEIGHT_TABLE).map(([type, weights]) => ({
         type,
         ...weights,
@@ -1903,7 +1838,7 @@ export const appRouter = router({
 
     // ─── Cultural Match Score Routes ─────────────────────────────────────────────────────────────────────────────
   fit: router({
-    calculate: fitRateLimitedProcedure
+    calculate: publicProcedure
       .input(z.object({
         creatorProfileId: z.string(),
         brandProfileId: z.string(),
@@ -2395,7 +2330,7 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         };
       }),
 
-    getJobProgress: protectedProcedure
+    getJobProgress: publicProcedure
       .input(z.object({ jobId: z.string() }))
       .query(({ input }) => {
         const job = getJob(input.jobId);
@@ -2410,24 +2345,24 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         };
       }),
 
-    get: protectedProcedure
+    get: publicProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         return getMatchWithProfiles(input.id);
       }),
 
-    list: protectedProcedure.query(async () => {
+    list: publicProcedure.query(async () => {
       return listMatchRecords();
     }),
 
-    delete: protectedProcedure
+    delete: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         await deleteMatchRecord(input.id);
         return { success: true };
       }),
 
-    comparable: protectedProcedure
+    comparable: publicProcedure
       .input(z.object({
         matchId: z.string(),
         brandType: z.string().optional(),

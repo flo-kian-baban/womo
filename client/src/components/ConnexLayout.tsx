@@ -2,10 +2,9 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Zap, Users, Building2, BarChart3, BookOpen, ChevronRight,
-  Menu, X, Sparkles, LogOut
+  Menu, X, Sparkles
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/_core/hooks/useAuth";
 
 const NAV_ITEMS = [
   {
@@ -40,9 +39,8 @@ interface ConnexLayoutProps {
 }
 
 export default function ConnexLayout({ children }: ConnexLayoutProps) {
-  const [location, setLocation] = useLocation();
+  const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -114,17 +112,7 @@ export default function ConnexLayout({ children }: ConnexLayoutProps) {
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-[#1a1f35]">
-          <button
-            onClick={async () => {
-              await logout();
-              setLocation("/login");
-            }}
-            className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl text-[#6b7280] hover:text-red-400 hover:bg-red-400/5 transition-all duration-200 text-sm font-medium"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign out</span>
-          </button>
-          <div className="text-[10px] text-[#4b5563] leading-relaxed mt-3">
+          <div className="text-[10px] text-[#4b5563] leading-relaxed">
             <div className="font-black text-[#6b7280] mb-1 tracking-wide uppercase">Connex F.I.T. Engine v2.0</div>
             Powered by Jungian Archetypes,<br />
             Bourdieusian Symbolic Capital &<br />

@@ -51,12 +51,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mockResearch = researchCreator as unknown as ReturnType<typeof vi.fn>;
 const mockExtract = extractCreatorProfile as unknown as ReturnType<typeof vi.fn>;
 
-// Minimal authenticated context for protectedProcedure (requirePilotAuth only
-// reads ctx.authenticated; reanalyze is not rate-limited).
-const authedCtx = {
+// Minimal request context (no auth in the internal local-only app).
+const baseCtx = {
   req: { headers: {}, ip: "10.0.0.1", socket: { remoteAddress: "10.0.0.1" }, protocol: "https" },
   res: {},
-  authenticated: true,
 } as unknown as TrpcContext;
 
 suite("session 8: correctness fixes (ephemeral Postgres)", () => {
@@ -150,7 +148,7 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
       new TRPCError({ code: "NOT_FOUND", message: "No public content found for @reanalyze_target." }),
     );
 
-    const caller = appRouter.createCaller(authedCtx);
+    const caller = appRouter.createCaller(baseCtx);
     await expect(caller.creator.reanalyze({ id: subjectId }))
       .rejects.toThrow(/reanalyze_target|No public content|could not collect/i);
 
@@ -192,7 +190,7 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
       aiSummary: "ok",
     } as Awaited<ReturnType<typeof extractCreatorProfile>>);
 
-    const caller = appRouter.createCaller(authedCtx);
+    const caller = appRouter.createCaller(baseCtx);
     const res = await caller.creator.reanalyze({ id: subjectId });
 
     expect(mockExtract).toHaveBeenCalledTimes(1);
