@@ -42,6 +42,16 @@ export const ENV = {
   // In Railway, set to your Vercel URL: https://your-app.vercel.app
   allowedOrigins: process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://localhost:3001",
 
+  // ─── Analysis timeout (local-first, C2) ────────────────────────────────────
+  // The analyze race deadline. Default 300s = the historical hosted value
+  // (must stay below Railway's ~300s gateway cutoff there). Locally there is
+  // no gateway, so ANALYSIS_TIMEOUT_MS may be raised (e.g. 600000) for hard
+  // creators. Unset env → identical hosted behavior.
+  analysisTimeoutMs: (() => {
+    const raw = parseInt(process.env.ANALYSIS_TIMEOUT_MS ?? "", 10);
+    return Number.isFinite(raw) && raw > 0 ? raw : 300_000;
+  })(),
+
   // ─── Deprecated: Forge keys (kept for non-data modules) ───────────────────
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",

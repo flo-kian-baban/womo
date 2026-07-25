@@ -15,7 +15,7 @@ import { createHmac } from "crypto";
 import { createContext } from "./_core/context";
 import type { TrpcContext } from "./_core/context";
 import { protectedProcedure, router } from "./_core/trpc";
-import { appRouter } from "./routers";
+import { appRouter, pilotCookieAttributes } from "./routers";
 
 const SECRET = process.env.JWT_SECRET!;
 const PIN = process.env.PIN_CODE!;
@@ -80,7 +80,7 @@ describe("auth.login / auth.logout / auth.check", () => {
     return { ctx, cookies, cleared };
   }
 
-  it("login with the correct PIN sets the HMAC cookie with hardened flags", async () => {
+  it("login with the correct PIN sets the HMAC cookie with the helper's flags for this env (dev: lax/insecure)", async () => {
     const { ctx, cookies } = ctxWithSpies();
     const r = await appRouter.createCaller(ctx).auth.login({ pin: PIN });
     expect(r).toEqual({ success: true });
@@ -88,7 +88,10 @@ describe("auth.login / auth.logout / auth.check", () => {
     expect(cookies[0].name).toBe("womo_pilot_auth");
     expect(cookies[0].value).toBe(validCookie); // HMAC-signed, never the literal "authenticated"
     expect(cookies[0].value).not.toBe("authenticated");
-    expect(cookies[0].options).toMatchObject({ httpOnly: true, path: "/", sameSite: "none", secure: true });
+    // Local-first C2: attributes come from pilotCookieAttributes(). The test env
+    // is non-production, so this pins the DEV attributes that make login work on
+    // http://localhost in any browser (Safari rejects Secure cookies over http).
+    expect(cookies[0].options).toMatchObject({ httpOnly: true, path: "/", sameSite: "lax", secure: false });
     expect(cookies[0].options.maxAge as number).toBeGreaterThan(0);
   });
 
@@ -99,13 +102,23 @@ describe("auth.login / auth.logout / auth.check", () => {
     expect(cookies).toHaveLength(0);
   });
 
-  it("logout clears the pilot cookie with matching flags", async () => {
-    const { ctx, cleared } = ctxWithSpies(true);
+  it("dev-mode login/logout ROUND-TRIP: logout clears with byte-identical attributes (cannot drift)", async () => {
+    const { ctx, cookies, cleared } = ctxWithSpies(true);
+    await appRouter.createCaller(ctx).auth.login({ pin: PIN });
     const r = await appRouter.createCaller(ctx).auth.logout();
     expect(r).toEqual({ success: true });
     expect(cleared).toHaveLength(1);
     expect(cleared[0].name).toBe("womo_pilot_auth");
-    expect(cleared[0].options).toMatchObject({ path: "/", sameSite: "none", secure: true });
+    // A set/clear attribute mismatch means the browser won't clear the cookie.
+    // Both calls read pilotCookieAttributes(); assert they agree exactly
+    // (login adds only maxAge on top).
+    const { maxAge: _ma, ...setAttrs } = cookies[0].options;
+    expect(cleared[0].options).toEqual(setAttrs);
+  });
+
+  it("pilotCookieAttributes: production keeps the historical cross-origin flags byte-identical", () => {
+    expect(pilotCookieAttributes(true)).toEqual({ httpOnly: true, path: "/", sameSite: "none", secure: true });
+    expect(pilotCookieAttributes(false)).toEqual({ httpOnly: true, path: "/", sameSite: "lax", secure: false });
   });
 
   it("check reflects ctx.authenticated", async () => {

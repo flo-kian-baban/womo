@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appRouter } from "./routers";
+import { appRouter, pilotCookieAttributes } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -44,11 +44,9 @@ describe("auth.logout", () => {
     expect(clearedCookies).toHaveLength(1);
     // Live cookie is the pilot PIN cookie, not the legacy manus session cookie.
     expect(clearedCookies[0]?.name).toBe("womo_pilot_auth");
-    // Options the handler actually passes (must match clearCookie in routers.ts).
-    expect(clearedCookies[0]?.options).toMatchObject({
-      path: "/",
-      sameSite: "none",
-      secure: true,
-    });
+    // Local-first C2: options come from the ONE shared helper (env-derived:
+    // dev = lax/insecure so localhost login works in any browser; prod keeps
+    // none/secure). Asserting against the helper keeps this test true in both.
+    expect(clearedCookies[0]?.options).toEqual(pilotCookieAttributes());
   });
 });

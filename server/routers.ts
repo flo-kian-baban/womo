@@ -805,6 +805,26 @@ function signedCookieValue(secret: string): string {
     .digest("hex");
 }
 
+/**
+ * The pilot-auth cookie attributes — the ONE source login and logout both use
+ * (drift between them would leave logout unable to clear the cookie).
+ *
+ * Production (hosted Railway/Vercel): sameSite "none" + secure — required for
+ * the cross-origin split (Vercel frontend → Railway backend); byte-identical to
+ * the historical hardcoded values.
+ *
+ * Development (local-first, http://localhost): "lax" + insecure — Safari
+ * rejects Secure cookies over plain http, so the hardcoded prod attributes were
+ * the one real blocker to local login. Exported for tests.
+ */
+export function pilotCookieAttributes(isProduction: boolean = ENV.isProduction): {
+  httpOnly: true; path: "/"; sameSite: "none" | "lax"; secure: boolean;
+} {
+  return isProduction
+    ? { httpOnly: true, path: "/", sameSite: "none", secure: true }
+    : { httpOnly: true, path: "/", sameSite: "lax", secure: false };
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -813,13 +833,11 @@ export const appRouter = router({
       .mutation(({ input, ctx }) => {
         if (input.pin === ENV.pinCode) {
           // Set an HMAC-signed cookie value — cannot be forged without JWT_SECRET.
-          // sameSite: "none" + secure: true is required for cross-origin deployments
-          // (Vercel frontend → Railway backend on different domains).
+          // Attributes come from the ONE shared helper (pilotCookieAttributes) so
+          // login and logout can never drift — a mismatch would leave logout
+          // unable to clear the cookie.
           ctx.res.cookie("womo_pilot_auth", signedCookieValue(ENV.cookieSecret), {
-            httpOnly: true,
-            path: "/",
-            sameSite: "none",
-            secure: true,
+            ...pilotCookieAttributes(),
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
           });
           return { success: true as const };
@@ -828,12 +846,9 @@ export const appRouter = router({
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       // Must pass same sameSite/secure options when clearing, otherwise browsers
-      // with strict security won't treat it as the same cookie.
-      ctx.res.clearCookie("womo_pilot_auth", {
-        path: "/",
-        sameSite: "none",
-        secure: true,
-      });
+      // with strict security won't treat it as the same cookie. Same helper as
+      // login — cannot drift.
+      ctx.res.clearCookie("womo_pilot_auth", pilotCookieAttributes());
       return { success: true } as const;
     }),
     check: publicProcedure.query(({ ctx }) => {
@@ -892,9 +907,11 @@ export const appRouter = router({
         const memTracker = startRunMemoryTracker();
 
         // ── FIX 1.1: Global analysis timeout ──
-        // Wrap research + extraction in Promise.race with a 3-minute timeout
-        // to prevent hung Playwright pages from blocking the server thread.
-        const ANALYSIS_TIMEOUT_MS = 5 * 60 * 1000;
+        // Wrap the raced work in Promise.race with a timeout so hung Playwright
+        // pages can't block the request forever. Local-first C2: the deadline is
+        // config (ANALYSIS_TIMEOUT_MS env; default 300s = the historical hosted
+        // value, which must stay below Railway's ~300s gateway cutoff there).
+        const ANALYSIS_TIMEOUT_MS = ENV.analysisTimeoutMs;
 
         const workPromise = (async () => {
           try {
@@ -1069,7 +1086,7 @@ export const appRouter = router({
           setTimeout(() => reject(
             new TRPCError({
               code: "TIMEOUT",
-              message: "Analysis timed out after 5 minutes. The creator's page may be slow or unavailable. Please try again.",
+              message: `Analysis timed out after ${Math.round(ANALYSIS_TIMEOUT_MS / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
             })
           ), ANALYSIS_TIMEOUT_MS)
         );
@@ -1086,7 +1103,7 @@ export const appRouter = router({
             await recordRunOutcome(runId, "timeout", {
               startedAt: new Date(pipelineStart),
               detail: {
-                note: "5-min race timeout; extraction may still complete and persist out-of-band",
+                note: `race timeout at ${ENV.analysisTimeoutMs}ms; extraction may still complete and persist out-of-band`,
                 // Non-terminal snapshot: workPromise is still running and owns the
                 // tracker's final stop() on its own success/failure path.
                 memory: memTracker.summarySoFar(),
