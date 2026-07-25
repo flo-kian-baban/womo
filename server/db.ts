@@ -115,16 +115,123 @@ export type RunOutcomeStatus =
  *
  * Never throws — telemetry must not break a run.
  */
+// ─── Capture health (scraper-reliability Part 3 — REPORTING ONLY) ────────────
+// One honest per-run assessment of how collection went, derived from what the
+// scrape_events actually record. It feeds pipeline_runs.error_log and the run
+// diagnostics panel. It must NEVER feed scoring or data_confidence_level
+// (Jason's) — confidence describes the EVIDENCE; capture health describes the
+// PROCESS that gathered it.
+
+export interface CaptureHealthEventInput {
+  failureReason: string | null;
+  silentFailure: boolean;
+  httpStatus: number | null;
+  url: string | null;
+  method: string;
+}
+
+export interface CaptureHealth {
+  /** clean = primaries succeeded first try; degraded = retries/fallbacks fired
+   *  or a path failed; thin = proceeded close to the min-data floor. */
+  status: "clean" | "degraded" | "thin";
+  /** "search "/"profile "-prefixed rows: attempts a retry superseded. */
+  supersededAttempts: number;
+  /** Terminal rows produced by a retry (url carries "-after-retry"). */
+  retryOutcomes: number;
+  /** Unmarked terminal search failures (queries that ultimately failed). */
+  failedSearchQueries: number;
+  /** Non-search methods with unmarked terminal failures. */
+  failedPathMethods: string[];
+  /** Evidence landed just above the (frozen, unchanged) min-data floor. */
+  thinEvidence: boolean;
+}
+
+/**
+ * Pure derivation — exported for tests. `evidence` (when known) enables the
+ * "thin" tier: transcripts < 3 AND titles < 6 is *just above* the frozen
+ * rejection region (< 2 real transcripts AND < 4 titles). The thresholds here
+ * classify REPORTING proximity; they change no pipeline behavior.
+ */
+export function deriveCaptureHealth(
+  events: CaptureHealthEventInput[],
+  evidence?: { transcripts: number; titles: number },
+): CaptureHealth {
+  const isAttempt = (fr: string | null) =>
+    Boolean(fr?.startsWith("transcript ") || fr?.startsWith("search ") || fr?.startsWith("profile "));
+  let supersededAttempts = 0;
+  let retryOutcomes = 0;
+  let failedSearchQueries = 0;
+  const failedPathMethods = new Set<string>();
+
+  for (const e of events) {
+    if (e.failureReason?.startsWith("search ") || e.failureReason?.startsWith("profile ")) {
+      supersededAttempts++;
+      continue;
+    }
+    if (e.url?.includes("-after-retry")) retryOutcomes++;
+    if (isAttempt(e.failureReason)) continue; // transcript attempt outcomes — normal chain operation
+    const failed = Boolean(e.failureReason) || e.silentFailure || (e.httpStatus != null && e.httpStatus >= 400);
+    if (!failed) continue;
+    if (e.method.includes("search")) failedSearchQueries++;
+    else failedPathMethods.add(e.method);
+  }
+
+  const thinEvidence = evidence != null && evidence.transcripts < 3 && evidence.titles < 6;
+  const degraded =
+    supersededAttempts > 0 || retryOutcomes > 0 || failedSearchQueries > 0 || failedPathMethods.size > 0;
+  return {
+    status: thinEvidence ? "thin" : degraded ? "degraded" : "clean",
+    supersededAttempts,
+    retryOutcomes,
+    failedSearchQueries,
+    failedPathMethods: Array.from(failedPathMethods),
+    thinEvidence,
+  };
+}
+
 export async function recordRunOutcome(
   runId: string,
   status: RunOutcomeStatus,
-  opts?: { runType?: string; detail?: Record<string, unknown>; startedAt?: Date },
+  opts?: {
+    runType?: string;
+    detail?: Record<string, unknown>;
+    startedAt?: Date;
+    /** Evidence counts for the capture-health "thin" tier (reporting only). */
+    captureEvidence?: { transcripts: number; titles: number };
+  },
 ): Promise<void> {
   try {
     const db = await getDb();
     if (!db) return;
     const now = new Date();
-    const errorLog = opts?.detail ?? null;
+    // Scraper-reliability Part 3: stamp the run's capture-health assessment
+    // into error_log alongside whatever detail the caller passed. Derived from
+    // the run's own scrape_events; skipped when the run produced none.
+    let captureHealth: CaptureHealth | undefined;
+    try {
+      const rows = await db
+        .select({
+          failureReason: scrapeEvents.failureReason,
+          silentFailure: scrapeEvents.silentFailureDetected,
+          httpStatus: scrapeEvents.httpStatus,
+          url: scrapeEvents.urlRequested,
+          method: scrapeEvents.scrapeMethod,
+        })
+        .from(scrapeEvents)
+        .where(eq(scrapeEvents.runId, runId));
+      if (rows.length > 0) {
+        captureHealth = deriveCaptureHealth(
+          rows.map(r => ({ ...r, silentFailure: Boolean(r.silentFailure) })),
+          opts?.captureEvidence,
+        );
+      }
+    } catch (err) {
+      console.warn(`[db] captureHealth derivation failed for run ${runId}:`, (err as Error).message);
+    }
+    const errorLog =
+      opts?.detail || captureHealth
+        ? { ...(opts?.detail ?? {}), ...(captureHealth ? { captureHealth } : {}) }
+        : null;
     await db.insert(pipelineRuns).values({
       id: runId,
       runType: opts?.runType ?? "creator_analysis",
@@ -1641,6 +1748,12 @@ export type RunDiagnostics = {
   confidence: { level: string | null; transcriptCount: number; rationale: string };
   /** Session 9: cultural velocity + why (which temporal buckets are populated). null when absent. */
   velocity: { value: string | null; rationale: string } | null;
+  /**
+   * Scraper-reliability Part 3: one honest per-run capture assessment
+   * (clean / degraded / thin), derived live from this run's scrape_events.
+   * REPORTING ONLY — never feeds scoring or data_confidence_level.
+   */
+  captureHealth: CaptureHealth;
   scrapes: {
     total: number;
     failed: number;
@@ -1842,6 +1955,32 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     if (ci.temporalBucket) temporalBuckets.add(ci.temporalBucket);
   }
 
+  // ── Capture health (scraper-reliability Part 3, reporting only) ──
+  // Derived live so historical runs get it too. Evidence proxy for the thin
+  // tier: transcripts = captured videos with transcript text; titles =
+  // captured videos with a non-empty caption (captions are what the pipeline's
+  // title evidence is built from).
+  const captionCount = contentRows.filter(ci => (ci.caption ?? "").trim().length > 0).length;
+  const captureHealth = deriveCaptureHealth(
+    scrapeRows.map(e => ({
+      failureReason: e.failureReason,
+      silentFailure: Boolean(e.silentFailureDetected),
+      httpStatus: e.httpStatus,
+      url: e.urlRequested,
+      method: e.scrapeMethod,
+    })),
+    { transcripts: withTranscript, titles: captionCount },
+  );
+  if (captureHealth.status === "degraded") {
+    const bits: string[] = [];
+    if (captureHealth.supersededAttempts > 0) bits.push(`${captureHealth.supersededAttempts} attempt(s) auto-retried`);
+    if (captureHealth.failedSearchQueries > 0) bits.push(`${captureHealth.failedSearchQueries} search quer${captureHealth.failedSearchQueries === 1 ? "y" : "ies"} failed`);
+    if (captureHealth.failedPathMethods.length > 0) bits.push(`path failures: ${captureHealth.failedPathMethods.join(", ")}`);
+    scrapeConsequences.push(`Capture health: DEGRADED — the run completed on fallbacks/retries (${bits.join("; ")}). Data may be complete, but collection was not first-try clean.`);
+  } else if (captureHealth.status === "thin") {
+    scrapeConsequences.push("Capture health: THIN — the run proceeded, but evidence landed just above the minimum-data floor. Treat coverage-sensitive fields with care.");
+  }
+
   // ── Coverage (Session 9): captured videos vs the channel's total ──
   // Derived stats (engagement, avg views) are computed over the CAPTURED subset,
   // so low coverage means those numbers describe a sample, not the channel.
@@ -2027,6 +2166,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     pool,
     confidence: { level: confidenceLevel, transcriptCount, rationale: confidenceRationale },
     velocity,
+    captureHealth,
     scrapes: { total: scrapeRows.length, failed: scrapesFailed, consequences: scrapeConsequences, byPlatform },
     videos: {
       total: contentRows.length,
