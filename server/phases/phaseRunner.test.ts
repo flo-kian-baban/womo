@@ -188,3 +188,66 @@ describe("idempotent re-run of a completed phase", () => {
     expect(rerun).toHaveBeenCalledOnce();
   });
 });
+
+// ─── S3a: the execute seam ───────────────────────────────────────────────────
+// The runner keeps owning order and stop conditions; a scheduler is supplied
+// through `execute` rather than bolted into this file.
+
+describe("execute seam", () => {
+  it("calls the phase directly when no execute is supplied (unchanged S2 behaviour)", async () => {
+    const ran = vi.fn();
+    const summary = await runPhases({
+      ...base, bank: noBank, phases: [stubPhase("capture", { onRun: ran })],
+    });
+    expect(ran).toHaveBeenCalledOnce();
+    expect(summary.executed).toEqual([{ phase: "capture", outcome: "complete" }]);
+  });
+
+  it("routes every phase through the supplied execute, with the runner's context", async () => {
+    const seen: string[] = [];
+    await runPhases({
+      ...base, bank: noBank,
+      phases: [stubPhase("capture"), stubPhase("augment")],
+      execute: (phase, input, ctx) => {
+        seen.push(`${phase.name}@${ctx.runId}`);
+        return phase.run(input, ctx);
+      },
+    });
+    expect(seen).toEqual(["capture@run-1", "augment@run-1"]);
+  });
+
+  it("banks the attemptCount and nextEarliestAt the scheduler reports", async () => {
+    const gate = new Date("2026-07-26T12:00:00Z");
+    const banked: Array<{ attemptCount: number; nextEarliestAt: Date | null }> = [];
+    const summary = await runPhases({
+      ...base,
+      bank: (e) => { banked.push({ attemptCount: e.attemptCount, nextEarliestAt: e.nextEarliestAt }); },
+      phases: [stubPhase("capture")],
+      execute: async (phase, input, ctx) => ({
+        ...(await phase.run(input, ctx)), attemptCount: 3, nextEarliestAt: gate,
+      }),
+    });
+    expect(banked).toEqual([{ attemptCount: 3, nextEarliestAt: gate }]);
+    expect(summary.state.phases.capture).toMatchObject({ attemptCount: 3, nextEarliestAt: gate });
+  });
+
+  it("defaults attemptCount to 1 and the gate to null when execute omits them", async () => {
+    const banked: Array<{ attemptCount: number; nextEarliestAt: Date | null }> = [];
+    await runPhases({
+      ...base,
+      bank: (e) => { banked.push({ attemptCount: e.attemptCount, nextEarliestAt: e.nextEarliestAt }); },
+      phases: [stubPhase("capture")],
+    });
+    expect(banked).toEqual([{ attemptCount: 1, nextEarliestAt: null }]);
+  });
+
+  it("stop conditions still belong to the runner, not to execute", async () => {
+    const summary = await runPhases({
+      ...base, bank: noBank,
+      phases: [stubPhase("capture", { outcome: "genuine_empty" }), stubPhase("augment")],
+      execute: (phase, input, ctx) => phase.run(input, ctx),
+    });
+    expect(summary.stoppedAt).toEqual({ phase: "capture", reason: "genuine_empty" });
+    expect(summary.executed.map(e => e.phase)).toEqual(["capture"]);
+  });
+});

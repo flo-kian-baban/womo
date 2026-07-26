@@ -6,12 +6,11 @@
  * phase's output as it completes, so the state a phase reads is the state that
  * was durably written, not a value threaded through a caller's locals.
  *
- * SEQUENTIAL AND SYNCHRONOUS by design this session. There is no scheduler, no
- * queue, no backoff timer here — a phase's declared retry policy is data the
- * S3 scheduler will act on, and the runner deliberately does not interpret it.
- * What the runner does provide is the execution order and the stop conditions,
- * which is what makes S3 a matter of adding a scheduler rather than rewriting
- * this.
+ * SEQUENTIAL by design. The runner owns the execution ORDER and the stop
+ * conditions and nothing else — it still does not interpret a phase's retry
+ * policy, admit work, or sleep. S3a added a scheduler by supplying `execute`
+ * (phaseScheduler.ts) rather than by rewriting anything here, which is what the
+ * original split was for.
  *
  * Stop conditions, in priority order:
  *   1. genuine_empty  — a confirmed fact about the subject. Terminal, and the
@@ -32,6 +31,7 @@ import {
   type CampaignState,
   type PhaseName,
   type PhaseResult,
+  type PhaseRunContext,
   type PhaseStateEntry,
   type PlatformName,
 } from "../_core/analysisPhase";
@@ -45,7 +45,25 @@ export type BankFn = (entry: {
   failureClass?: PhaseResult<unknown>["failureClass"];
   output: unknown;
   attempts: PhaseResult<unknown>["attempts"];
+  /** How many attempts the scheduler consumed; 1 without a scheduler. */
+  attemptCount: number;
+  /** Backoff gate the scheduler recorded, if it parked or requeued. */
+  nextEarliestAt: Date | null;
 }) => Promise<void> | void;
+
+/**
+ * How one phase is executed. Defaults to calling the phase directly — that is
+ * the whole S2 behaviour, preserved. S3a's scheduler supplies an implementation
+ * that adds admission and retry around the same call, so this file needs to
+ * know nothing about either.
+ */
+export type ExecutePhaseFn = (
+  phase: AnalysisPhase<never, unknown>,
+  input: never,
+  ctx: PhaseRunContext,
+) => Promise<PhaseResult<unknown> & { attemptCount?: number; nextEarliestAt?: Date | null }>;
+
+const runDirectly: ExecutePhaseFn = (phase, input, ctx) => phase.run(input, ctx);
 
 export interface PhaseRunSummary {
   /** Phases that ran, in order, with the outcome each produced. */
@@ -72,7 +90,10 @@ export async function runPhases(args: {
   bank: BankFn;
   /** Pre-banked phases (a resumed campaign); defaults to empty. */
   initialPhases?: CampaignState["phases"];
+  /** How each phase is executed. Omit for the direct call (S2 behaviour). */
+  execute?: ExecutePhaseFn;
 }): Promise<PhaseRunSummary> {
+  const execute = args.execute ?? runDirectly;
   const state: CampaignState = {
     runId: args.runId,
     handle: args.handle,
@@ -96,12 +117,14 @@ export async function runPhases(args: {
       return { executed, stoppedAt: { phase: phase.name, reason: "not_ready" }, state };
     }
 
-    const result = await phase.run(input as never, {
+    const result = await execute(phase, input as never, {
       runId: args.runId, handle: args.handle, platform: args.platform, attempt: 1,
     });
+    const attemptCount = result.attemptCount ?? 1;
+    const nextEarliestAt = result.nextEarliestAt ?? null;
 
     // Bank BEFORE deciding whether to continue: a failed phase's attempt record
-    // is exactly what the analyst (and S3's scheduler) needs to see.
+    // is exactly what the analyst (and the scheduler's rescan) needs to see.
     await args.bank({
       phase: phase.name,
       tool: phase.tool,
@@ -109,15 +132,17 @@ export async function runPhases(args: {
       failureClass: result.failureClass,
       output: result.output,
       attempts: result.attempts,
+      attemptCount,
+      nextEarliestAt,
     });
 
     state.phases[phase.name] = {
       phase: phase.name,
       tool: phase.tool,
       status: result.outcome as PhaseStateEntry["status"],
-      attemptCount: 1,
+      attemptCount,
       failureClass: result.failureClass ?? null,
-      nextEarliestAt: null,
+      nextEarliestAt,
       output: result.output,
     };
     executed.push({ phase: phase.name, outcome: result.outcome });

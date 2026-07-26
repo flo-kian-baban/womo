@@ -133,8 +133,13 @@ export interface PhaseStateWrite {
   phase: "capture" | "augment" | "transcribe" | "derive" | "extract_commit";
   tool?: string;
   status: "pending" | "running" | "complete" | "partial" | "blocked" | "genuine_empty" | "failed";
+  /** Which attempt produced this row, 1-based. The scheduler (S3a) passes the
+   *  real count; callers that do not retry may omit it. */
   attemptCount?: number;
   failureClass?: "transient" | "structural" | "genuine_empty";
+  /** Backoff gate for the scheduler scan: when a parked phase becomes ready
+   *  again. Null (the default) means "no gate". */
+  nextEarliestAt?: Date | null;
   /** The phase's durable output — what a later phase would read instead of
    *  receiving values through a caller's locals. */
   output?: unknown;
@@ -153,6 +158,7 @@ export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
       status: w.status,
       attemptCount: w.attemptCount ?? 1,
       failureClass: w.failureClass ?? null,
+      nextEarliestAt: w.nextEarliestAt ?? null,
       output: (w.output ?? null) as Record<string, unknown> | null,
       updatedAt: now,
     }).onConflictDoUpdate({
@@ -162,6 +168,7 @@ export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
         status: w.status,
         attemptCount: w.attemptCount ?? 1,
         failureClass: w.failureClass ?? null,
+        nextEarliestAt: w.nextEarliestAt ?? null,
         output: (w.output ?? null) as Record<string, unknown> | null,
         updatedAt: now,
       },
@@ -206,6 +213,45 @@ export async function getPhaseState(runId: string) {
   return db.select().from(analysisPhaseState)
     .where(eq(analysisPhaseState.runId, runId))
     .orderBy(analysisPhaseState.createdAt);
+}
+
+// ─── Scheduler scan (phased architecture S3a, Part 2) ────────────────────────
+//
+// "What is ready to run now?" — the query `aps_ready_idx (status,
+// next_earliest_at)` was created for in womo_0009.
+//
+// READY = a phase that has not reached a terminal outcome AND whose backoff gate
+// has expired. `pending` has never run; `failed` and `blocked` were parked by the
+// scheduler with a `next_earliest_at` in the future and become ready when that
+// passes. `running` is deliberately NOT ready — it belongs to a live campaign in
+// this process (a crashed process leaves stale `running` rows, which is why the
+// S3b boot path must age them out rather than this scan claiming them).
+// `complete` / `partial` / `genuine_empty` are terminal and never rescanned.
+
+export const READY_STATUSES = ["pending", "failed", "blocked"] as const;
+
+/**
+ * Phases whose backoff has expired, oldest gate first.
+ *
+ * S3a builds and proves this query; NOTHING CALLS IT ON A SCHEDULE YET. The
+ * endpoint is still synchronous, so a resumed campaign would have no caller to
+ * return to, and extract_commit still runs inline in routers.ts, so a rescan
+ * could not carry a campaign to completion anyway. The boot loop lands with
+ * enqueue-and-poll in S3b; this is the query it will drive.
+ */
+export async function scanReadyWork(now: Date = new Date(), limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(analysisPhaseState)
+    .where(and(
+      inArray(analysisPhaseState.status, [...READY_STATUSES]),
+      or(
+        isNull(analysisPhaseState.nextEarliestAt),
+        sql`${analysisPhaseState.nextEarliestAt} <= ${now}`,
+      ),
+    ))
+    .orderBy(sql`${analysisPhaseState.nextEarliestAt} ASC NULLS FIRST`, analysisPhaseState.createdAt)
+    .limit(limit);
 }
 
 // ─── Capture health (scraper-reliability Part 3 — REPORTING ONLY) ────────────
