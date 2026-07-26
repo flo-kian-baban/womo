@@ -1,0 +1,176 @@
+CREATOR RESEARCH EVIDENCE — @fixture.creator (TikTok)
+=====================================================
+Display Name: Fixture Creator
+Platform: TikTok
+Bio / Signature: "toronto street interviews · asking strangers the hard questions"
+Location: toronto
+
+STATS:
+  Followers / Subscribers: 184.3K
+  Total Videos: 96
+  Total Likes / Hearts: 5.2M
+  Total Views: 1.1M
+  Avg Views per Video: 216.8K
+  Engagement Rate: 8.54%
+
+DETECTED CREATOR TYPE: GENERAL CONTENT CREATOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPUTED ENGAGEMENT SIGNALS (from 6 sampled videos — DATA-DRIVEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RATE METRICS (avg per video):
+  Like Rate (true engagement):  8.130% of views → use this as engagementRate
+  Comment Rate (parasocial):    0.410% of views
+  Save Rate (utility/reference): 0.670% of views
+  Share Rate (cultural spread): 0.290% of views
+  Avg Video Duration:           40s (short-form)
+
+DERIVED SOCIOLOGICAL SIGNALS:
+  ▶ PARASOCIAL BOND STRENGTH: 4.0 — Strong bond (regular emotional engagement)
+    (Comment rate 0.410% → use this number, do not re-derive)
+
+  ▶ AUDIENCE RELATIONSHIP TYPE: Mentor (audience saves for future use — high utility value)
+    (Save rate 0.670% → use this number, do not re-derive)
+
+  ▶ CULTURAL CAPITAL: PRODUCE (leaning) — Creates original audio but limited cultural spread
+    (Original audio: 66.0%, Share rate: 0.290%)
+
+  ▶ REMIX RATE / COMMUNITY OPENNESS: HIGH (50.0% of videos allow duet/stitch — community remix culture)
+
+  ▶ BRAND SATURATION: NONE detected in sampled videos
+
+⚠️  INSTRUCTION: The above signals are COMPUTED FROM RAW DATA. You MUST use these
+    values directly when setting parasocialBondStrength, audienceRelationshipType,
+    culturalCapitalType, and remixRate. Do NOT override them with your own estimate.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEMPORAL CONTENT ANALYSIS (for Drift Signal + Goffman Stage Test)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RECENT (last 90 days) (2 videos):
+  [2026-03-18] asking torontonians what they'd change about the city | 412.0K plays, 33.5K likes, 1.7K comments, 2.8K saves
+  [2026-03-12] would you take the money or the mystery box? | 288.0K plays, 24.1K likes, 1.2K comments, 1.9K saves
+
+MID-PERIOD (3–12 months ago) (2 videos):
+  [2025-10-09] kingston road at 2am | 155.0K plays, 12.6K likes, 640 comments, 1.0K saves
+  [2025-09-16] asking people what they actually earn | 133.0K plays, 10.8K likes, 545 comments, 890 saves
+
+OLDER (12+ months ago) (1 videos):
+  [2025-02-20] the first video that ever went viral for me | 96.0K plays, 7.6K likes, 380 comments, 610 saves
+
+INSTRUCTION: Compare the topic/tone/style across time periods to assess:
+  • DRIFT SIGNAL: Zero Change / Minor Drift / Significant Drift / Full Pivot
+  • GOFFMAN STAGE TEST: Consistent / Minor Gap / Significant Gap
+  If only one time period has data, set Drift Signal to "Zero Change" (insufficient history).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DECODED CULTURAL SIGNALS (pre-processed symbolic analysis)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SYMBOLIC SUMMARY: An urban provocateur who converts ordinary street answers into evidence about a city's unspoken economic anxieties.
+
+IDENTITY CLAIMS (→ Archetype, NicheTopicNode):
+  ▸ "asking strangers the hard questions"
+    → positions self as an unfiltered public interlocutor rather than a performer
+    → Informs: archetype, personaConsistency
+  ▸ "toronto"
+    → anchors identity to a specific urban geography and its class tensions
+    → Informs: culturalIdentity, tribe
+
+STATUS SIGNALS (→ CulturalCapital, RogersAdoptionStage):
+  ▸ "nobody says why"
+    → claims insider interpretive authority over what the crowd actually means
+    → Informs: culturalCapital
+
+COMMUNITY REFERENCES (→ ParasocialBondStrength, AudienceRelationshipType):
+  ▸ "the most Toronto answer I've heard all night"
+    → in-group shorthand assuming shared civic self-awareness
+    → Informs: tribe, parasocialBond
+  ▸ "everyone thinks they're due for a win"
+    → collective address that flatters the audience as knowing observers
+    → Informs: audienceRelationship
+
+ASPIRATION DRIVERS (→ BarthesMyth, StuartHallDecoding):
+  ▸ "nobody can afford to stay where they grew up"
+    → promises validation of economic frustration rather than escape from it
+    → Informs: myth, aspiration
+
+⚠️  INSTRUCTION: The decoded signals above are pre-analyzed cultural evidence.
+    You MUST use them to inform the following fields:
+    - archetype: identity claims reveal the Jungian role the creator occupies
+    - barthesMyth: aspiration drivers reveal the naturalized belief their content sells
+    - audienceRelationshipType: community references reveal the bond type (Friend/Mentor/Authority)
+    - parasocialBondStrength: community references confirm or refine the computed rate signal
+    - nicheTopicNode: identity + status signals reveal the cultural function of the niche
+    - stuartHallDecoding: aspiration drivers reveal how the audience is primed to receive brand messages
+    - goffmanStageConsistency: compare identity claims in captions vs. transcripts for front/back stage gaps
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRIMARY EVIDENCE — SPOKEN TRANSCRIPTS (6 videos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ TRANSCRIPT DATA IS AVAILABLE. This is the HIGHEST CONFIDENCE evidence.
+Analyze what the creator LITERALLY SAYS. Their spoken words reveal their true niche,
+personality, values, and audience relationship more accurately than any other signal.
+
+  [Video 1] "asking torontonians what they'd change about the city #stree" — 45 words spoken
+  TRANSCRIPT: If you could change one thing about Toronto what would it be? Honestly the rent. Rent for sure. I'd say transit, the TTC is unreliable after ten. Everyone says rent but nobody says why. Because nobody can afford to stay where they grew up.
+
+  [Video 2] "would you take the money or the mystery box? #hypothetical" — 38 words spoken
+  TRANSCRIPT: Ten thousand dollars right now, or this box that might have a hundred thousand. Box. Box every time. See that's the thing, nobody takes the sure money anymore. Everyone thinks they're due for a win.
+
+  [Video 3] "the dating question nobody answers honestly #opinion" — 24 words spoken
+  TRANSCRIPT: Would you date someone who makes less than you? Depends how much less. That's not a no. It's not a yes either.
+
+  [Video 4] "kingston road at 2am #streetinterview #kingstreet" — 31 words spoken
+  TRANSCRIPT: What are you doing out here at two in the morning? Waiting for my friend who is definitely not coming. That's the most Toronto answer I've heard all night.
+
+  [Video 5] "asking people what they actually earn #money" — 27 words spoken
+  TRANSCRIPT: How much do you make? That's so rude. It is rude. Are you going to answer? Ninety a year. And you? Not ninety a year.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECONDARY EVIDENCE — VIDEO TITLES & METADATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTENT THEMES (LLM-translated from actual content):
+  • Street Opinion Interviews
+  • Toronto Local Content
+  • Hypothetical Choice Questions
+  • Relationship & Money Views
+
+RULE-BASED THEMES (cross-reference):
+  • Street Interviews
+  • Urban Life
+  • Social Commentary
+
+TOP KEYWORDS (from video titles/descriptions):
+toronto, rent, transit, money, dating, box, interview, night, afford, answer
+
+TOP HASHTAGS:
+#streetinterview, #toronto, #hypothetical, #opinion, #kingstreet, #money, #anchor
+
+ACTUAL VIDEO TITLES / DESCRIPTIONS (6 posts sampled):
+  1. asking torontonians what they'd change about the city #streetinterview #toronto
+  2. would you take the money or the mystery box? #hypothetical
+  3. the dating question nobody answers honestly #opinion
+  4. kingston road at 2am #streetinterview #kingstreet
+  5. asking people what they actually earn #money
+  6. the first video that ever went viral for me #anchor
+
+MUSIC / AUDIO SIGNALS (3 tracks):
+  • original sound - fixture.creator
+  • trending audio 44
+  • lo-fi background loop
+
+DATA CONFIDENCE LEVEL: HIGH ✅ (6 video transcripts available — spoken content analyzed)
+
+CRITICAL ANALYSIS INSTRUCTIONS:
+⚠️  TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL.
+    If transcripts are available, derive archetype, niche, values, and tone FROM WHAT THEY SAY.
+    Bio/signature is a SELF-REPORTED label — challenge it with the transcript evidence.
+
+RULE 1: Transcripts reveal the creator's TRUE identity. If they talk about food in every video,
+         they are a food creator — regardless of what their bio says.
+
+RULE 2: If no transcripts are available, use video titles and hashtags as the primary signal.
+         Bio is only context, not identity.
+
+RULE 3: Archetype, niche, and values must be derived from actual content evidence.
+         DO NOT invent themes not supported by the evidence.
+
+RULE 4: If data confidence is LOW, set identityCoherenceScore to 40 or below and state
+         clearly in aiSummary that this analysis is based on limited data.

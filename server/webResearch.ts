@@ -25,6 +25,7 @@
  * NO YouTube fallback for TikTok creators — it causes hallucinations.
  */
 
+import { writeFileSync } from "node:fs";
 import { fetchHtml, requestGovernor, recordScrapeEvent } from "./scraping/httpClient";
 import { getContext, retireContext } from "./scraping/browserClient";
 import pLimit from "p-limit";
@@ -1384,7 +1385,159 @@ function detectCreatorType(
 
 // ─── Evidence Summary Builder ─────────────────────────────────────────────────
 
-function buildCreatorEvidenceSummary(data: {
+// ─── Banked evidence (phased-architecture S1, M1 seam) ───────────────────────
+//
+// The explicit struct that stages A–D produce and stage E (assembly) consumes.
+// Today the monolith populates it inline, in exactly the order it always
+// computed these values — nothing about execution changed. When the phases land
+// (S2+), each section is written by its phase and read back from the ledger;
+// assembly does not care which produced it, which is the whole point.
+//
+// Assembly is PURE: same banked struct in → byte-identical evidence out. That
+// property is the acceptance criterion for the entire program and is pinned by
+// evidenceIdentity.test.ts.
+
+export interface BankedCreatorEvidence {
+  schemaVersion: 1;
+  handle: string;
+  platform: string;
+  /** P1 capture — surface stats from the profile read. */
+  capture: {
+    displayName: string;
+    bio: string;
+    followerCount: number;
+    followingCount: number;
+    videoCount: number;
+    totalLikes: number;
+    /** Final location (bio match, refined by the full-text pass below). */
+    location: string;
+    profileUrl: string;
+  };
+  /** P2 augment + P3 transcribe — the collected corpus. */
+  collection: {
+    transcripts: TranscriptEntry[];
+    musicTitles: string[];
+    engagementSignals: EngagementSignals;
+    longitudinalSample: LongitudinalSample;
+    discoveredVideoPool: CreatorResearchResult["discoveredVideoPool"];
+    foreignVideosRejected: number;
+  };
+  /** Pure preparations computed once from capture+collection (no I/O). */
+  prepared: {
+    allTitles: string[];
+    topHashtags: string[];
+    rawKeywords: string[];
+    contentThemes: string[];
+    transcriptExcerpts: string;
+    totalViews: number;
+    avgViews: number;
+    engagementRate: number;
+  };
+  /** P4 derive — the two independent LLM calls. */
+  derived: {
+    contentThemeLabels: string[];
+    decodedSymbols: Awaited<ReturnType<typeof decodeCreatorSymbols>>;
+  };
+}
+
+/**
+ * Env-gated fixture dump (`WOMO_EVIDENCE_FIXTURE=<path>`): writes a REAL run's
+ * banked struct to disk so the identity harness replays genuine stage outputs
+ * rather than hand-made ones. Inert unless the env var is set — normal runs
+ * never touch the filesystem here. Failures are swallowed: a debug hook must
+ * never be able to fail an analysis.
+ */
+function maybeDumpEvidenceFixture(banked: BankedCreatorEvidence): void {
+  const target = process.env.WOMO_EVIDENCE_FIXTURE;
+  if (!target) return;
+  try {
+    writeFileSync(target, JSON.stringify(banked, null, 2), "utf-8");
+    console.log(`[webResearch] evidence fixture written: ${target}`);
+  } catch (err) {
+    console.warn("[webResearch] evidence fixture dump failed (ignored):", (err as Error).message);
+  }
+}
+
+/**
+ * Stage E — assembly. PURE: no I/O, no clock, no randomness. Given the banked
+ * struct it returns the CreatorResearchResult the extraction step consumes.
+ *
+ * The pure helpers it calls (buildCreatorEvidenceSummary, detectCreatorType via
+ * that, formatDecodedSymbolsBlock) are untouched by the seam work — only where
+ * their inputs come from changed.
+ */
+export function assembleCreatorResearchResult(b: BankedCreatorEvidence): CreatorResearchResult {
+  const decodedSymbolsBlock = b.derived.decodedSymbols
+    ? formatDecodedSymbolsBlock(b.derived.decodedSymbols)
+    : "";
+
+  const evidenceSummary = buildCreatorEvidenceSummary({
+    handle: b.handle,
+    platform: b.platform,
+    displayName: b.capture.displayName,
+    bio: b.capture.bio,
+    followerCount: b.capture.followerCount,
+    videoCount: b.capture.videoCount,
+    totalLikes: b.capture.totalLikes,
+    totalViews: b.prepared.totalViews,
+    avgViews: b.prepared.avgViews,
+    engagementRate: b.prepared.engagementRate,
+    location: b.capture.location,
+    videoTitles: b.prepared.allTitles,
+    topHashtags: b.prepared.topHashtags,
+    rawKeywords: b.prepared.rawKeywords,
+    contentThemeLabels: b.derived.contentThemeLabels,
+    contentThemes: b.prepared.contentThemes,
+    musicSignals: b.collection.musicTitles,
+    transcripts: b.collection.transcripts,
+    engagementSignals: b.collection.engagementSignals,
+    decodedSymbolsBlock,
+  });
+
+  // Compute data confidence level (thresholds FROZEN — unchanged).
+  const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
+    b.collection.transcripts.length >= 6 ? "high" :
+      b.collection.transcripts.length >= 3 ? "medium" :
+        "low";
+
+  return {
+    handle: b.handle,
+    platform: b.platform,
+    displayName: b.capture.displayName,
+    bio: b.capture.bio,
+    followerCount: b.capture.followerCount,
+    followingCount: b.capture.followingCount,
+    videoCount: b.capture.videoCount,
+    totalLikes: b.capture.totalLikes,
+    totalViews: b.prepared.totalViews,
+    avgViews: b.prepared.avgViews,
+    engagementRate: b.prepared.engagementRate,
+    location: b.capture.location,
+    profileUrl: b.capture.profileUrl,
+    recentVideoTitles: b.prepared.allTitles,
+    topHashtags: b.prepared.topHashtags,
+    rawKeywords: b.prepared.rawKeywords,
+    contentThemeLabels: b.derived.contentThemeLabels,
+    contentThemes: b.prepared.contentThemes,
+    transcripts: b.collection.transcripts,
+    transcriptCount: b.collection.transcripts.length,
+    transcriptExcerpts: b.prepared.transcriptExcerpts,
+    decodedSymbols: b.derived.decodedSymbols as Record<string, unknown> | null,
+    evidenceSummary,
+    longitudinalSample: b.collection.longitudinalSample,
+    culturalVelocity: b.collection.longitudinalSample?.culturalVelocity,
+    dataConfidenceLevel,
+    // Session 8: computed iff the engagement-signals block was built (sampled videos).
+    sociologicalFieldsComputed: b.collection.engagementSignals.totalSampled > 0,
+    foreignVideosRejected: b.collection.foreignVideosRejected,
+    discoveredVideoPool: b.collection.discoveredVideoPool,
+  };
+}
+
+/** Exported for the identity harness (evidenceIdentity.test.ts) — the frozen
+ *  pre-seam reference assembly calls the SAME pure function, so the harness
+ *  compares plumbing, not this function's behavior. Untouched otherwise. */
+export function buildCreatorEvidenceSummary(data: {
   handle: string; platform: string; displayName: string; bio: string;
   followerCount: number; videoCount: number; totalLikes: number;
   totalViews: number; avgViews: number; engagementRate: number;
@@ -1819,39 +1972,34 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
 
   // Await both LLM calls (kicked off above; ran concurrently with the work between).
   const [contentThemeLabels, tikTokDecodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
-  const tikTokDecodedSymbolsBlock = tikTokDecodedSymbols ? formatDecodedSymbolsBlock(tikTokDecodedSymbols) : "";
 
-  const evidenceSummary = buildCreatorEvidenceSummary({
-    handle, platform: "TikTok", displayName, bio, followerCount, videoCount,
-    totalLikes, totalViews, avgViews, engagementRate, location,
-    videoTitles: allTitles, topHashtags, rawKeywords, contentThemeLabels, contentThemes,
-    musicSignals: musicTitles, transcripts, engagementSignals,
-    decodedSymbolsBlock: tikTokDecodedSymbolsBlock,
-  });
-
-  // Compute data confidence level
-  const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
-    transcripts.length >= 6 ? "high" :
-      transcripts.length >= 3 ? "medium" :
-        "low";
-
-  return {
-    handle, platform: "TikTok", displayName, bio, followerCount, followingCount, videoCount,
-    totalLikes, totalViews, avgViews, engagementRate, location,
-    profileUrl: `https://www.tiktok.com/@${handle}`,
-    recentVideoTitles: allTitles, topHashtags, rawKeywords,
-    contentThemeLabels, contentThemes,
-    transcripts, transcriptCount: transcripts.length, transcriptExcerpts,
-    decodedSymbols: tikTokDecodedSymbols as Record<string, unknown> | null,
-    evidenceSummary,
-    longitudinalSample,
-    culturalVelocity: longitudinalSample?.culturalVelocity,
-    dataConfidenceLevel,
-    // Session 8: computed iff the engagement-signals block was built (sampled videos).
-    sociologicalFieldsComputed: engagementSignals.totalSampled > 0,
-    foreignVideosRejected,
-    discoveredVideoPool,
+  // ── M1 seam (phased architecture S1): bank stages A–D, then assemble ──
+  // Populated in the exact order these values have always been computed, at the
+  // exact point the assembly used to run. Assembly reads ONLY this struct — no
+  // value reaches stage E through a local any more. Execution order, timing and
+  // output are unchanged; evidenceIdentity.test.ts proves the last of those.
+  const banked: BankedCreatorEvidence = {
+    schemaVersion: 1,
+    handle,
+    platform: "TikTok",
+    capture: {
+      displayName, bio, followerCount, followingCount, videoCount, totalLikes, location,
+      profileUrl: `https://www.tiktok.com/@${handle}`,
+    },
+    collection: {
+      transcripts, musicTitles, engagementSignals, longitudinalSample,
+      discoveredVideoPool, foreignVideosRejected,
+    },
+    prepared: {
+      allTitles, topHashtags, rawKeywords, contentThemes, transcriptExcerpts,
+      totalViews, avgViews, engagementRate,
+    },
+    derived: { contentThemeLabels, decodedSymbols: tikTokDecodedSymbols },
   };
+
+  maybeDumpEvidenceFixture(banked);
+
+  return assembleCreatorResearchResult(banked);
 }
 // ─── Instagram Creator Research ───────────────────────────────────────────────
 

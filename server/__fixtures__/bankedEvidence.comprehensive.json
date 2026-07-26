@@ -1,0 +1,204 @@
+{
+  "_comment": "Identity-harness fixture (phased architecture S1). Hand-built to exercise EVERY branch of the evidence assembly: speech + caption transcript sources, all three 6-3-3 temporal buckets, populated engagement signals (so the engagement + temporal blocks render), music signals, remix metadata, decoded symbols in all four categories, and a non-empty location. Shapes mirror the real types in webResearch.ts / symbolDecoder.ts. Content is synthetic; a companion fixture captured from a real run lives alongside this one.",
+  "schemaVersion": 1,
+  "handle": "fixture.creator",
+  "platform": "TikTok",
+  "capture": {
+    "displayName": "Fixture Creator",
+    "bio": "toronto street interviews · asking strangers the hard questions",
+    "followerCount": 184300,
+    "followingCount": 412,
+    "videoCount": 96,
+    "totalLikes": 5230000,
+    "location": "toronto",
+    "profileUrl": "https://www.tiktok.com/@fixture.creator"
+  },
+  "collection": {
+    "transcripts": [
+      {
+        "videoId": "7300000000000000001",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000001",
+        "caption": "asking torontonians what they'd change about the city #streetinterview #toronto",
+        "transcript": "If you could change one thing about Toronto what would it be? Honestly the rent. Rent for sure. I'd say transit, the TTC is unreliable after ten. Everyone says rent but nobody says why. Because nobody can afford to stay where they grew up.",
+        "wordCount": 45,
+        "bucket": "recent",
+        "createTime": 1774000000,
+        "transcriptSource": "subtitle",
+        "musicMetadata": { "soundName": "original sound - fixture.creator", "isOriginal": true },
+        "remixMetadata": { "duetCount": 0, "stitchCount": 0 },
+        "videoDuration": 47,
+        "collaborations": []
+      },
+      {
+        "videoId": "7300000000000000002",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000002",
+        "caption": "would you take the money or the mystery box? #hypothetical",
+        "transcript": "Ten thousand dollars right now, or this box that might have a hundred thousand. Box. Box every time. See that's the thing, nobody takes the sure money anymore. Everyone thinks they're due for a win.",
+        "wordCount": 38,
+        "bucket": "recent",
+        "createTime": 1773500000,
+        "transcriptSource": "subtitle",
+        "musicMetadata": { "soundName": "original sound - fixture.creator", "isOriginal": true },
+        "videoDuration": 38
+      },
+      {
+        "videoId": "7300000000000000003",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000003",
+        "caption": "the dating question nobody answers honestly #opinion",
+        "transcript": "Would you date someone who makes less than you? Depends how much less. That's not a no. It's not a yes either.",
+        "wordCount": 24,
+        "bucket": "recent",
+        "createTime": 1772900000,
+        "transcriptSource": "speech_to_text",
+        "videoDuration": 31
+      },
+      {
+        "videoId": "7300000000000000004",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000004",
+        "caption": "kingston road at 2am #streetinterview #kingstreet",
+        "transcript": "What are you doing out here at two in the morning? Waiting for my friend who is definitely not coming. That's the most Toronto answer I've heard all night.",
+        "wordCount": 31,
+        "bucket": "mid",
+        "createTime": 1760000000,
+        "transcriptSource": "subtitle",
+        "musicMetadata": { "soundName": "trending audio 44", "isOriginal": false },
+        "remixMetadata": { "duetCount": 2, "stitchCount": 1 },
+        "videoDuration": 52
+      },
+      {
+        "videoId": "7300000000000000005",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000005",
+        "caption": "asking people what they actually earn #money",
+        "transcript": "How much do you make? That's so rude. It is rude. Are you going to answer? Ninety a year. And you? Not ninety a year.",
+        "wordCount": 27,
+        "bucket": "mid",
+        "createTime": 1758000000,
+        "transcriptSource": "subtitle",
+        "videoDuration": 44
+      },
+      {
+        "videoId": "7300000000000000006",
+        "videoUrl": "https://www.tiktok.com/@fixture.creator/video/7300000000000000006",
+        "caption": "the first video that ever went viral for me #anchor",
+        "transcript": "",
+        "wordCount": 0,
+        "bucket": "anchor",
+        "createTime": 1740000000,
+        "transcriptSource": "post_caption",
+        "videoDuration": 29
+      }
+    ],
+    "musicTitles": [
+      "original sound - fixture.creator",
+      "trending audio 44",
+      "lo-fi background loop"
+    ],
+    "engagementSignals": {
+      "avgCommentRate": 0.0041,
+      "avgSaveRate": 0.0067,
+      "avgShareRate": 0.0029,
+      "avgLikeRate": 0.0813,
+      "originalAudioRate": 0.66,
+      "remixEnablementRate": 0.5,
+      "adTagRate": 0.0,
+      "avgDurationSeconds": 40.2,
+      "recentVideos": [
+        { "caption": "asking torontonians what they'd change about the city", "dateStr": "2026-03-18", "views": 412000, "likes": 33500, "comments": 1690, "saves": 2760 },
+        { "caption": "would you take the money or the mystery box?", "dateStr": "2026-03-12", "views": 288000, "likes": 24100, "comments": 1180, "saves": 1930 }
+      ],
+      "midVideos": [
+        { "caption": "kingston road at 2am", "dateStr": "2025-10-09", "views": 155000, "likes": 12600, "comments": 640, "saves": 1040 },
+        { "caption": "asking people what they actually earn", "dateStr": "2025-09-16", "views": 133000, "likes": 10800, "comments": 545, "saves": 890 }
+      ],
+      "olderVideos": [
+        { "caption": "the first video that ever went viral for me", "dateStr": "2025-02-20", "views": 96000, "likes": 7600, "comments": 380, "saves": 610 }
+      ],
+      "totalSampled": 6
+    },
+    "longitudinalSample": {
+      "recent": [],
+      "mid": [],
+      "anchor": [],
+      "totalFetched": 6,
+      "completeness": "partial",
+      "culturalVelocity": "Focusing"
+    },
+    "discoveredVideoPool": [
+      {
+        "id": "7300000000000000001",
+        "url": "https://www.tiktok.com/@fixture.creator/video/7300000000000000001",
+        "caption": "asking torontonians what they'd change about the city #streetinterview #toronto",
+        "createTime": 1774000000,
+        "views": 412000,
+        "likes": 33500,
+        "comments": 1690,
+        "saves": 2760,
+        "shares": 1190,
+        "musicOriginal": true,
+        "musicTitle": "original sound - fixture.creator",
+        "musicArtist": "fixture.creator",
+        "durationSec": 47,
+        "temporalBucket": "recent"
+      },
+      {
+        "id": "7300000000000000004",
+        "url": "https://www.tiktok.com/@fixture.creator/video/7300000000000000004",
+        "caption": "kingston road at 2am #streetinterview #kingstreet",
+        "createTime": 1760000000,
+        "views": 155000,
+        "likes": 12600,
+        "comments": 640,
+        "saves": 1040,
+        "shares": 410,
+        "musicOriginal": false,
+        "musicTitle": "trending audio 44",
+        "musicArtist": "various",
+        "durationSec": 52,
+        "temporalBucket": "mid"
+      }
+    ],
+    "foreignVideosRejected": 3
+  },
+  "prepared": {
+    "allTitles": [
+      "asking torontonians what they'd change about the city #streetinterview #toronto",
+      "would you take the money or the mystery box? #hypothetical",
+      "the dating question nobody answers honestly #opinion",
+      "kingston road at 2am #streetinterview #kingstreet",
+      "asking people what they actually earn #money",
+      "the first video that ever went viral for me #anchor"
+    ],
+    "topHashtags": ["#streetinterview", "#toronto", "#hypothetical", "#opinion", "#kingstreet", "#money", "#anchor"],
+    "rawKeywords": ["toronto", "rent", "transit", "money", "dating", "box", "interview", "night", "afford", "answer"],
+    "contentThemes": ["Street Interviews", "Urban Life", "Social Commentary"],
+    "transcriptExcerpts": "[asking torontonians what they'd change about the city #stree]: If you could change one thing about Toronto what would it be? Honestly the rent.\n\n[would you take the money or the mystery box? #hypothetical]: Ten thousand dollars right now, or this box that might have a hundred thousand.",
+    "totalViews": 1084000,
+    "avgViews": 216800,
+    "engagementRate": 8.54
+  },
+  "derived": {
+    "contentThemeLabels": [
+      "Street Opinion Interviews",
+      "Toronto Local Content",
+      "Hypothetical Choice Questions",
+      "Relationship & Money Views"
+    ],
+    "decodedSymbols": {
+      "identityClaims": [
+        { "phrase": "asking strangers the hard questions", "meaning": "positions self as an unfiltered public interlocutor rather than a performer", "informs": ["archetype", "personaConsistency"] },
+        { "phrase": "toronto", "meaning": "anchors identity to a specific urban geography and its class tensions", "informs": ["culturalIdentity", "tribe"] }
+      ],
+      "statusSignals": [
+        { "phrase": "nobody says why", "meaning": "claims insider interpretive authority over what the crowd actually means", "informs": ["culturalCapital"] }
+      ],
+      "communityReferences": [
+        { "phrase": "the most Toronto answer I've heard all night", "meaning": "in-group shorthand assuming shared civic self-awareness", "informs": ["tribe", "parasocialBond"] },
+        { "phrase": "everyone thinks they're due for a win", "meaning": "collective address that flatters the audience as knowing observers", "informs": ["audienceRelationship"] }
+      ],
+      "aspirationDrivers": [
+        { "phrase": "nobody can afford to stay where they grew up", "meaning": "promises validation of economic frustration rather than escape from it", "informs": ["myth", "aspiration"] }
+      ],
+      "symbolicSummary": "An urban provocateur who converts ordinary street answers into evidence about a city's unspoken economic anxieties."
+    }
+  }
+}

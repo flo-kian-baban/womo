@@ -123,7 +123,9 @@ export type CreatorEvidenceSnapshotPayload = {
   promptMeta: Record<string, unknown>;
 };
 
-function buildCreatorEvidenceSnapshotPayload(
+/** Exported for the identity harness (evidenceIdentity.test.ts): the womo_0007
+ *  snapshot is the byte-comparison surface for the phased-architecture program. */
+export function buildCreatorEvidenceSnapshotPayload(
   handleOrUrl: string,
   platform: string,
   evidenceSummary: string | undefined,
