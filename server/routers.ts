@@ -1228,6 +1228,25 @@ export const appRouter = router({
           console.warn(`[V2 Pipeline] ⚠️ Creator reanalyze persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
         }
 
+        // Shadow banking (S1): P5 extract_commit — same write as analyze.
+        // reanalyze/analyze parity is a standing rule (scraper-reliability
+        // Part 4); a ledger that only covers analyze would make every rerun
+        // look like a 4-phase campaign.
+        void recordPhaseState({
+          runId,
+          subjectHint: `${existing.handle}@${existing.platform}`,
+          phase: "extract_commit",
+          tool: "gemini:extractCreatorProfile+persistCreatorToV2",
+          status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
+          output: {
+            subjectId: "subjectId" in reanalyzePersistResult ? reanalyzePersistResult.subjectId : null,
+            observationId: "observationId" in reanalyzePersistResult ? reanalyzePersistResult.observationId : null,
+            persistence,
+            evidenceSummaryBytes: evidenceSummary.length,
+            transcriptCount: researchData.transcriptCount ?? 0,
+          },
+        });
+
         // NOTE: on saved === "none" this returns the PREVIOUS profile — the
         // persistence field is what tells the caller the rerun was not saved.
         const updated = await getCreatorProfileById(input.id);

@@ -1,0 +1,186 @@
+CREATOR RESEARCH EVIDENCE — @invisible.ads (TikTok)
+=====================================================
+Display Name: invisible.ads
+Platform: TikTok
+Bio / Signature: ""
+Location: toronto
+
+STATS:
+  Followers / Subscribers: 0
+  Total Videos: 0
+  Total Likes / Hearts: 0
+  Total Views: 6.3M
+  Avg Views per Video: 76.1K
+  Engagement Rate: 0.61%
+
+DETECTED CREATOR TYPE: FOOD CREATOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPUTED ENGAGEMENT SIGNALS (from 1 sampled videos — DATA-DRIVEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RATE METRICS (avg per video):
+  Like Rate (true engagement):  0.535% of views → use this as engagementRate
+  Comment Rate (parasocial):    0.072% of views
+  Save Rate (utility/reference): 0.072% of views
+  Share Rate (cultural spread): 0.564% of views
+  Avg Video Duration:           12s (short-form)
+
+DERIVED SOCIOLOGICAL SIGNALS:
+  ▶ PARASOCIAL BOND STRENGTH: 2.0 — Weak bond (passive audience, low interaction)
+    (Comment rate 0.072% → use this number, do not re-derive)
+
+  ▶ AUDIENCE RELATIONSHIP TYPE: Friend / Entertainer (audience watches but does not save — entertainment-first)
+    (Save rate 0.072% → use this number, do not re-derive)
+
+  ▶ CULTURAL CAPITAL: PRODUCE — Creator originates culture (original audio + high share rate)
+    (Original audio: 100.0%, Share rate: 0.564%)
+
+  ▶ REMIX RATE / COMMUNITY OPENNESS: HIGH (100.0% of videos allow duet/stitch — community remix culture)
+
+  ▶ BRAND SATURATION: NONE detected in sampled videos
+
+⚠️  INSTRUCTION: The above signals are COMPUTED FROM RAW DATA. You MUST use these
+    values directly when setting parasocialBondStrength, audienceRelationshipType,
+    culturalCapitalType, and remixRate. Do NOT override them with your own estimate.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEMPORAL CONTENT ANALYSIS (for Drift Signal + Goffman Stage Test)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RECENT (last 90 days): [no videos in this period]
+
+MID-PERIOD (3–12 months ago) (1 videos):
+  [2026-04-19] (no caption) | 6.9K plays, 37 likes, 5 comments, 5 saves
+
+OLDER (12+ months ago): [no videos in this period]
+
+INSTRUCTION: Compare the topic/tone/style across time periods to assess:
+  • DRIFT SIGNAL: Zero Change / Minor Drift / Significant Drift / Full Pivot
+  • GOFFMAN STAGE TEST: Consistent / Minor Gap / Significant Gap
+  If only one time period has data, set Drift Signal to "Zero Change" (insufficient history).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DECODED CULTURAL SIGNALS (pre-processed symbolic analysis)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SYMBOLIC SUMMARY: This creator embodies the archetype of a cultural interlocutor, adept at curating public opinion and navigating diverse cultural identities—from specific diasporic heritage to general social dilemmas—thereby fostering a community that collectively interprets, judges, and shares modern urban experiences.
+
+IDENTITY CLAIMS (→ Archetype, NicheTopicNode):
+  ▸ "Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob."
+    → The creator actively foregrounds and celebrates a specific culinary heritage (Iranian Kabab and Koobideh) as a fundamental marker of cultural identity, using "Our food" to explicitly claim a shared ethnic background with interviewees and implicitly with a segment of their audience. This establishes them as a cultural insider within this specific diaspora.
+    → Informs: Archetype, NicheTopicNode
+  ▸ "#streetinterview #toronto #kingstreet"
+    → The creator defines their operational and observational territory, positioning themselves as a cultural documentarian or reporter rooted in the specific urban landscape and street life of Toronto, particularly King Street. This grounds their identity in a local, public sphere.
+    → Informs: NicheTopicNode
+
+STATUS SIGNALS (→ CulturalCapital, RogersAdoptionStage):
+  ▸ "Comments section assemble"
+    → The creator uses a directive to summon audience engagement, asserting authority as the orchestrator of communal online interaction and implicitly positioning themselves as a leader or gatekeeper of the digital conversation.
+    → Informs: CreatorNichePosition, CulturalCapital
+  ▸ "Do you agree ? Did she make the right choice Is she a keeper Which one is it What’s the first thing you’d do ? First word that comes to your mind #opinion"
+    → The creator consistently employs interrogatives and the hashtag #opinion to establish themselves as a curator and facilitator of public discourse, actively soliciting, framing, and potentially shaping collective opinions on social and ethical dilemmas, thereby acting as a cultural provocateur.
+    → Informs: CreatorNichePosition, CulturalCapital
+
+COMMUNITY REFERENCES (→ ParasocialBondStrength, AudienceRelationshipType):
+  ▸ "Comments section assemble"
+    → This phrase acts as an in-group call to action, acknowledging and directly addressing the creator's audience as a recognized collective with a shared understanding of their role in contributing to the comment section, fostering a sense of active communal participation.
+    → Informs: ParasocialBondStrength, AudienceRelationshipType, StuartHallDecoding
+  ▸ "Oh, somebody say koobideh. Koob."
+    → The creator expresses an anticipatory shared cultural recognition and enthusiasm for a specific ethnic food, signaling an implicit in-group knowledge and affinity within the audience that understands and resonates with this cultural marker.
+    → Informs: ParasocialBondStrength, AudienceRelationshipType, StuartHallDecoding
+  ▸ "Virgos…? Taurus?"
+    → By referencing zodiac signs, the creator invokes a shared contemporary cultural shorthand, inviting self-identification and fostering a sense of commonality and shared understanding among audience members who participate in astrological discourse.
+    → Informs: AudienceRelationshipType, StuartHallDecoding
+
+ASPIRATION DRIVERS (→ BarthesMyth, StuartHallDecoding):
+  ▸ "The last one is crazy 😂"
+    → This phrase promises the audience an emotional payoff of surprise, amusement, and entertainment, appealing to a desire for vicarious thrill and shared moments of lighthearted cultural consumption.
+    → Informs: BarthesMyth, StuartHallDecoding, AudienceRelationshipType
+  ▸ "Shame on any man that does this"
+    → This strong moral judgment offers the audience an opportunity for collective moral alignment and validation, appealing to an aspiration to participate in ethical discourse and reinforce a shared sense of rectitude or social justice.
+    → Informs: BarthesMyth, StuartHallDecoding, AudienceRelationshipType
+  ▸ "From a ten to a zero"
+    → This phrase taps into the audience's desire to engage in social evaluation and understand dynamics of perceived worth or status, offering the gratification of participating in a narrative of dramatic social judgment and transformation.
+    → Informs: BarthesMyth, StuartHallDecoding
+  ▸ "The ick?"
+    → This phrase references a widely understood contemporary social phenomenon, inviting the audience to validate their own feelings and experiences, thereby offering an aspirational sense of being culturally current, understood, and part of a shared modern sensibility.
+    → Informs: BarthesMyth, StuartHallDecoding
+
+⚠️  INSTRUCTION: The decoded signals above are pre-analyzed cultural evidence.
+    You MUST use them to inform the following fields:
+    - archetype: identity claims reveal the Jungian role the creator occupies
+    - barthesMyth: aspiration drivers reveal the naturalized belief their content sells
+    - audienceRelationshipType: community references reveal the bond type (Friend/Mentor/Authority)
+    - parasocialBondStrength: community references confirm or refine the computed rate signal
+    - nicheTopicNode: identity + status signals reveal the cultural function of the niche
+    - stuartHallDecoding: aspiration drivers reveal how the audience is primed to receive brand messages
+    - goffmanStageConsistency: compare identity claims in captions vs. transcripts for front/back stage gaps
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRIMARY EVIDENCE — SPOKEN TRANSCRIPTS (1 videos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ TRANSCRIPT DATA IS AVAILABLE. This is the HIGHEST CONFIDENCE evidence.
+Analyze what the creator LITERALLY SAYS. Their spoken words reveal their true niche,
+personality, values, and audience relationship more accurately than any other signal.
+
+  [Video 1] "(no caption)" — 26 words spoken
+  TRANSCRIPT: Tell me where you're from without telling me where you're from. Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECONDARY EVIDENCE — VIDEO TITLES & METADATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTENT THEMES (LLM-translated from actual content):
+  • Street Interview Opinions
+  • Iranian Food Culture
+  • Dating & Relationship Views
+  • Toronto Local Content
+
+RULE-BASED THEMES (cross-reference):
+  • Local City Culture
+  • Street Interviews
+
+TOP KEYWORDS (from video titles/descriptions):
+koobideh, one, guy, girl, virgo, somebody, say, food, agree, choice, comments, section, assemble, crazy, virgos, word, mind, shame, man, keeper
+
+TOP HASHTAGS:
+#streetinterview, #meme, #toronto, #kingstreet, #ex, #iran, #israel, #war, #opinion
+
+ACTUAL VIDEO TITLES / DESCRIPTIONS (30 posts sampled):
+  1. He did what ? #meme #streetinterview #toronto #kingstreet #ex
+  2. Do you agree ?  - - #streetinterview #iran #israel #war #opinion
+  3. 🍇
+  4. Did she make the right choice
+  5. 5.7?
+  6. Comments section assemble
+  7. The last one is crazy 😂
+  8. Which one is it
+  9. How’s a guy get a girl out here
+  10. Virgos…?
+  11. First word that comes to your mind
+  12. Shame on any man that does this
+  13. Is she a keeper
+  14. From a ten to a zero
+  15. Intergalactic guy
+  16. The ick?
+  17. What’s the first thing you’d do ?
+  18. Taurus?
+  19. Rapid fire
+  20. He did his ex
+
+MUSIC / AUDIO SIGNALS (1 tracks):
+  • [original audio by @invisible.ads]
+
+DATA CONFIDENCE LEVEL: MEDIUM ⚠️ (1 transcript(s) + 30 video titles)
+
+CRITICAL ANALYSIS INSTRUCTIONS:
+⚠️  TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL.
+    If transcripts are available, derive archetype, niche, values, and tone FROM WHAT THEY SAY.
+    Bio/signature is a SELF-REPORTED label — challenge it with the transcript evidence.
+
+RULE 1: Transcripts reveal the creator's TRUE identity. If they talk about food in every video,
+         they are a food creator — regardless of what their bio says.
+
+RULE 2: If no transcripts are available, use video titles and hashtags as the primary signal.
+         Bio is only context, not identity.
+
+RULE 3: Archetype, niche, and values must be derived from actual content evidence.
+         DO NOT invent themes not supported by the evidence.
+
+RULE 4: If data confidence is LOW, set identityCoherenceScore to 40 or below and state
+         clearly in aiSummary that this analysis is based on limited data.

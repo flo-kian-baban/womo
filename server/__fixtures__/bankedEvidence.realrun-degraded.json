@@ -1,0 +1,318 @@
+{
+  "_comment": "Identity-harness fixture captured from a REAL run (reanalyze of @invisible.ads, run 23e57a0d, 2026-07-26) via WOMO_EVIDENCE_FIXTURE. Deliberately kept as a DEGRADED-capture specimen: TikTok served the profile without stats (followerCount/bio/videoCount all zero) and only one transcript survived the chain, so it exercises the thin/empty-field paths the synthetic fixture does not. Authentic Gemini symbol output and real TikTok data shapes. Companion to bankedEvidence.comprehensive.json, which covers the rich branches.",
+  "schemaVersion": 1,
+  "handle": "invisible.ads",
+  "platform": "TikTok",
+  "capture": {
+    "displayName": "invisible.ads",
+    "bio": "",
+    "followerCount": 0,
+    "followingCount": 0,
+    "videoCount": 0,
+    "totalLikes": 0,
+    "location": "toronto",
+    "profileUrl": "https://www.tiktok.com/@invisible.ads"
+  },
+  "collection": {
+    "transcripts": [
+      {
+        "videoId": "7630537825309543687",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7630537825309543687",
+        "caption": "",
+        "transcript": "Tell me where you're from without telling me where you're from. Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob.",
+        "wordCount": 26,
+        "bucket": "recent",
+        "createTime": 1776623041,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 12
+      }
+    ],
+    "musicTitles": [
+      "[original audio by @invisible.ads]"
+    ],
+    "engagementSignals": {
+      "avgCommentRate": 0.0007226477814713109,
+      "avgSaveRate": 0.0007226477814713109,
+      "avgShareRate": 0.005636652695476225,
+      "avgLikeRate": 0.0053475935828877,
+      "originalAudioRate": 1,
+      "remixEnablementRate": 1,
+      "adTagRate": 0,
+      "avgDurationSeconds": 12,
+      "recentVideos": [],
+      "midVideos": [
+        {
+          "caption": "(no caption)",
+          "dateStr": "2026-04-19",
+          "views": 6919,
+          "likes": 37,
+          "comments": 5,
+          "saves": 5
+        }
+      ],
+      "olderVideos": [],
+      "totalSampled": 1
+    },
+    "longitudinalSample": {
+      "recent": [
+        {
+          "videoId": "7630537825309543687",
+          "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7630537825309543687",
+          "caption": "",
+          "transcript": "Tell me where you're from without telling me where you're from. Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob.",
+          "wordCount": 26,
+          "bucket": "recent",
+          "createTime": 1776623041,
+          "transcriptSource": "subtitle",
+          "musicMetadata": {
+            "soundName": "original sound",
+            "isOriginal": true
+          },
+          "remixMetadata": {
+            "duetCount": 0,
+            "stitchCount": 0
+          },
+          "videoDuration": 12
+        }
+      ],
+      "mid": [],
+      "anchor": [],
+      "totalFetched": 1,
+      "completeness": "insufficient",
+      "culturalVelocity": "Insufficient Data"
+    },
+    "discoveredVideoPool": [
+      {
+        "id": "7630537825309543687",
+        "url": "https://www.tiktok.com/@invisible.ads/video/7630537825309543687",
+        "caption": "",
+        "createTime": 1776623041,
+        "views": 6919,
+        "likes": 37,
+        "comments": 5,
+        "saves": 5,
+        "shares": 39,
+        "musicOriginal": true,
+        "musicTitle": "original sound",
+        "musicArtist": "invisible.ads",
+        "durationSec": 12,
+        "alreadySampled": true,
+        "temporalBucket": "recent"
+      }
+    ],
+    "foreignVideosRejected": 69
+  },
+  "prepared": {
+    "allTitles": [
+      "He did what ? #meme #streetinterview #toronto #kingstreet #ex",
+      "Do you agree ?  - - #streetinterview #iran #israel #war #opinion",
+      "🍇",
+      "Did she make the right choice",
+      "5.7?",
+      "Comments section assemble",
+      "The last one is crazy 😂",
+      "Which one is it",
+      "How’s a guy get a girl out here",
+      "Virgos…?",
+      "First word that comes to your mind",
+      "Shame on any man that does this",
+      "Is she a keeper",
+      "From a ten to a zero",
+      "Intergalactic guy",
+      "The ick?",
+      "What’s the first thing you’d do ?",
+      "Taurus?",
+      "Rapid fire",
+      "He did his ex",
+      "Risk it for the biscuit",
+      "Vapes?",
+      "Which Persian girl was it ?",
+      "Best fight stance",
+      "🏀",
+      "Do any men go to bookstore anymore?",
+      "Take notes 📝",
+      "Favourite race to date?",
+      "Virgo on Virgo crime",
+      "Did somebody say koobideh?"
+    ],
+    "topHashtags": [
+      "#streetinterview",
+      "#meme",
+      "#toronto",
+      "#kingstreet",
+      "#ex",
+      "#iran",
+      "#israel",
+      "#war",
+      "#opinion"
+    ],
+    "rawKeywords": [
+      "koobideh",
+      "one",
+      "guy",
+      "girl",
+      "virgo",
+      "somebody",
+      "say",
+      "food",
+      "agree",
+      "choice",
+      "comments",
+      "section",
+      "assemble",
+      "crazy",
+      "virgos",
+      "word",
+      "mind",
+      "shame",
+      "man",
+      "keeper",
+      "ten",
+      "zero",
+      "intergalactic",
+      "ick",
+      "thing",
+      "taurus",
+      "rapid",
+      "fire",
+      "risk",
+      "biscuit",
+      "vapes",
+      "persian",
+      "fight",
+      "stance",
+      "men",
+      "bookstore",
+      "anymore",
+      "notes",
+      "favourite",
+      "race"
+    ],
+    "contentThemes": [
+      "Local City Culture",
+      "Street Interviews"
+    ],
+    "transcriptExcerpts": "[video]: Tell me where you're from without telling me where you're from. Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob.",
+    "totalViews": 6317789,
+    "avgViews": 76118,
+    "engagementRate": 0.61
+  },
+  "derived": {
+    "contentThemeLabels": [
+      "Street Interview Opinions",
+      "Iranian Food Culture",
+      "Dating & Relationship Views",
+      "Toronto Local Content"
+    ],
+    "decodedSymbols": {
+      "identityClaims": [
+        {
+          "phrase": "Our food. What kind of food? So good. Kabab. Koobideh. Oh, somebody say koobideh. Koob.",
+          "meaning": "The creator actively foregrounds and celebrates a specific culinary heritage (Iranian Kabab and Koobideh) as a fundamental marker of cultural identity, using \"Our food\" to explicitly claim a shared ethnic background with interviewees and implicitly with a segment of their audience. This establishes them as a cultural insider within this specific diaspora.",
+          "informs": [
+            "Archetype",
+            "NicheTopicNode"
+          ]
+        },
+        {
+          "phrase": "#streetinterview #toronto #kingstreet",
+          "meaning": "The creator defines their operational and observational territory, positioning themselves as a cultural documentarian or reporter rooted in the specific urban landscape and street life of Toronto, particularly King Street. This grounds their identity in a local, public sphere.",
+          "informs": [
+            "NicheTopicNode"
+          ]
+        }
+      ],
+      "statusSignals": [
+        {
+          "phrase": "Comments section assemble",
+          "meaning": "The creator uses a directive to summon audience engagement, asserting authority as the orchestrator of communal online interaction and implicitly positioning themselves as a leader or gatekeeper of the digital conversation.",
+          "informs": [
+            "CreatorNichePosition",
+            "CulturalCapital"
+          ]
+        },
+        {
+          "phrase": "Do you agree ? Did she make the right choice Is she a keeper Which one is it What’s the first thing you’d do ? First word that comes to your mind #opinion",
+          "meaning": "The creator consistently employs interrogatives and the hashtag #opinion to establish themselves as a curator and facilitator of public discourse, actively soliciting, framing, and potentially shaping collective opinions on social and ethical dilemmas, thereby acting as a cultural provocateur.",
+          "informs": [
+            "CreatorNichePosition",
+            "CulturalCapital"
+          ]
+        }
+      ],
+      "communityReferences": [
+        {
+          "phrase": "Comments section assemble",
+          "meaning": "This phrase acts as an in-group call to action, acknowledging and directly addressing the creator's audience as a recognized collective with a shared understanding of their role in contributing to the comment section, fostering a sense of active communal participation.",
+          "informs": [
+            "ParasocialBondStrength",
+            "AudienceRelationshipType",
+            "StuartHallDecoding"
+          ]
+        },
+        {
+          "phrase": "Oh, somebody say koobideh. Koob.",
+          "meaning": "The creator expresses an anticipatory shared cultural recognition and enthusiasm for a specific ethnic food, signaling an implicit in-group knowledge and affinity within the audience that understands and resonates with this cultural marker.",
+          "informs": [
+            "ParasocialBondStrength",
+            "AudienceRelationshipType",
+            "StuartHallDecoding"
+          ]
+        },
+        {
+          "phrase": "Virgos…? Taurus?",
+          "meaning": "By referencing zodiac signs, the creator invokes a shared contemporary cultural shorthand, inviting self-identification and fostering a sense of commonality and shared understanding among audience members who participate in astrological discourse.",
+          "informs": [
+            "AudienceRelationshipType",
+            "StuartHallDecoding"
+          ]
+        }
+      ],
+      "aspirationDrivers": [
+        {
+          "phrase": "The last one is crazy 😂",
+          "meaning": "This phrase promises the audience an emotional payoff of surprise, amusement, and entertainment, appealing to a desire for vicarious thrill and shared moments of lighthearted cultural consumption.",
+          "informs": [
+            "BarthesMyth",
+            "StuartHallDecoding",
+            "AudienceRelationshipType"
+          ]
+        },
+        {
+          "phrase": "Shame on any man that does this",
+          "meaning": "This strong moral judgment offers the audience an opportunity for collective moral alignment and validation, appealing to an aspiration to participate in ethical discourse and reinforce a shared sense of rectitude or social justice.",
+          "informs": [
+            "BarthesMyth",
+            "StuartHallDecoding",
+            "AudienceRelationshipType"
+          ]
+        },
+        {
+          "phrase": "From a ten to a zero",
+          "meaning": "This phrase taps into the audience's desire to engage in social evaluation and understand dynamics of perceived worth or status, offering the gratification of participating in a narrative of dramatic social judgment and transformation.",
+          "informs": [
+            "BarthesMyth",
+            "StuartHallDecoding"
+          ]
+        },
+        {
+          "phrase": "The ick?",
+          "meaning": "This phrase references a widely understood contemporary social phenomenon, inviting the audience to validate their own feelings and experiences, thereby offering an aspirational sense of being culturally current, understood, and part of a shared modern sensibility.",
+          "informs": [
+            "BarthesMyth",
+            "StuartHallDecoding"
+          ]
+        }
+      ],
+      "symbolicSummary": "This creator embodies the archetype of a cultural interlocutor, adept at curating public opinion and navigating diverse cultural identities—from specific diasporic heritage to general social dilemmas—thereby fostering a community that collectively interprets, judges, and shares modern urban experiences."
+    }
+  }
+}
