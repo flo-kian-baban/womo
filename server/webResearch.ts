@@ -582,226 +582,236 @@ export async function fetchTikTokVideosFromAPI(
   return { items, rejected };
 }
 
-async function fetchTikTokTranscripts(
-  handle: string,
-  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
-): Promise<{
-  transcripts: TranscriptEntry[];
+// ─── Pool collection & sampling stages (phased architecture S2 decomposition) ─
+//
+// The transcript orchestrator used to fuse four jobs in one function body:
+// API pool collection, supplemental search, 6-3-3 sampling, and per-video
+// transcription. They are separate PHASES in the target architecture (search is
+// `augment`, the rest is `transcribe`), so the orchestration is taken apart
+// here — as its own step, before any phase conversion depends on it.
+//
+// The statements inside each stage are moved VERBATIM. The only change is that
+// the shared accumulators, which used to be closure variables, are now passed
+// explicitly in a PoolAccumulator. Same objects, same mutation order, same
+// dedup and author-guard behavior — the ordering of videoTitles / viewCounts /
+// hashtags feeds downstream evidence, so it must not drift by a single entry.
+//
+// NOTE for reviewers: the identity harness does NOT cover this split — it
+// starts from banked evidence, downstream of collection. The real proof for
+// this commit is the live-run comparison plus the sampler unit tests below.
+
+/** One collected video with the full engagement snapshot temporal analysis needs. */
+export interface PoolVideoItem {
+  id: string;
+  caption: string;
+  views: number;
+  likes: number;
+  comments: number;
+  saves: number;
+  shares: number;
+  createTime: number;      // Unix timestamp (seconds)
+  musicOriginal: boolean;  // true = creator made original audio
+  musicTitle: string;      // Session 7: carried through to content_items (J-4)
+  musicArtist: string;
+  duetEnabled: boolean;
+  stitchEnabled: boolean;
+  isAd: boolean;
+  durationMs: number;      // video duration in milliseconds
+}
+
+/** Shared mutable state the collection stages accumulate into (was closure vars). */
+interface PoolAccumulator {
+  videoItems: PoolVideoItem[];
+  seen: Set<string>;
+  viewCounts: number[];
   videoTitles: string[];
   hashtags: string[];
-  viewCounts: number[];
   musicTitles: string[];
-  engagementSignals: EngagementSignals;
-  quotaExhausted: boolean;
-  longitudinalSample: LongitudinalSample;
-  discoveredVideoPool: Array<{
-    id: string; url: string; caption: string; createTime: number;
-    views: number; likes: number; comments: number; saves: number; shares: number;
-    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
-    durationSec: number;
-    /** C3: 6-3-3 sample membership, independent of transcript success. */
-    temporalBucket?: "recent" | "mid" | "anchor";
-  }>;
-  /** Session 10: count of foreign / author-less videos rejected by the guard. */
   foreignVideosRejected: number;
-}> {
-  const normalizedHandle = normalizeHandle(handle);
-  const transcripts: TranscriptEntry[] = [];
-  const videoTitles: string[] = [];
-  const hashtags: string[] = [];
-  const viewCounts: number[] = [];
-  const musicTitles: string[] = [];
-  const seen = new Set<string>();
-  let searchQuotaExhausted = false;
+  searchQuotaExhausted: boolean;
+  apiVideoCount: number;
+}
 
-  const isQuotaErr = (err: unknown) => {
-    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-    return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
-  };
+function isQuotaErrMsg(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
+}
 
-  // Collect video IDs: PRIMARY SOURCE is HTML scrape, FALLBACK is search API
-  // Each item carries the full engagement snapshot needed for temporal analysis
-  interface VideoItem {
-    id: string;
-    caption: string;
-    views: number;
-    likes: number;
-    comments: number;
-    saves: number;
-    shares: number;
-    createTime: number;      // Unix timestamp (seconds)
-    musicOriginal: boolean;  // true = creator made original audio
-    musicTitle: string;      // Session 7: carried through to content_items (J-4)
-    musicArtist: string;
-    duetEnabled: boolean;
-    stitchEnabled: boolean;
-    isAd: boolean;
-    durationMs: number;      // video duration in milliseconds
-  }
-  const videoItems: VideoItem[] = [];
-
-  // ─── PRIMARY SOURCE: TikTok API (get_user_post_list) ────────────────────────
+/** Stage 1 — PRIMARY SOURCE: TikTok API (get_user_post_list). */
+async function collectPoolFromApi(
+  handle: string,
+  prefetchedProfile: Awaited<ReturnType<typeof scrapeTikTokProfile>> | undefined,
+  acc: PoolAccumulator,
+): Promise<void> {
   // Session 10: the API path now author-guards each item and returns the count
   // of foreign / author-less items it rejected. Track the run total so it can be
   // surfaced in the Run diagnostics ("N videos excluded — author mismatch").
   const { items: apiVideos, rejected: apiRejectedForeign } = await fetchTikTokVideosFromAPI(handle, prefetchedProfile);
-  let foreignVideosRejected = apiRejectedForeign;
+  acc.foreignVideosRejected += apiRejectedForeign;
   for (const v of apiVideos) {
-    if (!seen.has(v.id)) {
-      seen.add(v.id);
-      videoItems.push(v);
-      if (v.views > 0) viewCounts.push(v.views);
-      if (v.caption) videoTitles.push(v.caption);
+    if (!acc.seen.has(v.id)) {
+      acc.seen.add(v.id);
+      acc.videoItems.push(v);
+      if (v.views > 0) acc.viewCounts.push(v.views);
+      if (v.caption) acc.videoTitles.push(v.caption);
     }
   }
+  acc.apiVideoCount = apiVideos.length;
 
   console.log(`[webResearch] @${handle}: API fetch yielded ${apiVideos.length} videos`);
+}
 
-  // ─── SUPPLEMENTAL SOURCE: Multi-query TikTok search (always runs to maximise pool) ──
+/** Stage 2 — SUPPLEMENTAL SOURCE: multi-query TikTok search (the `augment` phase). */
+async function collectPoolFromSupplementalSearch(
+  handle: string,
+  normalizedHandle: string,
+  acc: PoolAccumulator,
+): Promise<void> {
   // Uses dot-stripped handle variant to work around TikTok search tokenisation
-  {
-    const noDot = handle.replace(/\./g, "");
-    const queries = [
-      handle,          // kaylee.nhi
-      `@${handle}`,    // @kaylee.nhi
-      noDot,           // kayleenhi
-      `@${noDot}`,     // @kayleenhi
-    ];
+  const noDot = handle.replace(/\./g, "");
+  const queries = [
+    handle,          // kaylee.nhi
+    `@${handle}`,    // @kaylee.nhi
+    noDot,           // kayleenhi
+    `@${noDot}`,     // @kayleenhi
+  ];
 
-    // Session 11 (Commit 2): the 4 handle-variant search queries used to run
-    // strictly sequentially (~65s — each is a full Playwright search: warm + nav +
-    // scroll + XHR capture). Fetch them with bounded concurrency (2 at a time) over
-    // ONE dedicated shared context, then MERGE sequentially in query order so the
-    // author guard + dedup stay byte-identical to the old path. Bounded at 2 (not
-    // 4) to respect the tiktok request governor's human-pattern spacing and cap
-    // simultaneous hits; the single shared context avoids the retire race (Part 0.2).
-    const searchLimit = pLimit(2);
-    let searchCtx: Awaited<ReturnType<typeof getContext>> | null = null;
-    try {
-      searchCtx = await getContext("desktop-chrome");
-    } catch (err) {
-      console.warn(`[webResearch] @${handle}: could not acquire shared search context (queries will self-manage):`, (err as Error).message);
-    }
+  // Session 11 (Commit 2): the 4 handle-variant search queries used to run
+  // strictly sequentially (~65s — each is a full Playwright search: warm + nav +
+  // scroll + XHR capture). Fetch them with bounded concurrency (2 at a time) over
+  // ONE dedicated shared context, then MERGE sequentially in query order so the
+  // author guard + dedup stay byte-identical to the old path. Bounded at 2 (not
+  // 4) to respect the tiktok request governor's human-pattern spacing and cap
+  // simultaneous hits; the single shared context avoids the retire race (Part 0.2).
+  const searchLimit = pLimit(2);
+  let searchCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+  try {
+    searchCtx = await getContext("desktop-chrome");
+  } catch (err) {
+    console.warn(`[webResearch] @${handle}: could not acquire shared search context (queries will self-manage):`, (err as Error).message);
+  }
 
-    const rawSearchResults = await Promise.all(
-      queries.map((q) =>
-        searchLimit(async () => {
-          try {
-            const result = await searchTikTokVideos(q, undefined, searchCtx?.context) as unknown as Record<string, unknown>;
-            const items = (result?.item_list as unknown[]) ?? [];
-            console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
-            return { q, items, error: null as unknown };
-          } catch (err) {
-            return { q, items: [] as unknown[], error: err as unknown };
-          }
-        })
-      )
-    );
-
-    // The shared search context is done — close it once (never per-query).
-    if (searchCtx) {
-      try { await retireContext(searchCtx.context); } catch { /* ignore */ }
-    }
-
-    // Sequential merge in query order — identical processing to the old loop.
-    for (const { q, items, error } of rawSearchResults) {
-      if (error) {
-        if (isQuotaErr(error)) searchQuotaExhausted = true;
-        console.warn(`[webResearch] TikTok search "${q}" (supplemental) failed:`, error);
-        continue;
-      }
-        for (const item of items) {
-          const v = item as Record<string, unknown>;
-
-          // Session 10 (1c): shared author guard — FAIL CLOSED. The old check used
-          // normalizedHandle.includes(authorNorm) (true for an empty author) plus
-          // an `authorId !== ""` escape, so foreign / author-less search results
-          // were accepted. Now a video is kept only if its author verifiably IS
-          // this creator; missing/empty/foreign authors are rejected and counted.
-          const author = (v?.author as Record<string, unknown>) ?? {};
-          const authorId = (author?.uniqueId as string) ?? (author?.unique_id as string) ?? "";
-          if (!isAuthorMatch(handle, authorId)) {
-            foreignVideosRejected++;
-            continue;
-          }
-
-          const videoId = (v?.id as string) ?? ((v?.video as Record<string, unknown>)?.id as string) ?? "";
-          if (!videoId || seen.has(videoId)) continue;
-          seen.add(videoId);
-
-          const desc = (v?.desc as string) ?? "";
-          const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
-          const views = Number(statsObj?.playCount ?? statsObj?.play_count ?? 0);
-          const likes = Number(statsObj?.diggCount ?? statsObj?.digg_count ?? 0);
-          const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
-          const saves = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
-          const shares = Number(statsObj?.shareCount ?? statsObj?.share_count ?? 0);
-          const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
-
-          // Music signals
-          const music = (v?.music as Record<string, unknown>) ?? {};
-          const musicTitle = (music?.title as string) ?? "";
-          const musicAuthor = (music?.authorName as string) ?? "";
-          const musicOriginal = Boolean(music?.original ?? false);
-          if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
-            if (!musicTitles.includes(musicTitle)) musicTitles.push(musicTitle);
-          }
-          if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
-            if (!musicTitles.includes(`[original audio by @${handle}]`)) {
-              musicTitles.push(`[original audio by @${handle}]`);
-            }
-          }
-
-          // Interaction flags
-          const duetEnabled = Boolean(v?.duetEnabled ?? v?.duet_enabled ?? false);
-          const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
-          const isAd = Boolean(v?.isAd ?? v?.is_ad ?? false);
-          const videoObj = (v?.video as Record<string, unknown>) ?? {};
-          const durationMs = tiktokDurationToMs(Number(videoObj?.duration ?? 0));
-
-          // Collect hashtags from challenges and textExtra
-          const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
-          for (const c of challenges) {
-            const tagName = (c?.title as string) ?? (c?.name as string) ?? "";
-            if (tagName) hashtags.push(`#${tagName}`);
-          }
-          const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? (v?.text_extra as Array<Record<string, unknown>>) ?? [];
-          for (const tag of textExtra) {
-            const tagName = (tag?.hashtagName as string) ?? (tag?.hashtag_name as string) ?? "";
-            if (tagName) hashtags.push(`#${tagName}`);
-          }
-          if (desc) {
-            const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
-            hashtags.push(...inlineTags);
-          }
-
-          if (views > 0) viewCounts.push(views);
-          if (desc) videoTitles.push(desc);
-
-          videoItems.push({
-            id: videoId, caption: desc, views, likes, comments, saves, shares,
-            createTime, musicOriginal, musicTitle, musicArtist: musicAuthor,
-            duetEnabled, stitchEnabled, isAd, durationMs,
-          });
+  const rawSearchResults = await Promise.all(
+    queries.map((q) =>
+      searchLimit(async () => {
+        try {
+          const result = await searchTikTokVideos(q, undefined, searchCtx?.context) as unknown as Record<string, unknown>;
+          const items = (result?.item_list as unknown[]) ?? [];
+          console.log(`[webResearch] TikTok search "${q}" (fallback): ${items.length} results`);
+          return { q, items, error: null as unknown };
+        } catch (err) {
+          return { q, items: [] as unknown[], error: err as unknown };
         }
+      })
+    )
+  );
+
+  // The shared search context is done — close it once (never per-query).
+  if (searchCtx) {
+    try { await retireContext(searchCtx.context); } catch { /* ignore */ }
+  }
+
+  // Sequential merge in query order — identical processing to the old loop.
+  for (const { q, items, error } of rawSearchResults) {
+    if (error) {
+      if (isQuotaErrMsg(error)) acc.searchQuotaExhausted = true;
+      console.warn(`[webResearch] TikTok search "${q}" (supplemental) failed:`, error);
+      continue;
     }
+      for (const item of items) {
+        const v = item as Record<string, unknown>;
+
+        // Session 10 (1c): shared author guard — FAIL CLOSED. The old check used
+        // normalizedHandle.includes(authorNorm) (true for an empty author) plus
+        // an `authorId !== ""` escape, so foreign / author-less search results
+        // were accepted. Now a video is kept only if its author verifiably IS
+        // this creator; missing/empty/foreign authors are rejected and counted.
+        const author = (v?.author as Record<string, unknown>) ?? {};
+        const authorId = (author?.uniqueId as string) ?? (author?.unique_id as string) ?? "";
+        if (!isAuthorMatch(handle, authorId)) {
+          acc.foreignVideosRejected++;
+          continue;
+        }
+
+        const videoId = (v?.id as string) ?? ((v?.video as Record<string, unknown>)?.id as string) ?? "";
+        if (!videoId || acc.seen.has(videoId)) continue;
+        acc.seen.add(videoId);
+
+        const desc = (v?.desc as string) ?? "";
+        const statsObj = (v?.stats as Record<string, unknown>) ?? (v?.statistics as Record<string, unknown>) ?? {};
+        const views = Number(statsObj?.playCount ?? statsObj?.play_count ?? 0);
+        const likes = Number(statsObj?.diggCount ?? statsObj?.digg_count ?? 0);
+        const comments = Number(statsObj?.commentCount ?? statsObj?.comment_count ?? 0);
+        const saves = Number(statsObj?.collectCount ?? statsObj?.collect_count ?? 0);
+        const shares = Number(statsObj?.shareCount ?? statsObj?.share_count ?? 0);
+        const createTime = Number(v?.createTime ?? v?.create_time ?? 0);
+
+        // Music signals
+        const music = (v?.music as Record<string, unknown>) ?? {};
+        const musicTitle = (music?.title as string) ?? "";
+        const musicAuthor = (music?.authorName as string) ?? "";
+        const musicOriginal = Boolean(music?.original ?? false);
+        if (musicTitle && !musicTitle.startsWith("original sound") && musicTitle.length > 3) {
+          if (!acc.musicTitles.includes(musicTitle)) acc.musicTitles.push(musicTitle);
+        }
+        if (musicTitle.startsWith("original sound") && normalizeHandle(musicAuthor) === normalizedHandle) {
+          if (!acc.musicTitles.includes(`[original audio by @${handle}]`)) {
+            acc.musicTitles.push(`[original audio by @${handle}]`);
+          }
+        }
+
+        // Interaction flags
+        const duetEnabled = Boolean(v?.duetEnabled ?? v?.duet_enabled ?? false);
+        const stitchEnabled = Boolean(v?.stitchEnabled ?? v?.stitch_enabled ?? false);
+        const isAd = Boolean(v?.isAd ?? v?.is_ad ?? false);
+        const videoObj = (v?.video as Record<string, unknown>) ?? {};
+        const durationMs = tiktokDurationToMs(Number(videoObj?.duration ?? 0));
+
+        // Collect hashtags from challenges and textExtra
+        const challenges = (v?.challenges as Array<Record<string, unknown>>) ?? [];
+        for (const c of challenges) {
+          const tagName = (c?.title as string) ?? (c?.name as string) ?? "";
+          if (tagName) acc.hashtags.push(`#${tagName}`);
+        }
+        const textExtra = (v?.textExtra as Array<Record<string, unknown>>) ?? (v?.text_extra as Array<Record<string, unknown>>) ?? [];
+        for (const tag of textExtra) {
+          const tagName = (tag?.hashtagName as string) ?? (tag?.hashtag_name as string) ?? "";
+          if (tagName) acc.hashtags.push(`#${tagName}`);
+        }
+        if (desc) {
+          const inlineTags = desc.match(/#([a-zA-Z0-9_]+)/g) ?? [];
+          acc.hashtags.push(...inlineTags);
+        }
+
+        if (views > 0) acc.viewCounts.push(views);
+        if (desc) acc.videoTitles.push(desc);
+
+        acc.videoItems.push({
+          id: videoId, caption: desc, views, likes, comments, saves, shares,
+          createTime, musicOriginal, musicTitle, musicArtist: musicAuthor,
+          duetEnabled, stitchEnabled, isAd, durationMs,
+        });
+      }
   }
+}
 
-  const apiVideoCount = apiVideos.length;
-  const supplementalVideoCount = videoItems.length - apiVideoCount;
-  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
-
-  if (videoItems.length < 4) {
-    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
-  }
-
-  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
-
-  // ─── 6-3-3 Stratified Sampling ─────────────────────────────────────────────
-  // Sort all collected videos by createTime descending (newest first)
-  const nowSec2 = Math.floor(Date.now() / 1000);
+/**
+ * Stage 3 — the 6-3-3 stratified sampler. FROZEN selection logic, moved
+ * verbatim; exported so it can be unit-tested in isolation for the first time
+ * (the identity harness cannot reach it).
+ *
+ * `nowSec` is injectable purely so tests can pin the temporal windows; the
+ * production caller passes nothing and gets Date.now() exactly as before.
+ */
+export function selectLongitudinalSample(
+  handle: string,
+  videoItems: PoolVideoItem[],
+  nowSec?: number,
+): { sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }> } {
+  const nowSec2 = nowSec ?? Math.floor(Date.now() / 1000);
   const nineMonthsSec = 270 * 24 * 3600;  // ~9 months
   const eighteenMonthsSec = 540 * 24 * 3600; // ~18 months
+  void nineMonthsSec; // retained: documents the window the mid bucket targets
 
   // Sort by createTime descending (newest first)
   const sortedVideos = [...videoItems].sort((a, b) => b.createTime - a.createTime);
@@ -816,7 +826,7 @@ async function fetchTikTokTranscripts(
     return v.createTime > 0 && age >= sixMonthsSec && age < eighteenMonthsSec;
   });
   // Pick 3 evenly spaced from the mid window
-  const midBucket: typeof videoItems = [];
+  const midBucket: PoolVideoItem[] = [];
   if (midCandidates.length > 0) {
     const step = Math.max(1, Math.floor(midCandidates.length / 3));
     for (let i = 0; i < midCandidates.length && midBucket.length < 3; i += step) {
@@ -833,7 +843,7 @@ async function fetchTikTokTranscripts(
     const age = nowSec2 - v.createTime;
     return v.createTime > 0 && age >= eighteenMonthsSec;
   });
-  const anchorBucket: typeof videoItems = [];
+  const anchorBucket: PoolVideoItem[] = [];
   if (anchorCandidates.length > 0) {
     const step = Math.max(1, Math.floor(anchorCandidates.length / 3));
     for (let i = 0; i < anchorCandidates.length && anchorBucket.length < 3; i += step) {
@@ -886,7 +896,7 @@ async function fetchTikTokTranscripts(
 
   // Combine the 12 sampled videos (deduplicated)
   const bucketedIds = new Set<string>();
-  const sampledVideos: Array<{ item: typeof videoItems[0]; bucket: "recent" | "mid" | "anchor" }> = [];
+  const sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }> = [];
   for (const v of recentBucket) {
     if (!bucketedIds.has(v.id)) { bucketedIds.add(v.id); sampledVideos.push({ item: v, bucket: "recent" }); }
   }
@@ -900,6 +910,71 @@ async function fetchTikTokTranscripts(
   const midUsedFallback = midFallback && midBucket.length > midCandidates.length;
   const anchorUsedFallback = anchorFallback && anchorBucket.length > anchorCandidates.length;
   console.log(`[webResearch] @${handle}: 6-3-3 sample — recent=${recentBucket.length}, mid=${midBucket.length}${midUsedFallback ? "(+fallback)" : ""}, anchor=${anchorBucket.length}${anchorUsedFallback ? "(+fallback)" : ""} → ${sampledVideos.length} total`);
+
+  return { sampledVideos };
+}
+
+async function fetchTikTokTranscripts(
+  handle: string,
+  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
+): Promise<{
+  transcripts: TranscriptEntry[];
+  videoTitles: string[];
+  hashtags: string[];
+  viewCounts: number[];
+  musicTitles: string[];
+  engagementSignals: EngagementSignals;
+  quotaExhausted: boolean;
+  longitudinalSample: LongitudinalSample;
+  discoveredVideoPool: Array<{
+    id: string; url: string; caption: string; createTime: number;
+    views: number; likes: number; comments: number; saves: number; shares: number;
+    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
+    durationSec: number;
+    /** C3: 6-3-3 sample membership, independent of transcript success. */
+    temporalBucket?: "recent" | "mid" | "anchor";
+  }>;
+  /** Session 10: count of foreign / author-less videos rejected by the guard. */
+  foreignVideosRejected: number;
+}> {
+  const normalizedHandle = normalizeHandle(handle);
+  const transcripts: TranscriptEntry[] = [];
+  const videoTitles: string[] = [];
+  const hashtags: string[] = [];
+  const viewCounts: number[] = [];
+  const musicTitles: string[] = [];
+  const seen = new Set<string>();
+  let searchQuotaExhausted = false;
+
+  // S2 decomposition: the collection stages share these accumulators explicitly
+  // instead of closing over them. Same array objects, same mutation order.
+  const acc: PoolAccumulator = {
+    videoItems: [], seen, viewCounts, videoTitles, hashtags, musicTitles,
+    foreignVideosRejected: 0, searchQuotaExhausted: false, apiVideoCount: 0,
+  };
+  const videoItems = acc.videoItems;
+
+  // ─── Stage 1: PRIMARY SOURCE — TikTok API (get_user_post_list) ─────────────
+  await collectPoolFromApi(handle, prefetchedProfile, acc);
+
+  // ─── Stage 2: SUPPLEMENTAL SOURCE — multi-query search (the `augment` phase) ─
+  await collectPoolFromSupplementalSearch(handle, normalizedHandle, acc);
+  let foreignVideosRejected = acc.foreignVideosRejected;
+  searchQuotaExhausted = acc.searchQuotaExhausted;
+
+
+  const apiVideoCount = acc.apiVideoCount;
+  const supplementalVideoCount = videoItems.length - apiVideoCount;
+  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
+
+  if (videoItems.length < 4) {
+    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
+  }
+
+  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
+
+  // ─── Stage 3: 6-3-3 stratified sampling (FROZEN selection logic) ──────────
+  const { sampledVideos } = selectLongitudinalSample(handle, videoItems);
 
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
   const transcriptLimit = pLimit(3);
