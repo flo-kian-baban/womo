@@ -566,12 +566,16 @@ const instagramTranscribe: TranscribeTool = {
     const urls = instagramVideoUrls.get(handle) ?? new Map<string, string>();
     return transcribeInstagramReels(handle, sampled, urls);
   },
-  assemble(_handle, pool, transcripts) {
+  assemble(_handle, pool, transcripts, sampled) {
     // Instagram computes NO engagement signals and NO longitudinal sample — it
     // never has, and `sociologicalFieldsComputed: false` on that path says so.
     // The contract makes both optional; returning fabricated empties would be
     // the lie the optionality exists to avoid.
     const byId = new Map(transcripts.map(t => [t.videoId, t]));
+    // Stamp sample membership exactly as TikTok does — the value differs
+    // (`unbucketed`, not a temporal bucket) but the meaning is the same: this
+    // video was chosen for transcription.
+    const sampledBucketById = new Map(sampled.map(sv => [sv.item.id, sv.bucket]));
     return {
       engagementSignals: undefined,
       longitudinalSample: undefined,
@@ -591,6 +595,7 @@ const instagramTranscribe: TranscribeTool = {
           musicTitle: undefined,
           musicArtist: undefined,
           durationSec: Math.round(v.durationMs / 1000),
+          temporalBucket: sampledBucketById.get(v.id),
           videoUrl: instagramVideoUrls.get(_handle)?.get(v.id),
           transcriptText: t?.transcript,
           transcriptWordCount: t?.wordCount,

@@ -1073,7 +1073,7 @@ export async function transcribeInstagramReels(
       const batch = sampled.slice(i, i + batchSize);
 
       const batchResults = await Promise.allSettled(
-        batch.map(async ({ item }) => {
+        batch.map(async ({ item, bucket }) => {
           const videoUrl = videoUrlById.get(item.id);
           if (!videoUrl) {
             console.log(`[webResearch] Instagram reel ${item.id}: no video_url — skipping`);
@@ -1140,6 +1140,11 @@ export async function transcribeInstagramReels(
                 transcript: result.text.trim(),
                 wordCount,
                 transcriptSource: TRANSCRIPT_SOURCE.speechToText,
+                // Carry the sampler's own verdict. A NULL temporal_bucket means
+                // "not in the sample" for TikTok; without this, a sampled
+                // Instagram reel would be indistinguishable from an unsampled
+                // one, which is the ambiguity `unbucketed` exists to remove.
+                bucket,
               } as TranscriptEntry;
             }
 
