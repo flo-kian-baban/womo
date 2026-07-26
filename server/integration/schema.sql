@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict aF2q7DS5AzSXIpaIeoGHcYvrX0sAOSoHAKeQlwfwkmgYwbhVc3dKj7JeJ7fkO74
+\restrict Qc2dVTAc5u9eSiq2NbikkoWA9K6SpJB5gZmebsAr5MyL0AELBZ5LlaMfBCT4NHs
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.10 (Homebrew)
@@ -348,6 +348,47 @@ CREATE TYPE public.warning_type AS ENUM (
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: analysis_phase_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.analysis_phase_state (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_id uuid NOT NULL,
+    subject_hint character varying(160) NOT NULL,
+    phase character varying(32) NOT NULL,
+    tool character varying(64),
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    failure_class character varying(24),
+    next_earliest_at timestamp with time zone,
+    output jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE analysis_phase_state; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.analysis_phase_state IS 'Phased-architecture ledger (womo_0009): one row per (analysis run, phase). Durable phase output + retry state. run_id is a correlation id, not an FK - pipeline_runs is written only at terminal time.';
+
+
+--
+-- Name: COLUMN analysis_phase_state.subject_hint; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.analysis_phase_state.subject_hint IS 'handle+platform, so an in-flight campaign is findable before a subject row exists.';
+
+
+--
+-- Name: COLUMN analysis_phase_state.output; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.analysis_phase_state.output IS 'Durable banked output of this phase; the input later phases read instead of in-memory threading.';
+
 
 --
 -- Name: archetype_transitions; Type: TABLE; Schema: public; Owner: -
@@ -912,6 +953,14 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 
 --
+-- Name: analysis_phase_state analysis_phase_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.analysis_phase_state
+    ADD CONSTRAINT analysis_phase_state_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: archetype_transitions archetype_transitions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1130,6 +1179,20 @@ CREATE INDEX am_subject_sentiment_idx ON public.audience_mentions USING btree (s
 --
 
 CREATE INDEX am_subject_time_idx ON public.audience_mentions USING btree (subject_id, collected_at);
+
+
+--
+-- Name: aps_ready_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX aps_ready_idx ON public.analysis_phase_state USING btree (status, next_earliest_at);
+
+
+--
+-- Name: aps_run_phase_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX aps_run_phase_unique ON public.analysis_phase_state USING btree (run_id, phase);
 
 
 --
@@ -1965,5 +2028,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict aF2q7DS5AzSXIpaIeoGHcYvrX0sAOSoHAKeQlwfwkmgYwbhVc3dKj7JeJ7fkO74
+\unrestrict Qc2dVTAc5u9eSiq2NbikkoWA9K6SpJB5gZmebsAr5MyL0AELBZ5LlaMfBCT4NHs
 

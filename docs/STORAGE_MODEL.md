@@ -42,7 +42,11 @@
 
 ---
 
-## 2. Table catalog (all 21) — purpose, live rows, activity
+## 2. Table catalog (all 22) — purpose, live rows, activity
+
+> **womo_0009 (2026-07-26):** table **22** is `analysis_phase_state` — the
+> phased-architecture ledger. Written by shadow banking as of S1; not yet read.
+> Full column dictionary in [§22](#22-analysis_phase_state-12-cols--phased-architecture-ledger-womo_0009).
 
 **[FACT]** Row counts queried 2026-07-22. "Activity" from the write-path/read-path map ([§9](#9-write-path--read-path-map)).
 
@@ -494,6 +498,26 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | created_at | timestamptz | no | now() | |
 **[FACT] Session 11 (Commit 7):** `recordRunOutcome` (`db.ts`) now upserts one terminal row per `creator.analyze` run, keyed on the run id. It closes the Part 0.3 blind spot — before this the analyze path wrote no run-level row, so a run that scraped + ran LLMs but persisted nothing (a 5-min timeout orphaning a finished extraction, or a persist-time bail) left zero telemetry. Upsert-on-conflict means a late authoritative outcome supersedes a provisional `timeout` rather than duplicating it. **Bulk** jobs still use the in-memory `Map` in `bulkAnalysisJobs.ts` (not this table).
 
+### 22. `analysis_phase_state` (12 cols) — **phased-architecture ledger (womo_0009)**
+| Column | Type | Null | Default | Meaning |
+|---|---|---|---|---|
+| id | uuid | no | gen_random_uuid() | PK |
+| run_id | uuid | **no** | — | Analysis-run correlation id. **Deliberately NOT an FK** — `pipeline_runs` rows are written only at terminal time (`recordRunOutcome`), so during phases 1–4 no parent row exists. Same pattern as `scrape_events.run_id` / `llm_invocations.run_id` / `semantic_documents.run_id` (this schema has **zero** `run_id` FKs) |
+| subject_hint | varchar(160) | **no** | — | handle+platform, so an in-flight campaign is findable before a subject row exists |
+| phase | varchar(32) | **no** | — | `capture` / `augment` / `transcribe` / `derive` / `extract_commit` (varchar, not an enum, so adding a phase needs no type migration) |
+| tool | varchar(64) | yes | — | which platform tool ran this phase (e.g. `tiktok:profile_xhr_scroll`) |
+| status | varchar(24) | **no** | `'pending'` | `pending` / `running` / `complete` / `partial` / `blocked` / `genuine_empty` / `failed` |
+| attempt_count | integer | **no** | 0 | attempts for this phase in this run |
+| failure_class | varchar(24) | yes | — | `transient` / `structural` / `genuine_empty` — drives requeue policy (S3) |
+| next_earliest_at | timestamptz | yes | — | backoff gate for the scheduler scan (S3) |
+| output | jsonb | yes | — | **durable banked output** of this phase — what later phases read instead of in-memory threading |
+| created_at | timestamptz | no | now() | |
+| updated_at | timestamptz | no | now() | |
+
+Indexes: `aps_run_phase_unique (run_id, phase)` UNIQUE — one row per phase per run, and the run lookup index; `aps_ready_idx (status, next_earliest_at)` — the scheduler's "what is ready now?" scan.
+
+**[FACT] S1 (shadow banking):** the monolith **writes** this table as each stage completes — purely additive observation. **Nothing reads it to make a decision and nothing resumes from it yet**; execution is unchanged. Phase execution and resumption land in S2/S3.
+
 ### 21. `users` (9 cols) — `schema.ts:793` — **orphaned; empty**
 | Column | Type | Null | Default | Meaning |
 |---|---|---|---|---|
@@ -616,7 +640,9 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | 20260723 (see ledger) | **womo_0007_evidence_snapshots** (`semantic_documents.run_id` + `sd_run_idx` + partial unique `sd_run_doc_unique(run_id, document_type)`; evidence-snapshot document kinds — table gains its first writer) |
 | 20260723 (see ledger) | **womo_0008_correct_false_silent_failure_flags** (Session 8 **data correction**, not DDL: clears the false `silent_failure_detected=true` flag on **253** auto-logged TikTok success rows with `response_size_bytes >= 5000` — the empty-body `detectSilentFailure` bug fixed in `httpClient.ts`; **14** sub-5000-byte rows intentionally left flagged since their bodies were never stored) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **12** — `womo_0004`..`womo_0008` were applied in later sessions. `womo_0008` is a data correction (no schema change). This doc reflects the live state.
+| 20260726005131 | **womo_0009_analysis_phase_state** (phased-architecture S1: new table `analysis_phase_state` + `aps_run_phase_unique(run_id, phase)` + `aps_ready_idx(status, next_earliest_at)`. **Additive only** — no existing object touched. `run_id` is a correlation id, not an FK: see [§22](#22-analysis_phase_state-12-cols--phased-architecture-ledger-womo_0009)) |
+
+> *Note:* the original work order referenced "7 migrations"; there are now **13** — `womo_0004`..`womo_0009` were applied in later sessions. `womo_0008` is a data correction (no schema change). This doc reflects the live state.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).

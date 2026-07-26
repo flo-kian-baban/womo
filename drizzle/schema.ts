@@ -827,6 +827,37 @@ export const semanticDocuments = pgTable("semantic_documents", {
 // TABLE 20: PIPELINE_RUNS — Persistent batch job tracking
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ANALYSIS PHASE STATE — phased-architecture ledger (womo_0009)
+// ═══════════════════════════════════════════════════════════════════════════════
+// One row per (analysis run, phase): durable banked output + retry state.
+// runId is a CORRELATION id, deliberately NOT a foreign key — pipeline_runs
+// rows are written only at terminal time (recordRunOutcome), so during phases
+// 1-4 no parent row exists. Same pattern as scrapeEvents.runId /
+// llmInvocations.runId / semanticDocuments.runId.
+
+export const analysisPhaseState = pgTable("analysis_phase_state", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  runId: uuid("run_id").notNull(),
+  /** handle+platform, so an in-flight campaign is findable before a subject row exists. */
+  subjectHint: varchar("subject_hint", { length: 160 }).notNull(),
+  phase: varchar("phase", { length: 32 }).notNull(),
+  tool: varchar("tool", { length: 64 }),
+  status: varchar("status", { length: 24 }).default("pending").notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  failureClass: varchar("failure_class", { length: 24 }),
+  nextEarliestAt: timestamp("next_earliest_at", { withTimezone: true }),
+  /** Durable banked output of this phase — what later phases read instead of
+   *  in-memory threading. */
+  output: jsonb("output"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runPhaseUnique: uniqueIndex("aps_run_phase_unique").on(t.runId, t.phase),
+  readyIdx: index("aps_ready_idx").on(t.status, t.nextEarliestAt),
+}));
+
+
 export const pipelineRuns = pgTable("pipeline_runs", {
   id: uuid("id").defaultRandom().primaryKey(),
   runType: varchar("run_type", { length: 64 }).notNull(),
@@ -914,6 +945,9 @@ export type InsertSemanticDocument = typeof semanticDocuments.$inferInsert;
 
 export type PipelineRun = typeof pipelineRuns.$inferSelect;
 export type InsertPipelineRun = typeof pipelineRuns.$inferInsert;
+
+export type AnalysisPhaseState = typeof analysisPhaseState.$inferSelect;
+export type InsertAnalysisPhaseState = typeof analysisPhaseState.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
