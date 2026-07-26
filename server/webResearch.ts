@@ -1456,8 +1456,8 @@ async function fetchYouTubeVideoTranscript(
  * 2. Get channel video list
  * 3. Fetch transcript for each video
  */
-async function fetchYouTubeTranscripts(handle: string): Promise<{
-  transcripts: TranscriptEntry[];
+/** What a YouTube channel capture yields — profile stats plus the video list. */
+export interface YouTubeChannelCapture {
   channelId: string;
   displayName: string;
   bio: string;
@@ -1468,8 +1468,24 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   channelKeywords: string[];
   videoTitles: string[];
   videoViewCounts: number[];
+  /** The videos transcription will read, in channel order. */
+  videoIds: Array<{ id: string; title: string }>;
   quotaExhausted: boolean;
-}> {
+}
+
+/**
+ * YouTube CAPTURE (S4b) — channel search, channel details, channel videos, and
+ * the title-search fallback. Steps 1-3 of fetchYouTubeTranscripts, moved
+ * VERBATIM; nothing reordered, no condition changed.
+ *
+ * ─── Why the fallback moved with them ───────────────────────────────────────
+ * It ran AFTER transcription in the original, but it reads and appends only
+ * `videoTitles`, which transcription never touches. Running it at the end of
+ * capture therefore produces the identical list in the identical order — and it
+ * belongs here, because it is a capture concern: it exists for the case where no
+ * channel was found at all.
+ */
+export async function captureYouTubeChannel(handle: string): Promise<YouTubeChannelCapture> {
   let channelId = "";
   let displayName = handle;
   let bio = "";
@@ -1486,7 +1502,7 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
   let channelKeywords: string[] = [];
   const videoTitles: string[] = [];
   const videoViewCounts: number[] = [];
-  const transcripts: TranscriptEntry[] = [];
+  const videoIds: Array<{ id: string; title: string }> = [];
 
   // Step 1: Find channel
   try {
@@ -1533,7 +1549,6 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
     }
 
     // Step 3: Get channel videos
-    const videoIds: Array<{ id: string; title: string }> = [];
     try {
       const videosResponse = await scrapeYouTubeChannelVideos(channelId) as unknown as Record<string, unknown>;
 
@@ -1553,23 +1568,6 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
     } catch (err) {
       if (isQuotaErr(err)) ytQuotaExhausted = true;
       console.warn("[webResearch] YouTube channel videos failed:", err);
-    }
-
-    // Step 4: Fetch transcripts for videos
-    const batchSize = 3;
-    for (let i = 0; i < Math.min(videoIds.length, 10); i += batchSize) {
-      const batch = videoIds.slice(i, i + batchSize);
-      const results = await Promise.allSettled(
-        batch.map((v) => fetchYouTubeVideoTranscript(v.id, v.title))
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value) {
-          transcripts.push(r.value);
-        }
-      }
-      if (i + batchSize < videoIds.length) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
     }
   }
 
@@ -1591,13 +1589,53 @@ async function fetchYouTubeTranscripts(handle: string): Promise<{
     }
   }
 
-  console.log(`[webResearch] YouTube @${handle}: ${transcripts.length} transcripts, ${videoTitles.length} video titles`);
+  console.log(`[webResearch] YouTube @${handle}: captured ${videoIds.length} video ids, ${videoTitles.length} titles`);
 
   return {
-    transcripts, channelId, displayName, bio, followerCount, videoCount,
-    totalViews, location, channelKeywords, videoTitles, videoViewCounts,
+    channelId, displayName, bio, followerCount, videoCount, totalViews,
+    location, channelKeywords, videoTitles, videoViewCounts, videoIds,
     quotaExhausted: ytQuotaExhausted,
   };
+}
+
+/**
+ * YouTube TRANSCRIBE (S4b) — step 4 of fetchYouTubeTranscripts, moved VERBATIM:
+ * batches of 3 over the first 10 video ids, 300ms between batches, results
+ * collected in order. fetchYouTubeVideoTranscript (caption-XML) is called, never
+ * modified.
+ */
+export async function transcribeYouTubeVideos(
+  videoIds: Array<{ id: string; title: string }>,
+): Promise<TranscriptEntry[]> {
+  const transcripts: TranscriptEntry[] = [];
+  const batchSize = 3;
+  for (let i = 0; i < Math.min(videoIds.length, 10); i += batchSize) {
+    const batch = videoIds.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map((v) => fetchYouTubeVideoTranscript(v.id, v.title))
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) {
+        transcripts.push(r.value);
+      }
+    }
+    if (i + batchSize < videoIds.length) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+  return transcripts;
+}
+
+/**
+ * The original composed shape, preserved so researchYouTubeCreator (the monolith
+ * path) behaves exactly as before. Capture then transcribe, in the same order,
+ * with the same inputs.
+ */
+async function fetchYouTubeTranscripts(handle: string): Promise<YouTubeChannelCapture & { transcripts: TranscriptEntry[] }> {
+  const captured = await captureYouTubeChannel(handle);
+  const transcripts = await transcribeYouTubeVideos(captured.videoIds);
+  console.log(`[webResearch] YouTube @${handle}: ${transcripts.length} transcripts, ${captured.videoTitles.length} video titles`);
+  return { ...captured, transcripts };
 }
 
 // ─── Creator Type Detector ────────────────────────────────────────────────────
