@@ -56,9 +56,21 @@ the difference. Enqueue-and-poll is S3b.
   `extract_commit` still runs inline in `routers.ts`, so a resumed campaign could
   not reach a commit. S3b wires the loop.
 - Ledger writes now carry the real `attempt_count`, the `next_earliest_at` gate,
-  and a `running` row before each attempt — the table finally shows work **in
-  progress**, not only work that finished. No migration: womo_0009 already had
-  every column and index this needs.
+  and a live status marker per attempt: **`pending` while the phase queues for a
+  permit, `running` once admitted**. The table finally shows work in progress,
+  and distinguishes waiting from working — reporting a queued phase as "running"
+  would misdescribe exactly the state this session introduced. No migration:
+  womo_0009 already had every column and index this needs.
+- **Monotonic ledger writes.** A phase now writes its row up to three times and
+  every write is fire-and-forget, so nothing orders them. `recordPhaseState`
+  refuses a write older than the row it would overwrite, so a late marker can
+  never leave a finished phase reading `running` with the wrong attempt count.
+- **`system.concurrency`** — a read-only tRPC query returning the live bounds,
+  per-class in-flight/queued/peak occupancy, browser-pool state and one memory
+  sample. The bounds are explicitly starting values to be tuned against
+  telemetry, which is only honest if the telemetry is visible while work runs;
+  `pipeline_runs.error_log.memory` shows per-run peaks after the fact but cannot
+  show what is **queued**.
 
 ### Changed
 - The race deadline rides the analysis-run `AsyncLocalStorage` context alongside
