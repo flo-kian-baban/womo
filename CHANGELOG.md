@@ -9,6 +9,74 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — content_items observation attribution (blocks S3b)
+
+### Fixed
+- **A re-analysis attributed ZERO content_items to its own observation**, and
+  **silently overwrote the previous observation's stored evidence.**
+  `content_items`' unique key was `(platform, platform_video_id, subject_id)` —
+  no `observation_id` — so every repeated video collided, `DO UPDATE` refreshed
+  the row in place, and the row kept pointing at the *first* observation that
+  stored it. Postgres raised nothing, so `persistence_status.content_items`
+  recorded `success` and the run reported `success`.
+
+  Meanwhile `updateContentItemTranscript` matched subject-wide, so it wired
+  transcripts onto the *older* observation's rows and counted them as this run's
+  successes — which is how an observation holding **no content at all** still
+  reported `transcript_count: 8` at `data_confidence_level: high`. That is the
+  confidently-wrong-stored-data class the project spent six sessions removing.
+
+  Measured: **0 of 20 first analyses affected, 15 of 23 re-analyses (65%)**. Not
+  intermittent — deterministic in proportion to how much of a creator's back
+  catalogue is already stored. 15 observations affected; 1 accepted and feeding
+  a match.
+
+### Added
+- **Migration `womo_0011`** — `ci_platform_video_obs_idx (platform,
+  platform_video_id, subject_id, observation_id) NULLS NOT DISTINCT`. Each
+  observation owns its own content snapshot; storage grows with re-analyses,
+  accepted knowingly because per-observation snapshots *are* the version history.
+- `insertContentItems` returns `{ attributed, collided }` instead of `void`,
+  which is what made the failure observable at all. It stays as the assertion
+  that the fix holds: a non-zero `collided` now means something re-introduced
+  cross-observation sharing.
+- `runEnrichment` accepts a returned report, so a component whose write
+  *completed* but did not accomplish its purpose can say so without inventing an
+  exception.
+- `server/integration/contentAttribution.integration.ts`, including the
+  append-only proof: a prior observation's rows are untouched by a re-analysis.
+
+### Changed
+- **`updateContentItemTranscript` takes a REQUIRED `observationId`** and filters
+  on it. Required, not optional, so a caller cannot silently get the old
+  behaviour back — unscoped it would now rewrite *every* observation's copy.
+- **BEHAVIOUR CHANGE — the read model resolves ONE observation** (newest
+  accepted, else current) instead of the `accepted OR current` union. With
+  per-observation rows that union returns each shared video once *per visible*
+  observation, and 3 of 34 subjects have two visible observations. **Some
+  profiles now show less content than before, and that is correct:** the union
+  was backfilling an observation's missing evidence with an older observation's
+  rows. One subject changed in practice (`holycao23`, 3 → 0 items) — exactly the
+  profile whose own observation held nothing.
+- The diagnostics panel no longer reports "no videos captured" when a full pool
+  was captured and merely misattributed; it reads `persistence_status`.
+
+### Known — logged for the brand session, not fixed here
+- **The brand paths synthesise content ids by POSITION** —
+  `brand-video-${i}` ([routers.ts](server/routers.ts)) and
+  `ig-post-${handle}-${i}`. These are independently unsound: a re-analysis
+  regenerates the same keys, so video #3 of the new run overwrites video #3 of
+  the old one *even when they are different videos*. womo_0011 contains the
+  damage to within a single observation, but the ids should be derived from
+  something stable (the platform's own id, or a content hash).
+
+### Not done
+- **`signal_values` / `decoded_signals` still use the permissive union** in the
+  profile getter, and unlike `content_items` they have always accumulated one row
+  set per observation. A subject with two accepted observations may therefore
+  show duplicated keywords/themes today. Same shape, different table — out of
+  this work order's scope, flagged rather than silently changed.
+
 ## [Unreleased] — Phased architecture S3a: scheduler and real concurrency bounds
 
 **No interface change.** `creator.analyze` / `creator.reanalyze` stay synchronous:

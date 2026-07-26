@@ -435,7 +435,11 @@ export async function persistCreatorToV2(params: {
             for (const t of transcriptArray) {
               if (t.videoId && t.transcript) {
                 const updated = await updateContentItemTranscript(
-                  subjectId, t.videoId, platform,
+                  // womo_0011: scoped to THIS observation. Unscoped, a success
+                  // here could be another observation's row — which is how a
+                  // content-less observation still reported transcript_count 8
+                  // and confidence "high".
+                  subjectId, observationId, t.videoId, platform,
                   t.transcript, t.transcriptSource ?? TRANSCRIPT_SOURCE.subtitle, t.wordCount,
                   // Session 8: carry the 6-3-3 bucket onto content_items.temporal_bucket
                   t.bucket ?? null,

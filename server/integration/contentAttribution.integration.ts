@@ -14,12 +14,15 @@
  * Measured in production: 0 of 20 first analyses affected, 15 of 23
  * re-analyses (65%).
  *
- * ─── What this file asserts RIGHT NOW ───────────────────────────────────────
- * The DEFECT, exactly — because that is what the database does today, and
- * because Part 1's whole job is to make it *visible* rather than silent. Each
- * case is marked with what the unique-index migration will change it to, so the
- * fix shows up as an intentional diff in these assertions rather than as a
- * quietly-passing test that never described either behaviour.
+ * ─── Both are FIXED by womo_0011 ────────────────────────────────────────────
+ * The unique key is now (platform, platform_video_id, subject_id,
+ * observation_id), so each observation owns its own content snapshot, and
+ * updateContentItemTranscript takes a REQUIRED observationId so transcript
+ * wiring cannot land on a neighbouring observation's rows.
+ *
+ * These assertions previously described the defect; they now describe the fix.
+ * The APPEND-ONLY case is the one that matters most — it is the only thing
+ * standing between a re-analysis and the silent rewriting of history.
  *
  * Runs against the DISPOSABLE Docker Postgres (never production):
  * `pnpm test:db:up` → `pnpm test:integration`.
@@ -87,7 +90,6 @@ suite("content_items observation attribution (ephemeral Postgres)", () => {
   });
 
   it("a FIRST analysis attributes every row to its own observation", async () => {
-    // Unchanged by the migration — first analyses were never affected.
     const written = await db.insertContentItems(
       subjectId, obsOne, rowsFor({ views: 100, transcript: "first run words here" }),
     );
@@ -99,69 +101,95 @@ suite("content_items observation attribution (ephemeral Postgres)", () => {
     expect(count).toBe(3);
   });
 
-  it("DEFECT (a): a RE-ANALYSIS attributes NOTHING to the new observation, and says so", async () => {
+  it("a RE-ANALYSIS attributes a FULL set to the new observation", async () => {
+    // Before womo_0011 this returned { attributed: 0, collided: 3 } and the new
+    // observation owned nothing — the production symptom, 15 observations deep.
     const written = await db.insertContentItems(
       subjectId, obsTwo, rowsFor({ views: 999, transcript: "second run words here" }),
     );
+    expect(written).toEqual({ attributed: 3, collided: 0 });
 
-    // AFTER THE MIGRATION this becomes { attributed: 3, collided: 0 }.
-    expect(written).toEqual({ attributed: 0, collided: 3 });
-
-    // The new observation owns no evidence at all — the production symptom.
     const [{ count }] = (await client.query(
       "select count(*)::int from content_items where observation_id = $1", [obsTwo],
     )).rows;
-    expect(count).toBe(0);
-
-    // …and the write raised nothing. Without the returned count there is no
-    // signal anywhere that this happened. That is the whole reason Part 1 exists.
+    expect(count).toBe(3);
   });
 
-  it("DEFECT (b): the re-analysis REWROTE the earlier observation's stored evidence", async () => {
-    // obsOne recorded views 100/101/102 and its own transcript. Append-only says
-    // a historical observation records what was true when it was taken; the
-    // upsert overwrote it with the second run's values.
+  it("APPEND-ONLY: the earlier observation's rows are UNTOUCHED by the re-analysis", async () => {
+    // THE ONE THAT MATTERS. obsOne recorded views 100/101/102 and its own
+    // transcript text. A historical observation records what was true when it
+    // was taken; before womo_0011 the upsert silently overwrote all of it with
+    // the second run's values, so every re-analysis rewrote history.
     const rows = (await client.query(
-      `select platform_video_id, view_count, transcript_text
+      `select platform_video_id, view_count, like_count, transcript_text, status
          from content_items where observation_id = $1 order by platform_video_id`, [obsOne],
     )).rows;
 
     expect(rows).toHaveLength(3);
-    // view_count is bigint — node-pg hands it back as a string.
-    // AFTER THE MIGRATION these stay [100, 101, 102] / "first run words here".
+    // view_count / like_count are bigint — node-pg hands them back as strings.
+    expect(rows.map(r => Number(r.view_count))).toEqual([100, 101, 102]);
+    expect(rows.every(r => Number(r.like_count) === 100)).toBe(true);
+    expect(rows.every(r => r.transcript_text === "first run words here")).toBe(true);
+  });
+
+  it("the new observation carries the NEW values, not the old ones", async () => {
+    const rows = (await client.query(
+      `select view_count, transcript_text from content_items
+        where observation_id = $1 order by platform_video_id`, [obsTwo],
+    )).rows;
     expect(rows.map(r => Number(r.view_count))).toEqual([999, 1000, 1001]);
     expect(rows.every(r => r.transcript_text === "second run words here")).toBe(true);
   });
 
-  it("only ONE row set exists for the subject — later runs mutate rather than append", async () => {
+  it("both observations coexist — content is version history, not one mutable set", async () => {
     const [{ total }] = (await client.query(
       "select count(*)::int as total from content_items where subject_id = $1", [subjectId],
     )).rows;
-    // AFTER THE MIGRATION this becomes 6 (one set per observation).
-    expect(total).toBe(3);
+    expect(total).toBe(6); // 3 per observation
   });
 
-  it("DEFECT: transcript wiring is subject-scoped, so it counts ANOTHER observation's rows", async () => {
-    // updateContentItemTranscript matches (subject, platform, video) with no
-    // observation filter. obsTwo owns zero rows, yet wiring a transcript for it
-    // "succeeds" — by updating the row obsOne owns. This is precisely how
-    // transcript_count and data_confidence_level stayed high on observations
-    // holding no content: transcriptSuccessCount counted these.
+  it("transcript wiring lands on the TARGET observation and nowhere else", async () => {
+    // updateContentItemTranscript used to match (subject, platform, video) with
+    // no observation filter, so a success could be another observation's row —
+    // precisely how a content-less observation still reported transcript_count 8
+    // at "high" confidence. observationId is now a REQUIRED parameter.
     const updated = await db.updateContentItemTranscript(
-      subjectId, VIDEOS[0]!, "tiktok", "wired for obsTwo", "subtitle", 3, "recent",
+      subjectId, obsTwo, VIDEOS[0]!, "tiktok", "rewired transcript", "subtitle", 2, "recent",
     );
-    expect(updated).toBe(true); // reports success…
-
-    const two = (await client.query(
-      "select count(*)::int as c from content_items where observation_id = $1", [obsTwo],
-    )).rows[0];
-    expect(two.c).toBe(0); // …while obsTwo still owns nothing
+    expect(updated).toBe(true);
 
     const one = (await client.query(
       `select transcript_text from content_items
         where observation_id = $1 and platform_video_id = $2`, [obsOne, VIDEOS[0]],
     )).rows[0];
-    // The text landed on the OTHER observation's row.
-    expect(one.transcript_text).toBe("wired for obsTwo");
+    const two = (await client.query(
+      `select transcript_text, temporal_bucket from content_items
+        where observation_id = $1 and platform_video_id = $2`, [obsTwo, VIDEOS[0]],
+    )).rows[0];
+
+    expect(two.transcript_text).toBe("rewired transcript");
+    expect(two.temporal_bucket).toBe("recent");
+    // The earlier observation keeps what IT observed.
+    expect(one.transcript_text).toBe("first run words here");
+  });
+
+  it("reports a miss honestly when the target observation has no such video", async () => {
+    // A phantom success here is what inflated transcript_count historically.
+    const updated = await db.updateContentItemTranscript(
+      subjectId, obsTwo, "7399999999999999999", "tiktok", "orphan", "subtitle", 1, null,
+    );
+    expect(updated).toBe(false);
+  });
+
+  it("READ MODEL: a subject with two visible observations returns each video ONCE", async () => {
+    // Both obsOne and obsTwo are visible under the old accepted-OR-current
+    // union, and both now own a copy of all three videos. The union would return
+    // six rows — every video duplicated. The authoritative-observation resolver
+    // returns one observation's set.
+    const items = await db.getContentItemsBySubject(subjectId);
+    expect(items).toHaveLength(3);
+    expect(new Set(items.map(i => i.platformVideoId)).size).toBe(3);
+    // obsTwo is is_latest, so its values are the ones displayed.
+    expect(items.every(i => i.transcriptText?.includes("second run") || i.transcriptText === "rewired transcript")).toBe(true);
   });
 });

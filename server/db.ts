@@ -1248,25 +1248,21 @@ export interface ContentItemsWriteResult {
 /**
  * Bulk upsert content_items rows, reporting how many landed on THIS observation.
  *
- * ─── Why the count is returned (and why it used to be void) ─────────────────
- * The conflict target is `(platform, platform_video_id, subject_id)` — it does
- * NOT include observation_id, and observation_id is deliberately absent from the
- * DO UPDATE set (re-pointing a row would strip evidence from an older ACCEPTED
- * observation, which is strictly worse). So on a RE-ANALYSIS every repeated
- * video collides, its row is refreshed in place while still belonging to the
- * first observation that stored it, and ZERO rows are attributed to the new one.
+ * ─── Why the count is returned ──────────────────────────────────────────────
+ * Before womo_0011 the conflict target omitted observation_id, so on a
+ * RE-ANALYSIS every repeated video collided, its row was refreshed in place
+ * while still belonging to the first observation that stored it, and ZERO rows
+ * were attributed to the new one. Postgres raised nothing, and the old
+ * `Promise<void>` signature threw away the only evidence anything was wrong:
+ * 15 observations reported transcripts and high confidence with no content rows
+ * of their own, each recording `persistence_status.content_items = success`.
+ * Measured: 0 of 20 first analyses affected, 15 of 23 re-analyses (65%).
  *
- * Postgres raises nothing, so the old `Promise<void>` signature threw away the
- * only evidence that anything was wrong: 15 observations reported transcripts
- * and high confidence with no content rows of their own, and every one recorded
- * `persistence_status.content_items = success`. Measured: 0 of 20 first
- * analyses affected, 15 of 23 re-analyses (65%).
- *
- * Returning the split lets the caller tell the difference between "this subject
- * has no videos" and "we wrote 83 rows and none of them belong to this
- * observation". The structural fix is a unique-index change (see the migration
- * that adds observation_id to ci_platform_video_idx); this is the honesty half,
- * and it stays useful afterwards as the assertion that the fix holds.
+ * womo_0011 made the key observation-scoped, so a re-analysis now attributes a
+ * full set. This count stays as the ASSERTION that it holds: a non-zero
+ * `collided` after the migration means something re-introduced cross-observation
+ * sharing, and the caller reports it rather than discovering it in production
+ * months later.
  */
 export async function insertContentItems(
   subjectId: string,
@@ -1332,7 +1328,11 @@ export async function insertContentItems(
     // observation that owns it — which is how a collision is detected without a
     // second query.
     const written = await db.insert(contentItems).values(rows.slice(i, i + 500)).onConflictDoUpdate({
-      target: [contentItems.platform, contentItems.platformVideoId, contentItems.subjectId],
+      // womo_0011: OBSERVATION-SCOPED. Must match ci_platform_video_obs_idx —
+      // a mismatch fails loudly with "no unique or exclusion constraint
+      // matching the ON CONFLICT specification", which is why the migration and
+      // this line ship together.
+      target: [contentItems.platform, contentItems.platformVideoId, contentItems.subjectId, contentItems.observationId],
       set: {
         transcriptText: sql`COALESCE(excluded.transcript_text, ${contentItems.transcriptText})`,
         transcriptSource: sql`COALESCE(excluded.transcript_source, ${contentItems.transcriptSource})`,
@@ -1355,11 +1355,26 @@ export async function insertContentItems(
 }
 
 /**
- * Update an existing content_items row with transcript data.
- * Matches by platform + platform_video_id + subject_id.
+ * Update THIS observation's content_items row with transcript data.
+ *
+ * ─── Why observationId is REQUIRED (womo_0011) ──────────────────────────────
+ * This used to match (subject_id, platform, platform_video_id) with no
+ * observation filter. Under the old subject-scoped unique key there was only
+ * ever one row per video, so that read as harmless — but it meant the transcript
+ * wiring updated whichever observation happened to own the row, and counted that
+ * as a success for the CURRENT run. That is exactly how an observation with zero
+ * content rows still reported transcript_count 8 and data_confidence_level
+ * "high": every one of those successes had landed on an earlier observation.
+ *
+ * Now that each observation owns its own rows, an unscoped update would be
+ * strictly worse — it would rewrite EVERY observation's copy of the video and
+ * destroy the append-only history the migration just created. The parameter is
+ * required, not optional, so a caller cannot omit it and silently get the old
+ * behaviour back.
  */
 export async function updateContentItemTranscript(
   subjectId: string,
+  observationId: string,
   platformVideoId: string,
   platform: string,
   transcriptText: string,
@@ -1397,6 +1412,9 @@ export async function updateContentItemTranscript(
       })
       .where(and(
         eq(contentItems.subjectId, subjectId),
+        // womo_0011: scope to THIS observation's copy. Without it one write
+        // rewrites every observation's copy of the video.
+        eq(contentItems.observationId, observationId),
         eq(contentItems.platform, normalizedPlatform),
         eq(contentItems.platformVideoId, platformVideoId),
       ))
@@ -1597,6 +1615,42 @@ export async function getLlmTokenUsageByTimeWindow(since: Date, until?: Date): P
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * The ONE observation whose CONTENT is authoritative for a subject.
+ *
+ * ─── Why content cannot use the permissive union (womo_0011) ────────────────
+ * The review-gate visibility rule is `accepted OR current` — a UNION, which can
+ * resolve to more than one observation (3 of 34 subjects do today, all of them
+ * two ACCEPTED observations). That was harmless while content_items held one row
+ * per video per subject: the union could only ever return that single row.
+ *
+ * Now that each observation owns its own copy, the same union returns the video
+ * once PER visible observation — duplicating every shared video in the evidence
+ * table and in the profile's content list. So content resolves to exactly one
+ * observation: the newest ACCEPTED one, falling back to the current
+ * authoritative row (which covers a first-run pending profile under review).
+ *
+ * ─── This is a deliberate behaviour change ──────────────────────────────────
+ * Some profiles will show LESS content than before, and that is the point: the
+ * union has been silently backfilling an observation's missing evidence with an
+ * older observation's rows. holycao23 is the worked example — its accepted,
+ * current observation owns ZERO content rows, yet the profile displayed three
+ * videos borrowed from a previous observation. A profile must show the evidence
+ * its own observation actually holds, or the review gate is reviewing something
+ * that was never gathered.
+ */
+function authoritativeObservationIdSubquery(db: DbHandle, subjectId: string) {
+  return db.select({ id: observations.id })
+    .from(observations)
+    .where(eq(observations.subjectId, subjectId))
+    .orderBy(
+      sql`(${observations.reviewStatus} = 'accepted') DESC`,
+      sql`${observations.isLatest} DESC`,
+      desc(observations.createdAt),
+    )
+    .limit(1);
+}
+
+/**
  * Get a creator "profile" view by subject ID — joins subjects + latest observation + creator_observations.
  * Returns a flat object compatible with existing routers.ts expectations.
  */
@@ -1662,11 +1716,17 @@ export async function getCreatorProfileById(subjectId: string) {
     })
       .from(decodedSignals)
       .where(and(eq(decodedSignals.subjectId, subjectId), inArray(decodedSignals.observationId, visibleObservationIds))),
+    // womo_0011: content resolves to ONE observation, not the visible union —
+    // see authoritativeObservationIdSubquery. Signals and decoded symbols keep
+    // the union above (unchanged this session).
     db.select()
       .from(contentItems)
       .where(and(
         eq(contentItems.subjectId, subjectId),
-        or(isNull(contentItems.observationId), inArray(contentItems.observationId, visibleObservationIds)),
+        or(
+          isNull(contentItems.observationId), // legacy rows (FK is SET NULL); none exist today
+          inArray(contentItems.observationId, authoritativeObservationIdSubquery(db, subjectId)),
+        ),
       ))
       .orderBy(desc(contentItems.viewCount)),
   ]);
@@ -1866,21 +1926,18 @@ export async function getContentItemsBySubject(subjectId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  // Same review-gate visibility rule as the profile getters (womo_0006):
-  // exclude rows tied to pending reruns / declined runs, keep accepted +
-  // current authoritative + legacy (null observation) rows.
-  const visibleObservationIds = db.select({ id: observations.id })
-    .from(observations)
-    .where(and(
-      eq(observations.subjectId, subjectId),
-      or(eq(observations.reviewStatus, "accepted"), eq(observations.isLatest, true)),
-    ));
-
+  // womo_0011: ONE authoritative observation, not the accepted-OR-current union.
+  // The union predates per-observation content rows; with them it returns each
+  // shared video once per visible observation. Same resolver the profile getter
+  // uses, so the evidence table and the profile can never disagree.
   const rows = await db.select()
     .from(contentItems)
     .where(and(
       eq(contentItems.subjectId, subjectId),
-      or(isNull(contentItems.observationId), inArray(contentItems.observationId, visibleObservationIds)),
+      or(
+        isNull(contentItems.observationId), // legacy rows (FK is SET NULL); none exist today
+        inArray(contentItems.observationId, authoritativeObservationIdSubquery(db, subjectId)),
+      ),
     ))
     .orderBy(desc(contentItems.viewCount));
 

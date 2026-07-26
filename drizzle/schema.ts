@@ -487,9 +487,23 @@ export const contentItems = pgTable("content_items", {
 }, (t) => ({
   subjectIdx: index("ci_subject_idx").on(t.subjectId),
   observationIdx: index("ci_observation_idx").on(t.observationId),
-  // Index correction: includes subjectId so the same video can exist
-  // across multiple observation runs for the same creator
-  platformVideoIdx: uniqueIndex("ci_platform_video_idx").on(t.platform, t.platformVideoId, t.subjectId),
+  /**
+   * womo_0011: OBSERVATION-SCOPED. The key used to be
+   * (platform, platform_video_id, subject_id) — despite a comment claiming it
+   * let "the same video exist across multiple observation runs", it did the
+   * exact opposite: it permitted ONE row per video per subject, so a
+   * re-analysis collided every repeated video, DO UPDATE refreshed the row in
+   * place, and the row kept pointing at the FIRST observation that stored it.
+   * Two consequences, both silent: the new observation was attributed ZERO
+   * content rows (15 observations in production, 65% of all re-analyses), and
+   * the earlier observation's stored evidence was overwritten, breaking the
+   * append-only guarantee the rest of this schema assumes.
+   *
+   * NULLS NOT DISTINCT keeps legacy rows with a null observation_id deduped as
+   * they were before (there are none today, but the column is nullable).
+   */
+  platformVideoIdx: uniqueIndex("ci_platform_video_obs_idx")
+    .on(t.platform, t.platformVideoId, t.subjectId, t.observationId),
   statusIdx: index("ci_status_idx").on(t.subjectId, t.status),
   timeIdx: index("ci_time_idx").on(t.subjectId, t.createTime),
 }));

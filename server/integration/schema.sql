@@ -1238,10 +1238,10 @@ CREATE INDEX ci_observation_idx ON public.content_items USING btree (observation
 
 
 --
--- Name: ci_platform_video_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: ci_platform_video_obs_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX ci_platform_video_idx ON public.content_items USING btree (platform, platform_video_id, subject_id);
+CREATE UNIQUE INDEX ci_platform_video_obs_idx ON public.content_items USING btree (platform, platform_video_id, subject_id, observation_id) NULLS NOT DISTINCT;
 
 
 --

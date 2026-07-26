@@ -295,7 +295,7 @@ observations still persist as accepted until Session 7.
 |---|---|---|---|---|
 | id | uuid | no | gen_random_uuid() | PK |
 | subject_id | uuid | **no** | — | FK→subjects (cascade) |
-| observation_id | uuid | yes | — | FK→observations (**set null**) |
+| observation_id | uuid | yes | — | FK→observations (**set null**). **Part of the unique key since womo_0011** — see the note below the table |
 | platform | enum `platform` | **no** | — | |
 | platform_video_id | varchar(255) | yes | — | platform's video id |
 | video_url | text | yes | — | |
@@ -317,7 +317,20 @@ observations still persist as accepted until Session 7.
 | is_original_audio | boolean | yes | — | |
 | status | varchar(32) | **no** | `'sampled'` | sampled/ingested state |
 | created_at | timestamptz | no | now() | |
-Unique: `(platform, platform_video_id, subject_id)`.
+Unique: **`ci_platform_video_obs_idx (platform, platform_video_id, subject_id, observation_id) NULLS NOT DISTINCT`** — one row per video **per observation** (womo_0011).
+
+**[FACT] womo_0011 — content_items is OBSERVATION-SCOPED.** The key used to be `(platform, platform_video_id, subject_id)`, which permitted exactly one row per video per subject. `insertContentItems` upserts against it, and `observation_id` is deliberately **not** in the `DO UPDATE set` (re-pointing a row would strip evidence from an older **accepted** observation, which is strictly worse). So a **re-analysis** collided on every repeated video, `DO UPDATE` refreshed the row in place, and the row kept pointing at the **first** observation that stored it. Postgres raised nothing. Two silent consequences:
+
+1. **The new observation was attributed ZERO content rows** while still reporting `transcript_count` and `data_confidence_level = high` — because `updateContentItemTranscript` also matched subject-wide and counted the *older* observation's rows as this run's successes. Measured before the fix: **0 of 20 first analyses affected, 15 of 23 re-analyses (65%)**. Not intermittent — deterministic in proportion to how much of a creator's back catalogue is already stored.
+2. **The earlier observation's stored evidence was overwritten** (view counts, transcripts), breaking the append-only guarantee the rest of this schema assumes: a historical observation is supposed to record what was true when it was taken.
+
+**Invariants to preserve:**
+- `updateContentItemTranscript` takes a **required** `observationId` and filters on it. Unscoped, one write rewrites every observation's copy and destroys the history this index creates.
+- The **read model resolves ONE observation** (`authoritativeObservationIdSubquery`: newest accepted, else current) rather than the `accepted OR current` union the review gate uses for signals. With per-observation rows, that union returns each shared video once *per visible observation* — 3 of 34 subjects have two visible observations today.
+- **Never add `observationId` to the `DO UPDATE set`** as a shortcut. It re-points rows to the newest observation, stripping evidence from older accepted ones — the observations that feed matches.
+- Storage grows with re-analyses (one snapshot per observation). Accepted knowingly: per-observation snapshots *are* the version history. Pruning belongs to the future pgvector conversion.
+
+Guarded by `server/integration/contentAttribution.integration.ts` — in particular the append-only case, which asserts a prior observation's rows are byte-for-byte untouched by a re-analysis.
 
 ### 9. `audience_mentions` (16 cols) — `schema.ts:493` — **empty; counts are `integer` (not bigint)**
 | Column | Type | Null | Default | Meaning |
@@ -579,7 +592,7 @@ Indexes: `aps_run_phase_unique (run_id, phase)` UNIQUE — one row per phase per
 
 **Primary keys:** every table has a single-column `id` PK (UUID everywhere except `users.id` serial/integer).
 
-**Unique constraints:** `platform_handles(platform,handle)`, `creator_observations(observation_id)`, `brand_observations(observation_id)`, `content_items(platform,platform_video_id,subject_id)`, `match_scores(creator_subject_id,brand_subject_id,created_at)`, `niche_taxonomy(slug)`, `users(open_id)`.
+**Unique constraints:** `platform_handles(platform,handle)`, `creator_observations(observation_id)`, `brand_observations(observation_id)`, **`content_items(platform,platform_video_id,subject_id,observation_id)` NULLS NOT DISTINCT (womo_0011)**, `match_scores(creator_subject_id,brand_subject_id,created_at)`, `niche_taxonomy(slug)`, `users(open_id)`.
 
 **Foreign keys (child.column → parent, ON DELETE):**
 | Child.column | → Parent | ON DELETE |
@@ -601,7 +614,7 @@ Indexes: `aps_run_phase_unique (run_id, phase)` UNIQUE — one row per phase per
 | match_scores.creator_observation_id / brand_observation_id | observations / observations | **NO ACTION** / **NO ACTION** ⚠️ |
 | match_narratives / match_warnings / match_overlaps / match_content_directions .match_score_id | match_scores | CASCADE (all) |
 
-**Indexes** — **[FACT]** 82 indexes total; every FK column is indexed for lookups, plus composite filters (`obs_latest_idx(subject_id,is_latest)`, `subjects_matching_idx`, `ms_pair_idx` unique, `ci_platform_video_idx` unique, `sv_subject_domain_idx`, etc.). **[FACT] The duplicate index `nt_slug_idx` is GONE** (dropped by `womo_0004`; only `niche_taxonomy_slug_unique` remains on `slug`). **[FACT]** No trigram (`gin_trgm_ops`) or vector (`ivfflat`) index exists on any table.
+**Indexes** — **[FACT]** 82 indexes total; every FK column is indexed for lookups, plus composite filters (`obs_latest_idx(subject_id,is_latest)`, `subjects_matching_idx`, `ms_pair_idx` unique, `ci_platform_video_obs_idx` unique (womo_0011), `sv_subject_domain_idx`, etc.). **[FACT] The duplicate index `nt_slug_idx` is GONE** (dropped by `womo_0004`; only `niche_taxonomy_slug_unique` remains on `slug`). **[FACT]** No trigram (`gin_trgm_ops`) or vector (`ivfflat`) index exists on any table.
 
 ---
 
