@@ -39,10 +39,15 @@ import {
   collectPoolFromSupplementalSearch,
   selectLongitudinalSample,
   transcribeSampledVideos,
+  transcribeInstagramReels,
+  extractHashtags,
 } from "../webResearch";
 import { emptyCaptureMessage } from "../webResearch";
 import { isSpeechTranscript } from "@shared/transcriptSource";
 import { scrapeTikTokProfile } from "../scraping/tiktok/profileScraper";
+import { scrapeInstagramProfile } from "../scraping/instagram/profileScraper";
+import { fetchPostViaOEmbed } from "../scraping/instagram/postScraper";
+import type { InstagramPostData } from "../scraping/instagram/types";
 
 // ─── Shared shapes every platform tool speaks ────────────────────────────────
 
@@ -149,8 +154,9 @@ export interface TranscribeTool {
     transcripts: TranscriptEntry[],
     sampled: SampledVideo[],
   ): {
-    engagementSignals: EngagementSignals;
-    longitudinalSample: LongitudinalSample;
+    /** Absent when the platform computes none — see BankedCreatorEvidence. */
+    engagementSignals?: EngagementSignals;
+    longitudinalSample?: LongitudinalSample;
     discoveredVideoPool: NonNullable<CreatorResearchResult["discoveredVideoPool"]>;
   };
 }
@@ -365,12 +371,271 @@ export const TIKTOK_TOOLSET: PlatformToolset = {
   evidenceExtras: () => "",
 };
 
+
+// ─── Instagram implementation (S4) ───────────────────────────────────────────
+//
+// Every scraper below is CALLED, not reimplemented: scrapeInstagramProfile with
+// its multi-path fallbacks, fetchPostViaOEmbed, and the reel speech-to-text path
+// extracted verbatim from the monolith. What is new is the CONTRACT around them.
+//
+// The shapes differ from TikTok in ways the contract already absorbs: Instagram
+// posts carry no music metadata, no duet/stitch flags and no share/save counts,
+// so those pool fields are honestly zero/empty rather than invented.
+
+/** Instagram's post list, kept from capture so augment and transcribe can use it. */
+interface InstagramNative {
+  posts: InstagramPostData[];
+  source: string;
+  isBusinessAccount: boolean;
+  category: string;
+  isVerified: boolean;
+  externalUrl: string;
+}
+
+/** A caption's first line, trimmed to 60 chars — the monolith's title rule. */
+function instagramTitleFromCaption(caption: string): string {
+  const firstLine = caption.split("\n")[0] ?? "";
+  return firstLine.length > 60 ? firstLine.slice(0, 57) + "..." : firstLine;
+}
+
+/** Map an Instagram post onto the shared pool item. */
+function instagramPostToPoolItem(p: InstagramPostData): PoolVideoItem {
+  return {
+    id: p.shortcode || p.id,
+    caption: p.caption || "",
+    views: p.view_count || 0,
+    likes: p.like_count || 0,
+    comments: p.comment_count || 0,
+    // Instagram exposes neither saves nor shares on this path — zero is the
+    // honest value, not a placeholder to be filled in later.
+    saves: 0,
+    shares: 0,
+    createTime: p.timestamp || 0,
+    musicOriginal: false,
+    musicTitle: "",
+    musicArtist: "",
+    duetEnabled: false,
+    stitchEnabled: false,
+    isAd: false,
+    durationMs: p.video_duration ? Math.round(p.video_duration * 1000) : 0,
+  };
+}
+
+const instagramCapture: CaptureTool = {
+  platform: "Instagram",
+  name: "instagram:profile_multipath",
+  async capture(handle) {
+    const scraped = await scrapeInstagramProfile(handle);
+    const { profile, posts, source } = scraped;
+
+    const profileTitles: string[] = [];
+    const profileViewCounts: number[] = [];
+    for (const p of posts) {
+      const title = instagramTitleFromCaption(p.caption ?? "");
+      if (title) profileTitles.push(title);
+      if ((p.view_count ?? 0) > 0) profileViewCounts.push(p.view_count);
+    }
+
+    // Stash the CDN video URLs for the transcribe tool — see the note on
+    // instagramVideoUrls. They expire, so they cannot be re-derived later.
+    __rememberInstagramVideoUrls(handle, posts);
+
+    const native: InstagramNative = {
+      posts,
+      source,
+      isBusinessAccount: profile.is_business_account,
+      category: profile.category,
+      isVerified: profile.is_verified,
+      externalUrl: profile.external_url,
+    };
+
+    return {
+      stats: {
+        displayName: profile.full_name || handle,
+        bio: profile.biography,
+        followerCount: profile.follower_count,
+        followingCount: profile.following_count,
+        videoCount: profile.media_count,
+        // Instagram has no lifetime like total; the monolith summed post likes.
+        totalLikes: posts.reduce((sum, p) => sum + (p.like_count ?? 0), 0),
+        location: "",
+      },
+      profileTitles: profileTitles.slice(0, 25),
+      profileViewCounts,
+      assessment: { source, postsCaptured: posts.length },
+      nativeProfile: native,
+    };
+  },
+  async seedPool(_handle, captured, pool) {
+    const native = captured.nativeProfile as InstagramNative | undefined;
+    for (const post of native?.posts ?? []) {
+      const item = instagramPostToPoolItem(post);
+      if (!item.id || pool.seen.has(item.id)) continue;
+      pool.seen.add(item.id);
+      pool.videoItems.push(item);
+      if (item.caption.trim()) pool.videoTitles.push(instagramTitleFromCaption(item.caption));
+      if (item.views > 0) pool.viewCounts.push(item.views);
+    }
+    pool.apiVideoCount = pool.videoItems.length;
+    pool.hashtags.push(...extractHashtags(pool.videoItems.map(v => v.caption)));
+  },
+};
+
+const instagramAugment: AugmentTool = {
+  platform: "Instagram",
+  name: "instagram:oembed_supplement",
+  async augment(_handle, pool) {
+    // The monolith supplemented posts whose caption was missing or very short.
+    // Same rule here, applied to the pool the capture tool seeded.
+    const thin = pool.videoItems.filter(v => !v.caption || v.caption.length <= 10);
+    if (thin.length === 0) return;
+
+    const pLimit = (await import("p-limit")).default;
+    const limit = pLimit(3);
+    await Promise.allSettled(thin.map(item => limit(async () => {
+      const oembed = await fetchPostViaOEmbed(item.id);
+      if (oembed?.caption) {
+        item.caption = oembed.caption;
+        const title = instagramTitleFromCaption(item.caption);
+        if (title) pool.videoTitles.push(title);
+      }
+    })));
+    pool.hashtags.length = 0;
+    pool.hashtags.push(...extractHashtags(pool.videoItems.map(v => v.caption)));
+  },
+};
+
+const instagramTranscribe: TranscribeTool = {
+  platform: "Instagram",
+  name: "instagram:reel_speech_to_text",
+  selectSample(handle, pool) {
+    // The monolith took the first 6 video/reel posts in feed order and stopped
+    // once 5 transcripts landed. NOT temporal: there is no recent/mid/anchor
+    // stratification to report, so the sample says `unbucketed` rather than
+    // claiming a bucket the sampler never chose.
+    //
+    // The video test is URL presence, NOT duration: `video_duration` is never
+    // populated by the scrape paths in use (verified across two live captures —
+    // every post came back durationSec 0), so filtering on it would select
+    // nothing and silently yield zero transcripts. A reel with no CDN URL cannot
+    // be transcribed anyway, which is the same set the monolith skipped.
+    const urls = instagramVideoUrls.get(handle);
+    return pool
+      .filter(v => Boolean(urls?.get(v.id)))
+      .slice(0, 6)
+      .map(item => ({ item, bucket: "unbucketed" as const }));
+  },
+  transcribe(handle, sampled) {
+    const urls = instagramVideoUrls.get(handle) ?? new Map<string, string>();
+    return transcribeInstagramReels(handle, sampled, urls);
+  },
+  assemble(_handle, pool, transcripts) {
+    // Instagram computes NO engagement signals and NO longitudinal sample — it
+    // never has, and `sociologicalFieldsComputed: false` on that path says so.
+    // The contract makes both optional; returning fabricated empties would be
+    // the lie the optionality exists to avoid.
+    const byId = new Map(transcripts.map(t => [t.videoId, t]));
+    return {
+      engagementSignals: undefined,
+      longitudinalSample: undefined,
+      discoveredVideoPool: pool.map(v => {
+        const t = byId.get(v.id);
+        return {
+          id: v.id,
+          url: `https://www.instagram.com/p/${v.id}/`,
+          caption: v.caption,
+          createTime: v.createTime,
+          views: v.views,
+          likes: v.likes,
+          comments: v.comments,
+          saves: 0,
+          shares: 0,
+          musicOriginal: false,
+          musicTitle: undefined,
+          musicArtist: undefined,
+          durationSec: Math.round(v.durationMs / 1000),
+          videoUrl: instagramVideoUrls.get(_handle)?.get(v.id),
+          transcriptText: t?.transcript,
+          transcriptWordCount: t?.wordCount,
+          transcriptSource: t?.transcriptSource,
+        };
+      }),
+    };
+  },
+};
+
+/**
+ * Reel video URLs, keyed by handle then shortcode.
+ *
+ * WHY THIS EXISTS: a pool item carries no video_url — the shared PoolVideoItem
+ * has no field for one, because TikTok resolves video URLs at transcript time.
+ * Instagram's CDN URLs come from the profile scrape and expire, so they cannot
+ * be re-derived later. Capture stashes them here and transcribe reads them back
+ * within the same campaign. Deliberately NOT banked: a resumed campaign must
+ * re-scrape for fresh URLs rather than replay dead ones.
+ */
+const instagramVideoUrls = new Map<string, Map<string, string>>();
+
+export function __rememberInstagramVideoUrls(handle: string, posts: InstagramPostData[]): void {
+  const m = new Map<string, string>();
+  for (const p of posts) {
+    if (p.video_url) m.set(p.shortcode || p.id, p.video_url);
+  }
+  instagramVideoUrls.set(handle, m);
+}
+
+/** Instagram's evidence gate — messages VERBATIM from the monolith. */
+const instagramGate: PlatformToolset["gate"] = (input) => {
+  const capture = input.capture as { stats?: { followerCount?: number; bio?: string }; pool?: { videoItems?: unknown[] } } | null;
+  const handle = input.handle;
+
+  const hasProfileData = Number(capture?.stats?.followerCount ?? 0) > 0
+    || String(capture?.stats?.bio ?? "").length > 0;
+  const hasPostData = (capture?.pool?.videoItems?.length ?? 0) > 0;
+
+  if (!capture || (!hasProfileData && !hasPostData)) {
+    return {
+      ok: false,
+      code: "NOT_FOUND",
+      message: `No public content found for @${handle} on Instagram. Please verify the handle is correct and that the account is public.`,
+    };
+  }
+  return { ok: true };
+};
+
+/**
+ * Instagram's business-signals block — appended VERBATIM as the monolith did,
+ * after the shared evidence summary.
+ *
+ * NOTE: `is_business_account` is populated only by the GraphQL scrape path
+ * (profileScraper's extractProfileFromGraphqlUser). Live captures via
+ * playwright-mobile-xhr leave it false, so in practice this block is usually
+ * empty — see the S4 report.
+ */
+const instagramEvidenceExtras: PlatformToolset["evidenceExtras"] = ({ capture }) => {
+  const native = (capture as { nativeProfile?: InstagramNative } | null)?.nativeProfile;
+  if (!native?.isBusinessAccount) return "";
+  return `\nINSTAGRAM BUSINESS SIGNALS:\n  Business Account: YES\n  Category: ${native.category || "Not specified"}\n  Verified: ${native.isVerified ? "YES" : "NO"}\n  External URL: ${native.externalUrl || "None"}`;
+};
+
+export const INSTAGRAM_TOOLSET: PlatformToolset = {
+  capture: instagramCapture,
+  augment: instagramAugment,
+  transcribe: instagramTranscribe,
+  gate: instagramGate,
+  profileUrl: (handle) => `https://www.instagram.com/${handle}/`,
+  evidenceExtras: instagramEvidenceExtras,
+};
+
 /**
  * Tool registry. S4 adds Instagram and YouTube entries here — that is the
  * WHOLE change at the architecture level.
  */
 const REGISTRY: Partial<Record<PlatformName, PlatformToolset>> = {
   TikTok: TIKTOK_TOOLSET,
+  Instagram: INSTAGRAM_TOOLSET,
+  // YouTube: its own session — capture and transcribe are fused in one call,
+  // it emits no scrape_events at all, and it samples non-temporally.
 };
 
 export function toolsetFor(platform: PlatformName): PlatformToolset {

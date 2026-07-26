@@ -232,7 +232,7 @@ export function tiktokDurationToMs(raw: number): number {
   return raw > 1000 ? Math.round(raw) : Math.round(raw * 1000);
 }
 
-function extractHashtags(texts: string[]): string[] {
+export function extractHashtags(texts: string[]): string[] {
   const tagCounts: Record<string, number> = {};
   for (const text of texts) {
     const matches = text.match(/#([a-zA-Z0-9_]+)/g) ?? [];
@@ -1036,6 +1036,152 @@ export async function transcribeSampledVideos(
 }
 
 /**
+ * Per-reel transcription for Instagram (S4).
+ *
+ * ─── What this is ───────────────────────────────────────────────────────────
+ * The body was INLINE in researchInstagramCreator. Extracted, not rewritten, so
+ * the Instagram TranscribeTool can call it exactly as TikTok's tool calls
+ * transcribeSampledVideos. The behaviour is unchanged: batches of 3 over ONE
+ * Playwright context (its cookies are what make the CDN download work at all),
+ * stop once 5 transcripts land, skip reels with no video_url, skip files under
+ * 10KB, and require at least 10 characters of text before accepting a result.
+ *
+ * Instagram has no subtitle track to read, so this is speech-to-text over the
+ * downloaded audio — hence TRANSCRIPT_SOURCE.speechToText. That classification
+ * is FROZEN and is the reason the same transcript count means something
+ * different here than it does on TikTok.
+ */
+export async function transcribeInstagramReels(
+  handle: string,
+  sampled: Array<{ item: PoolVideoItem; bucket: SampleBucket }>,
+  videoUrlById: Map<string, string>,
+): Promise<TranscriptEntry[]> {
+  const transcripts: TranscriptEntry[] = [];
+  if (sampled.length === 0) return transcripts;
+
+  const { getContext } = await import("./scraping/browserClient");
+  const { requestGovernor } = await import("./scraping/httpClient");
+
+  let dlCtx: Awaited<ReturnType<typeof getContext>> | null = null;
+  try {
+    await requestGovernor("instagram");
+    dlCtx = await getContext("mobile-ios", 10);
+    const { context: browserCtx } = dlCtx;
+
+    const batchSize = 3;
+    for (let i = 0; i < sampled.length && transcripts.length < 5; i += batchSize) {
+      const batch = sampled.slice(i, i + batchSize);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async ({ item }) => {
+          const videoUrl = videoUrlById.get(item.id);
+          if (!videoUrl) {
+            console.log(`[webResearch] Instagram reel ${item.id}: no video_url — skipping`);
+            return null;
+          }
+          try {
+            console.log(`[webResearch] Instagram reel ${item.id}: downloading via context.request...`);
+            const dlStart = Date.now();
+            const dlRes = await browserCtx.request.get(videoUrl, {
+              timeout: 20000,
+              headers: { "Accept": "*/*", "Referer": "https://www.instagram.com/" },
+            });
+
+            if (!dlRes.ok()) {
+              console.log(`[webResearch] Instagram reel ${item.id}: download failed — HTTP ${dlRes.status()}`);
+              recordScrapeEvent({
+                platform: "instagram", scrapeMethod: "instagram_playwright",
+                urlRequested: videoUrl.slice(0, 1000), httpStatus: dlRes.status(),
+                failureReason: `reel video download failed — HTTP ${dlRes.status()}`,
+                durationMs: Date.now() - dlStart,
+              });
+              return null;
+            }
+
+            const audioBuffer = Buffer.from(await dlRes.body());
+            const mimeType = dlRes.headers()["content-type"] || "video/mp4";
+            const sizeMB = audioBuffer.length / (1024 * 1024);
+            console.log(`[webResearch] Instagram reel ${item.id}: downloaded ${sizeMB.toFixed(1)}MB`);
+            recordScrapeEvent({
+              platform: "instagram", scrapeMethod: "instagram_playwright",
+              urlRequested: videoUrl.slice(0, 1000), httpStatus: dlRes.status(),
+              responseSizeBytes: audioBuffer.length, durationMs: Date.now() - dlStart,
+            });
+
+            if (sizeMB < 0.01) {
+              console.log(`[webResearch] Instagram reel ${item.id}: file too small — skipping`);
+              return null;
+            }
+
+            const transcribeStart = Date.now();
+            const result = await transcribeAudio({
+              audioUrl: videoUrl,
+              language: "en",
+              audioBuffer,
+              mimeType: mimeType.includes("video") ? "video/mp4" : mimeType,
+            });
+
+            if (result && !("error" in result) && result.text && result.text.length >= 10) {
+              const wordCount = result.text.split(/\s+/).length;
+              console.log(`[webResearch] ✅ Instagram reel ${item.id}: ${wordCount} words transcribed`);
+              // S4 instrumentation parity: one event per transcription ATTEMPT,
+              // success or failure, so the next failure taxonomy can see this
+              // path at all. TikTok has emitted these since the reliability
+              // session; Instagram's transcription leg emitted nothing.
+              recordScrapeEvent({
+                platform: "instagram", scrapeMethod: "whisper_transcription",
+                urlRequested: `instagram:reel:${item.id}#transcribe=speech:success`,
+                durationMs: Date.now() - transcribeStart,
+              });
+              return {
+                videoId: item.id,
+                videoUrl: `https://www.instagram.com/p/${item.id}/`,
+                caption: item.caption.slice(0, 100),
+                transcript: result.text.trim(),
+                wordCount,
+                transcriptSource: TRANSCRIPT_SOURCE.speechToText,
+              } as TranscriptEntry;
+            }
+
+            const errDetail = result && "error" in result
+              ? `${(result as { error: string; details?: string }).error}: ${(result as { details?: string }).details ?? ""}`
+              : "empty/short text";
+            console.log(`[webResearch] Instagram reel ${item.id}: transcription failed — ${errDetail}`);
+            recordScrapeEvent({
+              platform: "instagram", scrapeMethod: "whisper_transcription",
+              urlRequested: `instagram:reel:${item.id}#transcribe=speech`,
+              failureReason: `transcript speech: ${errDetail}`.slice(0, 500),
+              durationMs: Date.now() - transcribeStart,
+            });
+            return null;
+          } catch (err) {
+            console.log(`[webResearch] Instagram reel ${item.id}: download/transcribe error — ${(err as Error).message}`);
+            recordScrapeEvent({
+              platform: "instagram", scrapeMethod: "whisper_transcription",
+              urlRequested: `instagram:reel:${item.id}#transcribe=speech`,
+              failureReason: `transcript speech: ${(err as Error).message}`.slice(0, 500),
+            });
+            return null;
+          }
+        })
+      );
+
+      for (const result of batchResults) {
+        if (result.status === "fulfilled" && result.value) transcripts.push(result.value);
+      }
+    }
+
+    try { await dlCtx.page.close(); } catch { /* */ }
+  } catch (err) {
+    console.log(`[webResearch] Instagram @${handle}: transcript batch failed — ${(err as Error).message}`);
+    if (dlCtx) { try { await dlCtx.page.close(); } catch { /* */ } }
+  }
+
+  console.log(`[webResearch] Instagram @${handle}: ${transcripts.length} transcripts from ${sampled.length} sampled reels`);
+  return transcripts;
+}
+
+/**
  * Engagement signals + LongitudinalSample + discoveredVideoPool, assembled
  * from the collected pool and the fetched transcripts. Body moved VERBATIM;
  * the cultural-velocity heuristic and the 6-3-3 membership stamping are
@@ -1635,8 +1781,9 @@ export interface ResumableBankedPhases {
   transcribe: {
     transcripts: TranscriptEntry[];
     musicTitles: string[];
-    engagementSignals: EngagementSignals;
-    longitudinalSample: LongitudinalSample;
+    /** Absent when the platform computes none (S4). */
+    engagementSignals?: EngagementSignals;
+    longitudinalSample?: LongitudinalSample;
     discoveredVideoPool: CreatorResearchResult["discoveredVideoPool"];
     foreignVideosRejected: number;
     transcriptViewCounts: number[];
@@ -1766,7 +1913,8 @@ export function computeDeriveInputs(input: {
   transcripts: TranscriptEntry[];
   viewCounts: number[];
   followerCount: number;
-  engagementSignals: EngagementSignals;
+  /** Absent when the platform computes none (S4); the rate falls back below. */
+  engagementSignals?: EngagementSignals;
 }): {
   totalViews: number; avgViews: number; engagementRate: number;
   topHashtags: string[]; rawKeywords: string[]; combinedTranscriptText: string;
@@ -1780,8 +1928,8 @@ export function computeDeriveInputs(input: {
     : 0;
   // FIXED engagement rate: use (likes + comments) / plays, not views/followers
   // This is the true interaction rate and will never exceed 100%
-  const engagementRate = engagementSignals.avgLikeRate > 0
-    ? Math.round((engagementSignals.avgLikeRate + engagementSignals.avgCommentRate) * 100 * 100) / 100
+  const engagementRate = (engagementSignals?.avgLikeRate ?? 0) > 0
+    ? Math.round((engagementSignals!.avgLikeRate + engagementSignals!.avgCommentRate) * 100 * 100) / 100
     : (followerCount > 0 && avgViews > 0
       ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
       : 0);

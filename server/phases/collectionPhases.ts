@@ -261,8 +261,9 @@ export function selectSampleForPlatform(
 export interface TranscribePhaseOutput {
   transcripts: TranscriptEntry[];
   musicTitles: string[];
-  engagementSignals: EngagementSignals;
-  longitudinalSample: LongitudinalSample;
+  /** Absent when the platform computes none (S4) — Instagram never has. */
+  engagementSignals?: EngagementSignals;
+  longitudinalSample?: LongitudinalSample;
   discoveredVideoPool: NonNullable<CreatorResearchResult["discoveredVideoPool"]>;
   foreignVideosRejected: number;
   transcriptViewCounts: number[];

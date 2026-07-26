@@ -39,11 +39,21 @@ describe("platform tool seam", () => {
     expect(ts.transcribe.name).toBe("tiktok:transcriptStrategies");
   });
 
-  it("an unregistered platform fails LOUDLY and says what S4 must do", () => {
+  it("Instagram is registered with all three tools (S4)", () => {
+    expect(registeredPlatforms()).toContain("Instagram");
+    const ts = toolsetFor("Instagram");
+    expect(ts.capture.name).toBe("instagram:profile_multipath");
+    expect(ts.augment?.name).toBe("instagram:oembed_supplement");
+    expect(ts.transcribe.name).toBe("instagram:reel_speech_to_text");
+  });
+
+  it("an unregistered platform still fails LOUDLY", () => {
     // The alternative — silently doing nothing — is how a platform ends up
-    // producing empty analyses that look successful.
-    expect(() => toolsetFor("Instagram")).toThrow(/No phase toolset registered for Instagram/);
-    expect(() => toolsetFor("YouTube")).toThrow(/S4/);
+    // producing empty analyses that look successful. YouTube is deliberately
+    // NOT registered: it carries the capture/transcribe split, telemetry from
+    // zero, and non-temporal sampling, and gets its own session.
+    expect(registeredPlatforms()).not.toContain("YouTube");
+    expect(() => toolsetFor("YouTube")).toThrow(/No phase toolset registered for YouTube/);
   });
 
   it("the transcribe tool delegates to the FROZEN 6-3-3 sampler", () => {
