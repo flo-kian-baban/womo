@@ -18,7 +18,7 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
-  recordPhaseState, recordPhaseObservation, loadResumableBankedPhases,
+  recordPhaseObservation, getPhaseState,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -35,13 +35,13 @@ import { researchCreator, researchBrand, resumeResearchFromBanked, type Resumabl
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
+import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow } from "./queue/analysisQueue";
 import type { CreatorResearchResult } from "./webResearch";
 import type { PhaseStateWrite } from "./db";
 import type { RunOutcomeStatus } from "./db";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
-import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
 import { newRunId, withAnalysisRun, currentDeadlineAt } from "./_core/runContext";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
@@ -976,99 +976,61 @@ export const appRouter = router({
         return { existing };
       }),
 
-    analyze: publicProcedure
+    /**
+     * SUBMIT — the single entry point for all creator analysis (S3b).
+     *
+     * New analysis, re-analysis, one handle or twenty: same call, same code
+     * path. The array length is the only difference. There is no synchronous
+     * variant and no "run now" bypass; a single creator is a queue of one.
+     *
+     * Returns as soon as the campaigns are DURABLY enqueued. Poll
+     * `creator.queue.status` for progress — it reports real ledger state, never
+     * an estimate.
+     */
+    submit: publicProcedure
       .input(z.object({
-        handleOrUrl: z.string().min(1),
-        platform: z.enum(["TikTok", "Instagram"]),
-        /** Session 7: required to proceed when the handle already exists as a subject */
+        handles: z.array(z.string().min(1)).min(1).max(50),
+        platform: z.enum(["TikTok"]),
+        /** Session 7: required to proceed when a handle already exists. */
         confirmDuplicate: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
-        // Duplicate gate (Session 7): enforced server-side even if a client
-        // skips the pre-flight, and re-checked at submit time to cover the
-        // pre-flight → submit race. Runs BEFORE any scraping starts.
+        // Duplicate gate (Session 7) — still BEFORE enqueue, so the analyst
+        // confirms before anything is queued rather than after it has run.
         if (!input.confirmDuplicate) {
-          const existing = await findExistingCreatorByHandle(input.handleOrUrl, input.platform);
-          if (existing) {
-            const last = existing.lastAnalyzedAt
-              ? new Date(existing.lastAnalyzedAt).toISOString().slice(0, 10)
-              : "unknown date";
+          const duplicates: string[] = [];
+          for (const handle of input.handles) {
+            const existing = await findExistingCreatorByHandle(handle, input.platform);
+            if (existing) {
+              const last = existing.lastAnalyzedAt
+                ? new Date(existing.lastAnalyzedAt).toISOString().slice(0, 10)
+                : "unknown date";
+              duplicates.push(`@${existing.handle ?? canonicalizeHandle(handle)} (last analyzed ${last}, status: ${existing.reviewStatus ?? "unknown"})`);
+            }
+          }
+          if (duplicates.length > 0) {
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
-              message: `A profile for @${existing.handle ?? canonicalizeHandle(input.handleOrUrl)} already exists (last analyzed ${last}, status: ${existing.reviewStatus ?? "unknown"}). Re-submit with confirmation to run a new analysis.`,
+              message: `A profile already exists for ${duplicates.join("; ")}. Re-submit with confirmation to queue a new analysis.`,
             });
           }
         }
 
-        // womo_0006: one correlation id per analysis run — every scrape_event
-        // and llm_invocation below inherits it via AsyncLocalStorage (see
-        // _core/runContext.ts), and the observation is stamped with it.
-        const runId = newRunId();
-        // Scraper-reliability Part 4: the run machinery (memory tracker, global
-        // timeout race with in-race persistence/salvage, shared concurrency
-        // pool, terminal telemetry on all three exits) lives in
-        // runInstrumentedAnalysis — extracted VERBATIM from this endpoint and
-        // pinned by instrumentedRun.test.ts. The work below is unchanged.
-        return runInstrumentedAnalysis({
-          runId,
-          runType: "creator_analysis",
-          timeoutMs: ENV.analysisTimeoutMs,
-          timeoutMessage: `Analysis timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
-          work: async ({ pipelineStart, stepTimings }) => {
-            // S3b: the campaign runs all FIVE phases through the runner —
-            // extract_commit included. What used to be inline here (the
-            // fabrication guard, the extraction retry, the researchData mapping)
-            // now lives in creatorCampaignDeps and runs inside the phase, so a
-            // campaign completes with nobody watching. This endpoint keeps its
-            // synchronous shape for one more commit; the queue replaces it next.
-            const t1 = Date.now();
-            const outcome = await runCreatorCampaign(
-              { runId, handle: input.handleOrUrl, platform: "TikTok", deadlineAt: currentDeadlineAt() },
-              creatorCampaignDeps,
-            );
-            stepTimings.push({ step: "Campaign (5 phases)", durationMs: Date.now() - t1 });
+        const campaigns = await submitCampaigns(
+          input.handles.map(handle => ({ handle, platform: input.platform })),
+        );
+        return { campaigns };
+      }),
 
-            // The FROZEN evidence gates still throw from the collection half;
-            // the campaign classifies them and this re-raises so the endpoint's
-            // error contract is unchanged for now.
-            if (!outcome.committed) {
-              throw new TRPCError({
-                code: outcome.status === "min_data_rejection" ? "PRECONDITION_FAILED" : "INTERNAL_SERVER_ERROR",
-                message: outcome.message ?? `Analysis failed for @${input.handleOrUrl}. Nothing was saved.`,
-              });
-            }
-
-            const research = outcome.research!;
-            const researchData = researchDataFromResult(research);
-            const persistence = outcome.persistence;
-
-            // Collect token metrics — exact per-run lookup via run_id (womo_0006).
-            const tokenMetrics = await getLlmTokenUsageByRunId(runId)
-              .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
-
-            const saved = outcome.subjectId ? await getCreatorProfileById(outcome.subjectId) : null;
-            return {
-              status: outcome.status as RunOutcomeStatus,
-              detail: outcome.status === "success" ? {} : { saved: outcome.status, error: outcome.message },
-              captureEvidence: {
-                transcripts: (researchData.transcriptCount as number) ?? 0,
-                titles: (researchData.recentVideoTitles as string[] | undefined)?.length ?? 0,
-              },
-              value: {
-                profile: saved,
-                persistence,
-                runId,
-                pipelineMetrics: {
-                  totalDurationMs: Date.now() - pipelineStart,
-                  steps: stepTimings,
-                  tokens: tokenMetrics,
-                  transcriptCount: (researchData.transcriptCount as number) ?? 0,
-                  videosScraped: (researchData.discoveredVideoPoolJson as unknown[] | undefined)?.length ?? 0,
-                },
-              },
-            };
-          },
-        });
+    /** Queue view: one campaign, or everything in flight. Real ledger state. */
+    queueStatus: publicProcedure
+      .input(z.object({ runId: z.string().uuid().optional() }))
+      .query(async ({ input }) => {
+        if (input.runId) {
+          const one = await getCampaignStatus(input.runId);
+          return { campaigns: one ? [one] : [] };
+        }
+        return { campaigns: await listCampaigns() };
       }),
 
     list: publicProcedure
@@ -1185,285 +1147,59 @@ export const appRouter = router({
         return { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" };
       }),
 
+    /**
+     * RE-ANALYSIS — a queue submission like any other (S3b).
+     *
+     * It differs from a first analysis in exactly one way: the subject already
+     * exists, so the duplicate gate is implicitly confirmed. Mechanism, code
+     * path and result shape are identical. It used to be a second full copy of
+     * the orchestration, which is how it drifted (it dropped followingCount for
+     * months).
+     */
     reanalyze: publicProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
-        // womo_0006: reanalyze is its own analysis run.
-        // Scraper-reliability Part 4: PARITY with analyze — the same
-        // instrumented wrapper (shared 2-slot concurrency pool, memory tracker,
-        // timeout race with in-race persistence, terminal pipeline_runs
-        // telemetry on all three exits; run_type "creator_reanalysis"), plus
-        // analyze's extraction retry and the followingCount field it dropped.
-        const runId = newRunId();
-        return runInstrumentedAnalysis({
-          runId,
-          runType: "creator_reanalysis",
-          timeoutMs: ENV.analysisTimeoutMs,
-          timeoutMessage: `Re-analysis timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
-          work: async () => {
         const existing = await getCreatorProfileById(input.id);
-        if (!existing) throw new Error("Creator profile not found");
-
-        let evidenceSummary = "";
-        let researchedProfileUrl: string | undefined;
-        let researchData: any = {};
-
-        try {
-          const research = await researchCreator(existing.profileUrl || existing.handle, existing.platform as any);
-          evidenceSummary = research.evidenceSummary;
-          researchedProfileUrl = research.profileUrl;
-          researchData = {
-            followerCount: research.followerCount || undefined,
-            // Part 4 parity: analyze threads followingCount (I1); reanalyze
-            // dropped it, orphaning the field on every rerun observation.
-            followingCount: research.followingCount || undefined,
-            totalLikes: research.totalLikes || undefined,
-            videoCount: research.videoCount || undefined,
-            totalViews: research.totalViews || undefined,
-            avgViews: research.avgViews || undefined,
-            engagementRate: research.engagementRate || undefined,
-            location: research.location || undefined,
-            bio: research.bio || undefined,
-            rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
-            contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
-            topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
-            recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
-            transcriptCount: research.transcriptCount ?? 0,
-            transcriptExcerpts: research.transcriptExcerpts || undefined,
-            decodedSymbols: research.decodedSymbols ?? undefined,
-            culturalVelocity: research.culturalVelocity ?? undefined,
-            dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-            sociologicalFieldsComputed: research.sociologicalFieldsComputed,
-            foreignVideosRejected: research.foreignVideosRejected,
-            longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-            discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
-            transcripts: research.transcripts?.length ? research.transcripts : undefined,
-          };
-        } catch (err) {
-          // Session 8: FAIL CLEANLY on research failure. This previously swallowed
-          // the error and fell through to extractCreatorProfile with an empty
-          // evidenceSummary, which triggers the "use your own knowledge of this
-          // creator" prompt branch (aiExtraction.ts:107-109) and fabricates a
-          // profile with no confidence penalty. We throw here — before the persist
-          // call below — so NO observation is created and nothing is persisted.
-          if (err instanceof TRPCError) throw err;
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `Re-analysis could not collect fresh evidence for @${existing.handle ?? input.id}. Nothing was saved. (${(err as Error).message})`,
-          });
-        }
-
-        // Defensive: a successful research always yields a non-empty evidence
-        // summary. If that ever changes, still refuse to extract on empty evidence
-        // rather than hallucinate a profile from the model's own knowledge.
-        if (!evidenceSummary) {
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Creator profile not found" });
+        if (String(existing.platform).toLowerCase() !== "tiktok") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: `Re-analysis produced no usable evidence for @${existing.handle ?? input.id}. Nothing was saved.`,
+            message: `Re-analysis currently supports TikTok only (this profile is ${existing.platform}). Instagram and YouTube land in S4.`,
           });
         }
-
-        // Part 4 parity: same one-retry extraction analyze has (transient LLM
-        // hiccups should not kill an otherwise-good rerun).
-        // S3a: same `llm` admission as analyze — reanalyze/analyze parity is a
-        // standing rule, and a rerun contends for exactly the same quota.
-        const extracted = await withResourceSlot("llm", async () => {
-          try {
-            return await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
-          } catch (firstErr) {
-            console.warn("[creator.reanalyze] First extraction attempt failed, retrying:", firstErr);
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-              return await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
-            } catch (secondErr) {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Creator extraction failed after retry. Please try again.",
-              });
-            }
-          }
-        });
-
-        // V2: reanalyze creates a new observation (append-only)
-        const reanalyzePersistResult = await persistCreatorToV2({
-          handle: existing.handle,
-          platform: existing.platform as string,
-          profileUrl: researchedProfileUrl ?? existing.profileUrl ?? undefined,
-          displayName: extracted.displayName,
-          pronouns: extracted.pronouns,
-          extracted,
-          researchData,
-          // womo_0007: mirror the exact extraction inputs used above
-          evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
-            existing.profileUrl || existing.handle, existing.platform as string, evidenceSummary, researchData,
-          ),
-        });
-        const persistence = summarizePersistence(reanalyzePersistResult);
-        if (persistence.saved !== "full") {
-          console.warn(`[V2 Pipeline] ⚠️ Creator reanalyze persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
-        }
-
-        // Shadow banking (S1): P5 extract_commit — same write as analyze.
-        // reanalyze/analyze parity is a standing rule (scraper-reliability
-        // Part 4); a ledger that only covers analyze would make every rerun
-        // look like a 4-phase campaign.
-        void recordPhaseObservation({
-          runId,
-          subjectHint: `${existing.handle}@${existing.platform}`,
-          phase: "extract_commit",
-          tool: "gemini:extractCreatorProfile+persistCreatorToV2",
-          status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
-          output: {
-            subjectId: "subjectId" in reanalyzePersistResult ? reanalyzePersistResult.subjectId : null,
-            observationId: "observationId" in reanalyzePersistResult ? reanalyzePersistResult.observationId : null,
-            persistence,
-            evidenceSummaryBytes: evidenceSummary.length,
-            transcriptCount: researchData.transcriptCount ?? 0,
-          },
-        });
-
-        // NOTE: on saved === "none" this returns the PREVIOUS profile — the
-        // persistence field is what tells the caller the rerun was not saved.
-        const updated = await getCreatorProfileById(input.id);
-        return {
-          status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
-          detail: persistence.saved === "full" ? {} : {
-            saved: persistence.saved,
-            error: persistence.error ?? null,
-            failedComponents: persistence.failedComponents ?? [],
-          },
-          captureEvidence: {
-            transcripts: researchData.transcriptCount ?? 0,
-            titles: researchData.recentVideoTitles?.length ?? 0,
-          },
-          value: { profile: updated, persistence, extracted, runId },
-        };
-          },
-        });
+        const campaigns = await submitCampaigns([{ handle: existing.handle ?? input.id, platform: "TikTok" }]);
+        return { campaigns };
       }),
 
-    // ─── M3: resume a run from banked ledger output (phased architecture S2) ──
-    // The dead-key class: capture/augment/transcribe all succeeded, then derive
-    // or extract_commit failed and minutes of scraping were discarded. This
-    // re-runs ONLY phases 4-5 from the ledger — no re-scraping.
-    //
-    // Minimal trigger by design: an explicit runId. The analyst-facing surface
-    // (a "resume" button on a failed run) is S6; the scheduler that requeues
-    // automatically is S3. Until then this is the manual escape hatch.
+    // ─── M3 resume, superseded (S3b) ──────────────────────────────────────────
+    // The dead-key class — capture/augment/transcribe succeeded, then derive or
+    // extract_commit failed and minutes of scraping were discarded — is now
+    // handled AUTOMATICALLY: the queue's boot loop resumes every incomplete
+    // campaign, and the runner skips phases already banked as usable, so only
+    // the failed phase re-runs. This endpoint remains as the manual nudge for a
+    // campaign parked on backoff that an analyst does not want to wait for.
     resumeRun: publicProcedure
       .input(z.object({ runId: z.string().uuid() }))
       .mutation(async ({ input }) => {
-        const banked = await loadResumableBankedPhases(input.runId);
-        if (!banked) {
+        const rows = await getPhaseState(input.runId);
+        if (rows.length === 0) {
           throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: `Run ${input.runId} is not resumable — capture, augment and transcribe must all have banked usable output. Re-run the analysis instead.`,
+            code: "NOT_FOUND",
+            message: `Run ${input.runId} is not in the ledger — there is nothing to resume.`,
           });
         }
-        const [handle, platform] = banked.subjectHint.split("@");
+        const [, platform] = (rows[0]!.subjectHint ?? "@").split("@");
         if (platform !== "TikTok") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
             message: `Resume currently supports TikTok campaigns only (this run is ${platform}). Instagram/YouTube land in S4.`,
           });
         }
-
-        // A resume is its own analysis run for telemetry, wrapped in the same
-        // instrumented machinery as analyze/reanalyze.
-        const runId = newRunId();
-        return runInstrumentedAnalysis({
-          runId,
-          runType: "creator_resume",
-          timeoutMs: ENV.analysisTimeoutMs,
-          timeoutMessage: `Resume timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). Please try again.`,
-          work: async () => {
-            const research = await resumeResearchFromBanked(
-              handle!, banked.phases as unknown as ResumableBankedPhases,
-            );
-
-            const existing = await findExistingCreatorByHandle(handle!, "TikTok");
-            // S3a: same `llm` admission as analyze/reanalyze. A resume skips the
-            // scraping phases entirely, so this is the only slot it takes.
-            const extracted = await withResourceSlot("llm", () =>
-              extractCreatorProfile(handle!, "TikTok", research.evidenceSummary),
-            );
-
-            const persistResult = await persistCreatorToV2({
-              handle: handle!,
-              platform: "TikTok",
-              profileUrl: research.profileUrl,
-              displayName: extracted.displayName,
-              pronouns: extracted.pronouns,
-              extracted,
-              researchData: {
-                followerCount: research.followerCount || undefined,
-                followingCount: research.followingCount || undefined,
-                totalLikes: research.totalLikes || undefined,
-                videoCount: research.videoCount || undefined,
-                totalViews: research.totalViews || undefined,
-                avgViews: research.avgViews || undefined,
-                engagementRate: research.engagementRate || undefined,
-                location: research.location || undefined,
-                bio: research.bio || undefined,
-                rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
-                contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
-                topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
-                recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
-                transcriptCount: research.transcriptCount ?? 0,
-                transcriptExcerpts: research.transcriptExcerpts || undefined,
-                decodedSymbols: research.decodedSymbols ?? undefined,
-                culturalVelocity: research.culturalVelocity ?? undefined,
-                dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-                sociologicalFieldsComputed: research.sociologicalFieldsComputed,
-                foreignVideosRejected: research.foreignVideosRejected,
-                longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-                discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
-                transcripts: research.transcripts?.length ? research.transcripts : undefined,
-              },
-              evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
-                handle!, "TikTok", research.evidenceSummary, research,
-              ),
-            });
-            const persistence = summarizePersistence(persistResult);
-
-            void recordPhaseObservation({
-              runId,
-              subjectHint: banked.subjectHint,
-              phase: "extract_commit",
-              tool: "gemini:extractCreatorProfile+persistCreatorToV2 (resumed)",
-              status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
-              output: {
-                resumedFromRunId: input.runId,
-                subjectId: "subjectId" in persistResult ? persistResult.subjectId : null,
-                observationId: "observationId" in persistResult ? persistResult.observationId : null,
-                persistence,
-                evidenceSummaryBytes: research.evidenceSummary?.length ?? 0,
-              },
-            });
-
-            const subjectId = "subjectId" in persistResult ? persistResult.subjectId : existing?.subjectId ?? null;
-            return {
-              status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
-              detail: { resumedFromRunId: input.runId },
-              captureEvidence: {
-                transcripts: research.transcriptCount ?? 0,
-                titles: research.recentVideoTitles?.length ?? 0,
-              },
-              value: {
-                profile: subjectId ? await getCreatorProfileById(subjectId) : null,
-                persistence,
-                extracted,
-                runId,
-                resumedFromRunId: input.runId,
-              },
-            };
-          },
-        });
+        // Clear the backoff gate so the next drain picks it up immediately.
+        await requeueCampaignNow(input.runId);
+        return { runId: input.runId, requeued: true };
       }),
 
-    // ─── Supplemental Video Ingestion ─────────────────────────────────────────
-    // Fetches transcript for a single TikTok video URL and appends it to the
-    // creator profile's transcript pool, then updates the profile's data.
     ingestSupplementalVideo: publicProcedure
       .input(z.object({
         creatorProfileId: z.string(),
@@ -1549,92 +1285,13 @@ export const appRouter = router({
   }),
 
 
-    bulkAnalyze: publicProcedure
-      .input(z.object({
-        handles: z.array(z.string().min(1)).max(10, "Bulk analysis is limited to 10 handles per request"),
-        platform: z.enum(["TikTok", "Instagram"]),
-      }))
-      .mutation(async ({ input }) => {
-        // Create a bulk job
-        const job = createBulkCreatorJob(input.handles, input.platform);
-        
-        // Start processing in background (non-blocking)
-        // In production, this would be queued to a job processor
-        (async () => {
-          markJobProcessing(job.jobId);
-          
-          for (let i = 0; i < input.handles.length; i++) {
-            try {
-              const handle = input.handles[i];
-              // womo_0006: each bulk handle is its own analysis run
-              await withAnalysisRun(newRunId(), async () => {
-              // Call the regular analyze endpoint
-              const research = await researchCreator(handle, input.platform);
-              // Session 8: never extract on empty evidence (fabrication guard).
-              // A researchCreator throw is already caught by the per-handle
-              // try/catch below and recorded as a job error; this also closes the
-              // theoretical empty-success case for the same fabrication path.
-              if (!research.evidenceSummary) {
-                throw new TRPCError({
-                  code: "PRECONDITION_FAILED",
-                  message: `No usable evidence was collected for @${handle}.`,
-                });
-              }
-              const extracted = await extractCreatorProfile(handle, input.platform, research.evidenceSummary);
+    // bulkAnalyze REMOVED (S3b). Bulk is no longer a concept: `creator.submit`
+    // takes n handles and one handle through the identical path. The old
+    // endpoint was a third copy of the orchestration and had drifted badly — no
+    // timeout, no memory tracker, no terminal pipeline_runs telemetry, no
+    // extraction retry, and it dropped followingCount. It also had no client
+    // surface at all. One entry point cannot drift from itself.
 
-              const bulkPersistResult = await persistCreatorToV2({
-                handle,
-                platform: input.platform,
-                profileUrl: research.profileUrl ?? "",
-                displayName: extracted.displayName,
-                pronouns: extracted.pronouns,
-                extracted,
-                // womo_0007: mirror the exact extraction inputs used above
-                evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
-                  handle, input.platform, research.evidenceSummary, research,
-                ),
-                researchData: {
-                  followerCount: research.followerCount ?? undefined,
-                  totalLikes: research.totalLikes ?? undefined,
-                  videoCount: research.videoCount ?? undefined,
-                  totalViews: research.totalViews ?? undefined,
-                  avgViews: research.avgViews ?? undefined,
-                  engagementRate: research.engagementRate ?? undefined,
-                  location: research.location ?? undefined,
-                  bio: research.bio ?? undefined,
-                  rawKeywords: research.rawKeywords ?? undefined,
-                  contentThemeLabels: research.contentThemeLabels ?? undefined,
-                  topHashtags: research.topHashtags ?? undefined,
-                  recentVideoTitles: research.recentVideoTitles ?? undefined,
-                  transcriptCount: research.transcriptCount ?? 0,
-                  transcriptExcerpts: research.transcriptExcerpts ?? undefined,
-                  decodedSymbols: research.decodedSymbols ?? undefined,
-                  culturalVelocity: research.culturalVelocity ?? undefined,
-                  dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-                  sociologicalFieldsComputed: research.sociologicalFieldsComputed,
-                  foreignVideosRejected: research.foreignVideosRejected,
-                  longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-                  discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
-                  transcripts: research.transcripts?.length ? research.transcripts : undefined,
-                },
-              });
-              
-              const bulkSubjectId = "subjectId" in bulkPersistResult ? bulkPersistResult.subjectId : "unknown";
-              updateJobResult(job.jobId, i, { creatorId: bulkSubjectId });
-              // Use loop index i + 1 as completed count — job.progress is a stale
-              // snapshot from job creation time and does not reflect live progress.
-              updateJobProgress(job.jobId, { completed: i + 1 });
-              });
-            } catch (err) {
-              recordJobError(job.jobId, i, input.handles[i], String(err));
-            }
-          }
-          
-          markJobCompleted(job.jobId);
-        })().catch(err => console.error("Bulk creator analysis failed:", err));
-        
-        return { jobId: job.jobId };
-      }),
 
     // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
@@ -2529,20 +2186,9 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         };
       }),
 
-    getJobProgress: publicProcedure
-      .input(z.object({ jobId: z.string() }))
-      .query(({ input }) => {
-        const job = getJob(input.jobId);
-        if (!job) {
-          throw new Error("Job not found");
-        }
-        return {
-          jobId: job.jobId,
-          type: job.type,
-          progress: job.progress,
-          results: job.results,
-        };
-      }),
+    // getJobProgress REMOVED (S3b) along with the in-memory bulkAnalysisJobs
+    // store it read. Queue progress is `creator.queueStatus`, which reads the
+    // ledger — durable across restarts, which an in-memory Map never was.
 
     get: publicProcedure
       .input(z.object({ id: z.string() }))

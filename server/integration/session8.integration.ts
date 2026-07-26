@@ -22,14 +22,20 @@ import { fileURLToPath } from "url";
 import { Client } from "pg";
 import { TRPCError } from "@trpc/server";
 
-// Mock ONLY the two impure boundaries so re-analysis runs offline and
-// deterministically. researchCreator (scraping) and extractCreatorProfile (LLM)
-// are overridden; everything else in those modules — and all of db.ts /
+// Mock ONLY the two impure boundaries so a campaign runs offline and
+// deterministically. runTikTokCollection (scraping) and extractCreatorProfile
+// (LLM) are overridden; everything else in those modules — and all of db.ts /
 // routers.ts — stays real, including buildCreatorExtractionPrompts used by the
 // evidence-snapshot writer.
+//
+// S3b: these cases used to drive `creator.reanalyze` and assert on its response.
+// The endpoint is now a queue submission that returns before any work runs, so
+// they drive the CAMPAIGN directly. What they guard is unchanged and still the
+// point: a collection failure must never reach extraction, because the "use
+// your own knowledge" prompt branch would fabricate a profile.
 vi.mock("../webResearch", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../webResearch")>();
-  return { ...actual, researchCreator: vi.fn() };
+  return { ...actual, runTikTokCollection: vi.fn() };
 });
 vi.mock("../aiExtraction", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../aiExtraction")>();
@@ -37,25 +43,53 @@ vi.mock("../aiExtraction", async (importOriginal) => {
 });
 
 import * as db from "../db";
-import { appRouter, persistCreatorToV2 } from "../routers";
-import { researchCreator } from "../webResearch";
+import { persistCreatorToV2, creatorCampaignDeps } from "../routers";
+import { runTikTokCollection } from "../webResearch";
+import { runCreatorCampaign } from "../phases/creatorCampaign";
 import { extractCreatorProfile } from "../aiExtraction";
 import { newRunId, withAnalysisRun } from "../_core/runContext";
-import type { TrpcContext } from "../_core/context";
 
 const TEST_URL = process.env.TEST_DATABASE_URL;
 if (TEST_URL) process.env.DATABASE_URL = TEST_URL;
 
 const suite = TEST_URL ? describe : describe.skip;
 const here = path.dirname(fileURLToPath(import.meta.url));
-const mockResearch = researchCreator as unknown as ReturnType<typeof vi.fn>;
+const mockCollect = runTikTokCollection as unknown as ReturnType<typeof vi.fn>;
 const mockExtract = extractCreatorProfile as unknown as ReturnType<typeof vi.fn>;
 
-// Minimal request context (no auth in the internal local-only app).
-const baseCtx = {
-  req: { headers: {}, ip: "10.0.0.1", socket: { remoteAddress: "10.0.0.1" }, protocol: "https" },
-  res: {},
-} as unknown as TrpcContext;
+
+/**
+ * Minimal banked phase state (S3b). extract_commit reads its inputs from BANKED
+ * output, not from the collection's in-memory result — that indirection is what
+ * lets a resumed campaign run phase 5 on a cold process — so a campaign test has
+ * to supply it. Same shape the phase-unit tests use.
+ */
+const bankedPhase = (output: unknown) => ({
+  tool: null, status: "complete" as const, attemptCount: 1,
+  failureClass: null, nextEarliestAt: null, output,
+});
+const emptyPool = (over: Record<string, unknown> = {}) => ({
+  videoIds: [], videoItems: [], viewCounts: [], videoTitles: [],
+  hashtags: [], musicTitles: [], foreignVideosRejected: 0, ...over,
+});
+const HAPPY_PHASES = {
+  capture: { phase: "capture", ...bankedPhase({
+    stats: { displayName: "Happy Target", bio: "a real bio", followerCount: 700,
+      followingCount: 0, videoCount: 3, totalLikes: 10, location: "" },
+    profileTitles: ["t1"], profileViewCounts: [100], assessment: null,
+    pool: emptyPool({ videoTitles: ["t1"], viewCounts: [100] }),
+  }) },
+  augment: { phase: "augment", ...bankedPhase({
+    pool: emptyPool({ videoTitles: ["t1"], hashtags: ["#a"], viewCounts: [100] }),
+    quotaExhausted: false,
+  }) },
+  transcribe: { phase: "transcribe", ...bankedPhase({
+    transcripts: [], musicTitles: [], engagementSignals: { totalSampled: 0 },
+    longitudinalSample: { culturalVelocity: "Insufficient Data" },
+    discoveredVideoPool: [], foreignVideosRejected: 0, transcriptViewCounts: [100],
+  }) },
+  derive: { phase: "derive", ...bankedPhase({ contentThemeLabels: ["Theme"], decodedSymbols: null }) },
+} as never;
 
 suite("session 8: correctness fixes (ephemeral Postgres)", () => {
   let admin: Client;
@@ -144,13 +178,18 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
     const creatorObsBefore = await count("creator_observations", []);
 
     // Simulate the scraper failing (bot block / no public content).
-    mockResearch.mockRejectedValueOnce(
+    mockCollect.mockRejectedValueOnce(
       new TRPCError({ code: "NOT_FOUND", message: "No public content found for @reanalyze_target." }),
     );
 
-    const caller = appRouter.createCaller(baseCtx);
-    await expect(caller.creator.reanalyze({ id: subjectId }))
-      .rejects.toThrow(/reanalyze_target|No public content|could not collect/i);
+    const outcome = await runCreatorCampaign(
+      { runId: newRunId(), handle: "reanalyze_target", platform: "TikTok" },
+      creatorCampaignDeps,
+    );
+    // The campaign reports the failure honestly instead of throwing at a caller
+    // that no longer exists — same message, terminal outcome.
+    expect(outcome.committed).toBe(false);
+    expect(outcome.message).toMatch(/reanalyze_target|No public content/i);
 
     // Extraction was never reached; nothing new persisted.
     expect(mockExtract).not.toHaveBeenCalled();
@@ -168,7 +207,7 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
     const obsId = await db.insertObservation(subjectId, { followerCount: 700, reviewStatus: "accepted" });
     await db.insertCreatorObservation(obsId, { archetype: "The Jester" });
 
-    mockResearch.mockResolvedValueOnce({
+    mockCollect.mockResolvedValueOnce({ phases: HAPPY_PHASES, research: {
       handle: "happy_target", platform: "TikTok", displayName: "Happy Target", bio: "a real bio",
       followerCount: 700, videoCount: 3, totalLikes: 10, totalViews: 100, avgViews: 33,
       engagementRate: 4.2, location: "", profileUrl: "https://www.tiktok.com/@happy_target",
@@ -176,7 +215,7 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
       contentThemes: ["Theme"], transcripts: [], transcriptCount: 0, transcriptExcerpts: "",
       // Non-empty evidence summary → the guard passes and extraction runs.
       evidenceSummary: "CREATOR RESEARCH EVIDENCE — @happy_target (TikTok)\nFollowers: 700",
-    } as unknown as Awaited<ReturnType<typeof researchCreator>>);
+    } } as unknown as Awaited<ReturnType<typeof runTikTokCollection>>);
 
     mockExtract.mockResolvedValueOnce({
       handle: "happy_target", platform: "TikTok", displayName: "Happy Target",
@@ -190,11 +229,14 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
       aiSummary: "ok",
     } as Awaited<ReturnType<typeof extractCreatorProfile>>);
 
-    const caller = appRouter.createCaller(baseCtx);
-    const res = await caller.creator.reanalyze({ id: subjectId });
+    const outcome = await runCreatorCampaign(
+      { runId: newRunId(), handle: "happy_target", platform: "TikTok" },
+      creatorCampaignDeps,
+    );
 
     expect(mockExtract).toHaveBeenCalledTimes(1);
-    expect(res.persistence.saved).not.toBe("none");
+    expect(outcome.persistence?.saved).not.toBe("none");
+    expect(outcome.committed).toBe(true);
     // A new (pending) observation was appended — append-only re-analysis.
     expect(await count("observations where subject_id=$1", [subjectId])).toBe(2);
     expect(await count("observations where subject_id=$1 and review_status='pending'", [subjectId])).toBe(1);

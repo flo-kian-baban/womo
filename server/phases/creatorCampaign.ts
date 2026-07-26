@@ -138,7 +138,7 @@ export async function runCreatorCampaign(
   // ── Phases 1-4 + the FROZEN gates + the pure assembly ──
   let collected;
   try {
-    collected = await runTikTokCollection(args.handle);
+    collected = await runTikTokCollection(args.handle, args.initialPhases);
   } catch (err) {
     const { status, message } = classifyCollectionFailure(err);
     return { ...base, status, message };
@@ -157,9 +157,12 @@ export async function runCreatorCampaign(
     handle: args.handle,
     platform: args.platform,
     phases: [extractCommitPhase] as never,
-    // The collection phases' banked output is what extract_commit declares as
-    // its input; a resumed campaign's ledger state takes precedence.
-    initialPhases: { ...collected.phases, ...(args.initialPhases ?? {}) },
+    // `collected.phases` is authoritative: it already merges the resumed ledger
+    // state (passed into the collection above) with whatever this attempt ran.
+    // Spreading args.initialPhases over it again would let a PRE-RUN snapshot —
+    // where capture is still `pending` with a null output — mask the freshly
+    // collected result, and extract_commit would read NOT_READY forever.
+    initialPhases: collected.phases,
     execute: makeSchedulerExecute({
       deadlineAt: args.deadlineAt,
       onAttemptStart: (phase, attempt, status) =>

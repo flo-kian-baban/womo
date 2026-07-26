@@ -2145,7 +2145,16 @@ export interface TikTokCollectionCampaign {
  * They throw, exactly as before; the campaign turns that throw into a terminal
  * campaign outcome carrying the same honest message.
  */
-export async function runTikTokCollection(handleOrUrl: string): Promise<TikTokCollectionCampaign> {
+export async function runTikTokCollection(
+  handleOrUrl: string,
+  /**
+   * Banked state from a previous attempt (S3b). The runner skips any phase
+   * already banked as usable, so a RESUMED campaign re-runs only what it has
+   * to — without this, a resume would silently re-scrape everything it had
+   * already collected, which is precisely the cost resumption exists to avoid.
+   */
+  initialPhases?: CampaignState["phases"],
+): Promise<TikTokCollectionCampaign> {
   const handle = extractHandle(handleOrUrl);
   const subjectHint = `${handle}@TikTok`;
   const runId = currentRunId();
@@ -2163,6 +2172,8 @@ export async function runTikTokCollection(handleOrUrl: string): Promise<TikTokCo
     handle,
     platform: "TikTok",
     phases: [capturePhase, augmentPhase, transcribePhase, derivePhase] as never,
+    // Resumed campaigns skip whatever the ledger already holds as usable.
+    initialPhases,
     // S3a: every phase now runs through the scheduler — admitted against its
     // resource class's bound BEFORE any tool (and so any browser context) is
     // touched, and retried per its declared policy. The runner still owns order

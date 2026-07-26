@@ -70,6 +70,18 @@ async function startServer() {
           );
         })
     );
+
+    // ─── Analysis queue worker (S3b) ────────────────────────────────────────
+    // The single entry point's engine. Started after listen so a slow ledger
+    // scan never delays the port binding, and so a restart resumes whatever the
+    // last process left behind: it reclaims phases whose heartbeat died and
+    // picks up every incomplete campaign. Nothing else drives the pipeline.
+    void Promise.all([
+      import("../queue/analysisQueue"),
+      import("../routers"),
+    ]).then(([{ startQueueWorker }, { creatorCampaignDeps }]) => {
+      startQueueWorker(creatorCampaignDeps);
+    }).catch(err => console.error("[startup] queue worker failed to start:", err));
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
