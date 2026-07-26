@@ -9,6 +9,77 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phased architecture S4b: YouTube behind the contract
+
+All three platforms now run through one contract. **No fifth extension was
+needed** — YouTube differs from TikTok in all three ways at once (fused
+capture/transcribe, no augmentation, non-temporal sampling) and every one was
+absorbed by the contract as it stood.
+
+### Added
+- **YouTube tools** — `youtube:channel_html` (capture), `youtube:caption_xml`
+  (transcribe), and `augment: null`. The contract's optional-phase semantics are
+  used here for the first time: YouTube states it has no augmentation rather
+  than registering a tool that does nothing.
+- **YouTube telemetry, from zero.** `channelScraper.ts` and `searchScraper.ts`
+  emitted NO `scrape_events` at all, so every YouTube call was invisible to
+  capture health and the diagnostics panel. Ten emission points added across
+  both, matching TikTok's `#strategy=outcome` convention, distinguishing a
+  thrown request, a missing `ytInitialData`, a shape drift, and an
+  empty-but-valid result.
+- **Instagram collection identity harness** — four boundaries replayed from a
+  recorded fixture through the real tools, with the vacuous-pass guard scoped
+  per platform. Boundary 2 asserts its no-op PRECONDITION so a future fixture
+  with short captions fails loudly instead of reaching the network mid-test.
+
+### Fixed
+- **Instagram no longer analyses a bio when zero posts were captured.** Its only
+  gate was `hasProfileData || hasPostData`, so a profile-only capture produced a
+  profile written from the bio — the fabrication risk TikTok's min-data
+  threshold prevents. The profile's own `media_count` distinguishes transient
+  rate-limiting ("wait a few minutes… the account should not be deleted") from a
+  genuinely empty account ("reports 0 posts… not a scraping failure"). A FLOOR,
+  not a threshold.
+
+### Changed
+- **`fetchYouTubeTranscripts` split** into `captureYouTubeChannel` and
+  `transcribeYouTubeVideos`, verbatim. The title-search fallback moved from after
+  transcription to the end of capture: it reads and appends only `videoTitles`,
+  which transcription never touches, so the list and order are identical — and it
+  belongs there, since it exists for the case where no channel was found.
+  `fetchYouTubeTranscripts` survives as a thin composition, so the monolith path
+  is unchanged.
+
+### FINDING — YouTube's channel parsers are broken against today's YouTube
+The first instrumented YouTube run diagnosed itself immediately, which was
+impossible before this session:
+
+    search_channel:success     826KB  ✓ channel found
+    channel_details            1.26MB  "no ytInitialData on channel page"
+    channel_videos:empty       1.18MB  "0 videos parsed"
+    search_any:success         1.58MB  ✓ fallback gave 9 titles
+
+Both channel-page extractors return nothing on HTTP 200 with over a megabyte of
+HTML — YouTube's page shape has drifted. Only the search path still works, so a
+YouTube campaign currently yields **titles but no videos, no pool and no
+transcripts**. This is PRE-EXISTING, not caused by the split: the only
+non-telemetry change to those files is a whitespace shift. The standing caveat
+was exactly right — zero observed YouTube failures reflected zero exercise, not
+health.
+
+### Open — a gate-policy question for Jason, not decided here
+**YouTube has no min-data floor either.** Its gates are quota + `hasAnyData`, so
+the run above committed an observation with 0 videos, 0 transcripts and 9 titles
+at confidence "low". This is the same class as the Instagram zero-post hole fixed
+in Part 1, but the fix there was authorised as a floor for a specific observed
+failure. What counts as "enough" YouTube evidence is a policy decision.
+
+### Not done
+- **No YouTube collection fixture.** With the channel parsers broken the capture
+  yields an empty pool, so the fixture is vacuous (pool 0, sample 0) and asserts
+  nothing while looking green. Committing it would be worse than not having it.
+  Recapture once the parsers are repaired.
+
 ## [Unreleased] — Phased architecture S4: Instagram behind the platform contract
 
 Instagram is registered and runs through the queue. **Implementation, not
