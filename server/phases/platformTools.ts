@@ -67,6 +67,9 @@ export interface ToolPoolState {
   foreignVideosRejected: number;
   searchQuotaExhausted: boolean;
   apiVideoCount: number;
+  /** Opt-in raw-payload sink for the collection-fixture refresh
+   *  (WOMO_COLLECTION_FIXTURE). Absent in normal operation. */
+  rawCapture?: { searchResponses: Array<{ query: string; items: unknown[] }> };
 }
 
 export interface CaptureToolResult {

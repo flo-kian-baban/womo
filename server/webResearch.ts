@@ -54,6 +54,7 @@ import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db";
 import { currentRunId } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
+import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
   makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
   type CapturePhaseOutput, type AugmentPhaseOutput, type TranscribePhaseOutput,
@@ -639,9 +640,9 @@ interface PoolAccumulator {
   searchQuotaExhausted: boolean;
   apiVideoCount: number;
   /**
-   * Opt-in raw-payload capture for the collection harness
-   * (WOMO_COLLECTION_FIXTURE). Absent in normal operation — when absent, not a
-   * single extra object is allocated.
+   * Opt-in raw-payload sink for the collection-fixture refresh
+   * (WOMO_COLLECTION_FIXTURE). Seeded by the augment phase; absent in normal
+   * operation, when not a single extra object is allocated.
    */
   rawCapture?: { searchResponses: Array<{ query: string; items: unknown[] }> };
 }
@@ -670,34 +671,6 @@ export function snapshotPool(acc: {
   };
 }
 
-/**
- * Opt-in collection-fixture dump (`WOMO_COLLECTION_FIXTURE=<path>`). Records
- * the RAW platform payloads plus the expected output at each stage boundary,
- * so the collection harness can replay a real run offline. Permanent and inert
- * by default — a future session will need it again when TikTok's response
- * shapes drift and the fixtures must be refreshed.
- */
-/** Merge additional recorded boundaries into an existing collection fixture. */
-function appendCollectionFixture(target: string, extra: Record<string, unknown>): void {
-  try {
-    const existing = JSON.parse(readFileSync(target, "utf-8")) as Record<string, unknown>;
-    const expected = (existing.expected ?? {}) as Record<string, unknown>;
-    existing.expected = { ...expected, ...extra };
-    writeFileSync(target, JSON.stringify(existing, null, 2), "utf-8");
-    console.log(`[webResearch] collection fixture extended: ${Object.keys(extra).join(",")}`);
-  } catch (err) {
-    console.warn("[webResearch] collection fixture append failed (ignored):", (err as Error).message);
-  }
-}
-
-function dumpCollectionFixture(target: string, payload: unknown): void {
-  try {
-    writeFileSync(target, JSON.stringify(payload, null, 2), "utf-8");
-    console.log(`[webResearch] collection fixture written: ${target}`);
-  } catch (err) {
-    console.warn("[webResearch] collection fixture dump failed (ignored):", (err as Error).message);
-  }
-}
 
 function isQuotaErrMsg(err: unknown): boolean {
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
@@ -1004,7 +977,6 @@ export function selectLongitudinalSample(
 export async function transcribeSampledVideos(
   handle: string,
   sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>,
-  collectionFixturePath?: string,
 ): Promise<TranscriptEntry[]> {
   const transcripts: TranscriptEntry[] = [];
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
@@ -1049,14 +1021,6 @@ export async function transcribeSampledVideos(
     }
   }
 
-  // Boundary 4 capture (opt-in): the per-video transcript results, recorded so
-  // the collection harness can replay them and assert byte-identity of text,
-  // wordCount, source, metadata enrichment and ORDER.
-  if (collectionFixturePath) {
-    appendCollectionFixture(collectionFixturePath, {
-      transcriptsAfterFetch: transcripts.map(t => ({ ...t })),
-    });
-  }
 
   // Clean up shared context after batch is done
   if (sharedCtx) {
@@ -1217,103 +1181,6 @@ export function assembleTranscribeOutputs(
       temporalBucket: sampledBucketById.get(v.id),
     }));
   return { engagementSignals, longitudinalSample, discoveredVideoPool };
-}
-
-async function fetchTikTokTranscripts(
-  handle: string,
-  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
-): Promise<{
-  transcripts: TranscriptEntry[];
-  videoTitles: string[];
-  hashtags: string[];
-  viewCounts: number[];
-  musicTitles: string[];
-  engagementSignals: EngagementSignals;
-  quotaExhausted: boolean;
-  longitudinalSample: LongitudinalSample;
-  discoveredVideoPool: Array<{
-    id: string; url: string; caption: string; createTime: number;
-    views: number; likes: number; comments: number; saves: number; shares: number;
-    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
-    durationSec: number;
-    /** C3: 6-3-3 sample membership, independent of transcript success. */
-    temporalBucket?: "recent" | "mid" | "anchor";
-  }>;
-  /** Session 10: count of foreign / author-less videos rejected by the guard. */
-  foreignVideosRejected: number;
-}> {
-  const normalizedHandle = normalizeHandle(handle);
-  const videoTitles: string[] = [];
-  const hashtags: string[] = [];
-  const viewCounts: number[] = [];
-  const musicTitles: string[] = [];
-  const seen = new Set<string>();
-  let searchQuotaExhausted = false;
-
-  // S2 decomposition: the collection stages share these accumulators explicitly
-  // instead of closing over them. Same array objects, same mutation order.
-  const collectionFixturePath = process.env.WOMO_COLLECTION_FIXTURE;
-  const acc: PoolAccumulator = {
-    videoItems: [], seen, viewCounts, videoTitles, hashtags, musicTitles,
-    foreignVideosRejected: 0, searchQuotaExhausted: false, apiVideoCount: 0,
-    ...(collectionFixturePath ? { rawCapture: { searchResponses: [] } } : {}),
-  };
-  const videoItems = acc.videoItems;
-
-  // ─── Stage 1: PRIMARY SOURCE — TikTok API (get_user_post_list) ─────────────
-  await collectPoolFromApi(handle, prefetchedProfile, acc);
-  // Boundary snapshot for the collection harness (opt-in only).
-  const poolAfterApi = collectionFixturePath ? snapshotPool(acc) : null;
-
-  // ─── Stage 2: SUPPLEMENTAL SOURCE — multi-query search (the `augment` phase) ─
-  await collectPoolFromSupplementalSearch(handle, normalizedHandle, acc);
-  let foreignVideosRejected = acc.foreignVideosRejected;
-  searchQuotaExhausted = acc.searchQuotaExhausted;
-
-
-  const apiVideoCount = acc.apiVideoCount;
-  const supplementalVideoCount = videoItems.length - apiVideoCount;
-  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
-
-  if (videoItems.length < 4) {
-    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
-  }
-
-  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
-
-  // ─── Stage 3: 6-3-3 stratified sampling (FROZEN selection logic) ──────────
-  // The clock is injected at this orchestration boundary rather than read
-  // inside the sampler. Identical value (the sampler computed exactly this when
-  // the argument was absent), but now it is explicit and RECORDABLE — which is
-  // what lets the collection harness reproduce a sample exactly instead of
-  // merely checking it is stable.
-  const samplingNowSec = Math.floor(Date.now() / 1000);
-  const { sampledVideos } = selectLongitudinalSample(handle, videoItems, samplingNowSec);
-  if (collectionFixturePath) {
-    dumpCollectionFixture(collectionFixturePath, {
-      handle,
-      samplingNowSec,
-      raw: {
-        prefetchedProfile: prefetchedProfile ?? null,
-        searchResponses: acc.rawCapture?.searchResponses ?? [],
-      },
-      expected: {
-        poolAfterApi,
-        poolAfterAugment: snapshotPool(acc),
-        sample: sampledVideos.map(s => ({ id: s.item.id, bucket: s.bucket })),
-      },
-    });
-  }
-
-  // ─── Stage 4: per-video transcription (the `transcribe` phase) ───────────
-  const transcripts = await transcribeSampledVideos(handle, sampledVideos, collectionFixturePath);
-
-  // ─── Stage 4b: engagement signals + longitudinal + pool assembly ─────────
-  const { engagementSignals, longitudinalSample, discoveredVideoPool } =
-    assembleTranscribeOutputs(handle, videoItems, transcripts, sampledVideos);
-
-
-  return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected };
 }
 
 // ─── YouTube Transcript Fetcher ───────────────────────────────────────────────
@@ -1671,30 +1538,6 @@ export interface BankedCreatorEvidence {
   };
 }
 
-/**
- * Shadow banking helper (phased architecture S1) — WRITE-ONLY.
- *
- * Records a stage's output to analysis_phase_state as the monolith runs. The
- * run id comes from the ambient analysis-run context (the same AsyncLocalStorage
- * that stamps scrape_events / llm_invocations), so no signature changes and no
- * value is threaded. Silent no-op outside an analysis run.
- *
- * Callers use `void bankPhase(...)` — never awaited: observation must not add
- * latency to the pipeline, and recordPhaseState already swallows its own
- * errors so nothing here can fail an analysis.
- */
-function bankPhase(
-  subjectHint: string,
-  phase: PhaseStateWrite["phase"],
-  tool: string,
-  status: PhaseStateWrite["status"],
-  output: unknown,
-  failureClass?: PhaseStateWrite["failureClass"],
-): Promise<void> {
-  const runId = currentRunId();
-  if (!runId) return Promise.resolve();
-  return recordPhaseState({ runId, subjectHint, phase, tool, status, output, failureClass });
-}
 
 /**
  * Env-gated fixture dump (`WOMO_EVIDENCE_FIXTURE=<path>`): writes a REAL run's
@@ -2271,9 +2114,8 @@ function emptyCaptureMessage(
  * emptyCaptureMessage. Those are interpretation, not gathering, and this
  * session does not touch them.
  *
- * researchTikTokCreatorInline (further down) is the previous orchestration. It
- * is intentionally RETAINED AND UNREFERENCED this session so the change is
- * reversible; deleting it is the next session's work.
+ * This is now the ONLY path: the previous inline orchestration was deleted in
+ * the S2 cutover.
  */
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
@@ -2388,6 +2230,9 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     });
   }
 
+  // Flush the collection-fixture draft (inert unless WOMO_COLLECTION_FIXTURE).
+  if (runId) flushCollectionFixture(runId);
+
   // Stage E — the SAME pure assembly the resume path uses.
   const result = assembleFromPhases(handle, { handle, capture, augment, transcribe }, derived);
   maybeDumpEvidenceFixture({
@@ -2417,257 +2262,6 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   return result;
 }
 
-/**
- * PREVIOUS inline orchestration — RETAINED AND UNREFERENCED (S2, Part 3).
- *
- * Kept deliberately so this session's change is reversible. It is dead code:
- * nothing calls it. Deleting it, after the caller inventory, is the next
- * session's work. Do not extend it.
- */
-async function researchTikTokCreatorInline(handleOrUrl: string): Promise<CreatorResearchResult> {
-  const handle = extractHandle(handleOrUrl);
-  /** Label for this campaign's shadow-banking rows (S1). */
-  const subjectHint = `${handle}@TikTok`;
-
-  let secUid = "";
-  let displayName = handle;
-  let bio = "";
-  let followerCount = 0;
-  let followingCount = 0;
-  let videoCount = 0;
-  let totalLikes = 0;
-  let location = "";
-  let quotaExhausted = false;
-  const viewCounts: number[] = [];
-
-  // Helper: detect quota exhaustion errors
-  const isQuotaError = (err: unknown): boolean => {
-    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-    return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
-  };
-
-  // Step 1: Combined profile scrape (user info + video list via XHR interception)
-  const htmlTitles: string[] = [];
-  const popularTitles: string[] = [];
-  // Session 11 (Commit 1): scrape the profile ONCE here and hand the result to
-  // the transcript/video-collection path below, which used to run a second
-  // identical scrapeTikTokProfile inside fetchTikTokVideosFromAPI (~30-45s of
-  // duplicate Playwright work every run). If this scrape fails, the flag stays
-  // undefined and the transcript path self-fetches (a genuine retry).
-  let prefetchedProfile: Awaited<ReturnType<typeof scrapeTikTokProfile>> | undefined;
-  // Scraper-reliability Part 2: the profile scrape's capture assessment lets the
-  // min-data rejections below say WHY the capture is empty (transient vs the
-  // creator genuinely having no posts). Absent when the prefetch itself failed.
-  let captureAssessment: Awaited<ReturnType<typeof scrapeTikTokProfile>>["capture"];
-  try {
-    const profileResult = await scrapeTikTokProfile(handle);
-    prefetchedProfile = profileResult;
-    captureAssessment = profileResult.capture;
-
-    const userInfoData = profileResult.userInfo?.userInfo ?? {} as Record<string, unknown>;
-    const user = userInfoData?.user ?? {} as Record<string, unknown>;
-    const stats = userInfoData?.stats ?? {} as Record<string, unknown>;
-
-    secUid = user?.secUid ?? "";
-    displayName = user?.nickname ?? handle;
-    bio = user?.signature ?? "";
-    followerCount = Number(stats?.followerCount ?? 0);
-    followingCount = Number(stats?.followingCount ?? 0);
-    videoCount = Number(stats?.videoCount ?? 0);
-    totalLikes = Number(stats?.heartCount ?? 0);
-
-    const cityMatch = matchKnownCity(bio);
-    if (cityMatch) location = cityMatch;
-
-    // Extract video titles and view counts from the combined post list
-    const itemList = profileResult.posts?.data?.itemList ?? [];
-    for (const item of itemList) {
-      const desc = item.desc ?? "";
-      const views = Number(item.stats?.playCount ?? 0);
-      if (desc.trim()) htmlTitles.push(desc.trim());
-      if (views > 0) viewCounts.push(views);
-    }
-
-    console.log(`[webResearch] @${handle}: scrapeTikTokProfile returned followerCount=${followerCount}, videos=${itemList.length}`);
-
-    // Shadow banking (S1): record what P1 capture produced. Write-only — no
-    // execution path reads this. Not awaited: observation must never add
-    // latency to, or be able to fail, the analysis.
-    void bankPhase(subjectHint, "capture", "tiktok:profile_xhr_scroll",
-      captureAssessment?.genuineEmpty ? "genuine_empty" : itemList.length > 0 ? "complete" : "partial", {
-        stats: { displayName, bio, followerCount, followingCount, videoCount, totalLikes, secUid, location },
-        poolFromProfile: itemList.length,
-        profileTitles: htmlTitles,
-        profileViewCounts: viewCounts,
-        assessment: captureAssessment ?? null,
-      });
-  } catch (err) {
-    if (isQuotaError(err)) quotaExhausted = true;
-    console.warn("[webResearch] TikTok profile scrape failed:", err);
-    void bankPhase(subjectHint, "capture", "tiktok:profile_xhr_scroll", "failed", {
-      error: (err as Error).message.slice(0, 300),
-    }, isQuotaError(err) ? "transient" : undefined);
-  }
-
-  // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags.
-  // Session 11 (Commit 1): reuse Step 1's profile scrape (no second scrape).
-  const transcriptData = await fetchTikTokTranscripts(handle, prefetchedProfile);
-  const { transcripts, videoTitles: searchTitles, hashtags: searchHashtags, viewCounts: transcriptViewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected } = transcriptData;
-  if (searchQuotaExhausted) quotaExhausted = true;
-  // Merge transcript view counts into main viewCounts array
-  for (const vc of transcriptViewCounts) {
-    if (vc > 0 && !viewCounts.includes(vc)) viewCounts.push(vc);
-  }
-
-  // Shadow banking (S1): P2 augment and P3 transcribe are fused inside
-  // fetchTikTokTranscripts today; they are banked separately because they are
-  // separate phases in the target architecture (S2 splits the execution).
-  void bankPhase(subjectHint, "augment", "tiktok:search_xhr_scroll",
-    searchQuotaExhausted ? "blocked" : searchTitles.length > 0 ? "complete" : "partial", {
-      searchTitles, searchHashtags, quotaExhausted: searchQuotaExhausted,
-    }, searchQuotaExhausted ? "transient" : undefined);
-  void bankPhase(subjectHint, "transcribe", "tiktok:transcriptStrategies",
-    transcripts.length > 0 ? "complete" : "partial", {
-      transcripts, musicTitles, engagementSignals, longitudinalSample,
-      discoveredVideoPool, foreignVideosRejected,
-      // Resume needs the view counts this stage contributed, because the
-      // monolith merges them into the profile's list IN ORDER with dedup —
-      // reproducing that exactly is what makes a resumed run byte-identical.
-      transcriptViewCounts,
-    });
-
-  // NO YouTube fallback — removed entirely to prevent hallucination
-
-  // Merge all video titles
-  const allTitles = Array.from(new Set([...searchTitles, ...htmlTitles, ...popularTitles])).slice(0, 30);
-
-  // Check if we have meaningful content data (bio alone is not enough)
-  const hasContentData = transcripts.length > 0 || allTitles.length > 0;
-  const hasAnyData = hasContentData || followerCount > 0 || bio.length > 0;
-
-  // Log extracted stats for debugging
-  if (followerCount > 0) {
-    console.log(`[webResearch] @${handle}: followerCount=${followerCount}, videoCount=${videoCount}, totalLikes=${totalLikes}`);
-  } else {
-    console.warn(`[webResearch] @${handle}: WARNING - followerCount is still 0 after all extraction attempts`);
-  }
-
-  // If quota was exhausted AND we have no content (transcripts or titles), hard-block.
-  // Bio alone is insufficient — it produces hallucinated profiles.
-  if (quotaExhausted && !hasContentData) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: `The TikTok data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
-    });
-  }
-
-  // If quota was exhausted but we have content data (titles/transcripts), continue with what we have
-  if (quotaExhausted) {
-    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
-  }
-
-  // Hard error when truly nothing is available.
-  // Scraper-reliability Part 2: say WHY — a confirmed genuine-empty (the
-  // profile's own stats report 0 posts) reads differently from a transient
-  // capture failure. The old one-size message ("verify the handle") caused
-  // unnecessary subject deletions on transient failures.
-  if (!hasAnyData) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: emptyCaptureMessage(handle, captureAssessment,
-        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
-    });
-  }
-
-  // ── Minimum data threshold — prevent LLM from hallucinating on thin data ──
-  // If we have fewer than 2 real transcripts AND fewer than 4 video titles,
-  // the data is too thin for a reliable cultural analysis.
-  // "real" = speech-derived (subtitle/audio); the post-caption fallback is
-  // excluded — identical set to the historical `!== "caption"` gate. This does
-  // NOT change what counts as evidence (Jason's ruling), only how the source is
-  // classified. See @shared/transcriptSource.
-  const realTranscripts = transcripts.filter(t => isSpeechTranscript(t.transcriptSource));
-  const totalVideoPool = discoveredVideoPool?.length ?? 0;
-  console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
-
-  if (realTranscripts.length < 2 && allTitles.length < 4) {
-    // Same threshold as always (frozen); only the explanation is smarter — see
-    // emptyCaptureMessage. Counts stay in the message for the analyst.
-    const counts = `${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles.`;
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, captureAssessment,
-        `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
-    });
-  }
-
-  // S2 seam: the pre-LLM derivations, now a shared pure function so the
-  // resume-from-banked path computes them from identical inputs with identical
-  // code (the only way a resumed run can be byte-identical to a straight one).
-  const { totalViews, avgViews, engagementRate, topHashtags, rawKeywords, combinedTranscriptText } =
-    computeDeriveInputs({ searchHashtags, allTitles, bio, transcripts, viewCounts, followerCount, engagementSignals });
-
-  // Session 11 (Commit 3): the theme-extraction and symbol-decoder LLM calls are
-  // independent — neither reads the other's output — so launch both together and
-  // do the local work (themes heuristic, location, excerpts) while they run,
-  // instead of awaiting them back-to-back (~2 calls of latency -> ~1). Both helpers
-  // catch internally (never throw), so Promise.all cannot reject here.
-  // extractCreatorProfile (later, in the router) still depends on BOTH via the
-  // evidence summary and stays ordered.
-  const themesPromise = translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, bio, combinedTranscriptText);
-  const symbolsPromise = decodeCreatorSymbols({
-    handle,
-    bio,
-    videoTitles: allTitles,
-    hashtags: topHashtags,
-    transcriptExcerpts: transcripts.map(t => t.transcript),
-  });
-
-  // The local work that runs WHILE the two LLM calls are in flight — same
-  // shared pure function the resume path uses.
-  const localPrepared = computeLocalPrepared({
-    allTitles, topHashtags, bio, location, combinedTranscriptText, transcripts,
-  });
-  const { contentThemes, transcriptExcerpts } = localPrepared;
-  location = localPrepared.location;
-
-  // Await both LLM calls (kicked off above; ran concurrently with the work between).
-  const [contentThemeLabels, tikTokDecodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
-
-  // ── M1 seam (phased architecture S1): bank stages A–D, then assemble ──
-  // Populated in the exact order these values have always been computed, at the
-  // exact point the assembly used to run. Assembly reads ONLY this struct — no
-  // value reaches stage E through a local any more. Execution order, timing and
-  // output are unchanged; evidenceIdentity.test.ts proves the last of those.
-  const banked: BankedCreatorEvidence = {
-    schemaVersion: 1,
-    handle,
-    platform: "TikTok",
-    capture: {
-      displayName, bio, followerCount, followingCount, videoCount, totalLikes, location,
-      profileUrl: `https://www.tiktok.com/@${handle}`,
-    },
-    collection: {
-      transcripts, musicTitles, engagementSignals, longitudinalSample,
-      discoveredVideoPool, foreignVideosRejected,
-    },
-    prepared: {
-      allTitles, topHashtags, rawKeywords, contentThemes, transcriptExcerpts,
-      totalViews, avgViews, engagementRate,
-    },
-    derived: { contentThemeLabels, decodedSymbols: tikTokDecodedSymbols },
-  };
-
-  // Shadow banking (S1): P4 derive — the two independent LLM outputs.
-  void bankPhase(subjectHint, "derive", "gemini:themes+symbols",
-    contentThemeLabels.length > 0 && tikTokDecodedSymbols ? "complete" : "partial", {
-      contentThemeLabels, decodedSymbols: tikTokDecodedSymbols,
-    });
-
-  maybeDumpEvidenceFixture(banked);
-
-  return assembleCreatorResearchResult(banked);
-}
 // ─── Instagram Creator Research ───────────────────────────────────────────────
 
 async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorResearchResult> {

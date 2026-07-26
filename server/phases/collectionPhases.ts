@@ -36,6 +36,7 @@ import {
   type CaptureToolResult,
   type ToolPoolState,
 } from "./platformTools";
+import { capturing, draftFor } from "./fixtureCapture";
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,9 @@ export function freshPoolState(): ToolPoolState {
     videoItems: [], seen: new Set<string>(), viewCounts: [], videoTitles: [],
     hashtags: [], musicTitles: [], foreignVideosRejected: 0,
     searchQuotaExhausted: false, apiVideoCount: 0,
+    // Opt-in raw-payload sink for the collection-fixture refresh (inert unless
+    // WOMO_COLLECTION_FIXTURE is set).
+    ...(capturing() ? { rawCapture: { searchResponses: [] } } : {}),
   };
 }
 
@@ -83,6 +87,7 @@ export function poolStateFromBanked(banked: {
     foreignVideosRejected: banked.foreignVideosRejected,
     searchQuotaExhausted: false,
     apiVideoCount: 0,
+    ...(capturing() ? { rawCapture: { searchResponses: [] } } : {}),
   };
 }
 
@@ -114,6 +119,12 @@ export function makeCapturePhase(platform: PlatformName): AnalysisPhase<{ handle
         const captured = await tools.capture.capture(input.handle);
         const pool = freshPoolState();
         await tools.capture.seedPool(input.handle, captured, pool);
+
+        if (capturing()) {
+          const d = draftFor(ctx.runId, input.handle);
+          d.raw.prefetchedProfile = captured.nativeProfile ?? null;
+          d.expected.poolAfterApi = snapshotPool(pool);
+        }
 
         const assessment = captured.assessment as { genuineEmpty?: boolean } | undefined;
         const genuineEmpty = Boolean(assessment?.genuineEmpty);
@@ -194,6 +205,11 @@ export function makeAugmentPhase(platform: PlatformName): AnalysisPhase<
 
       try {
         await tools.augment.augment(input.handle, pool);
+        if (capturing()) {
+          const d = draftFor(ctx.runId, input.handle);
+          d.raw.searchResponses = pool.rawCapture?.searchResponses ?? [];
+          d.expected.poolAfterAugment = snapshotPool(pool);
+        }
         const outcome = pool.searchQuotaExhausted ? "blocked" as const : "complete" as const;
         return {
           outcome,
@@ -293,7 +309,16 @@ export function makeTranscribePhase(platform: PlatformName): AnalysisPhase<
       try {
         const pool = input.augment.pool.videoItems;
         const sampled = tools.transcribe.selectSample(input.handle, pool, input.nowSec);
+        if (capturing()) {
+          const d = draftFor(ctx.runId, input.handle);
+          d.samplingNowSec = input.nowSec;
+          d.expected.sample = sampled.map(sv => ({ id: sv.item.id, bucket: sv.bucket }));
+        }
         const transcripts = await tools.transcribe.transcribe(input.handle, sampled);
+        if (capturing()) {
+          draftFor(ctx.runId, input.handle).expected.transcriptsAfterFetch =
+            transcripts.map(t => ({ ...t }));
+        }
         const assembled = tools.transcribe.assemble(input.handle, pool, transcripts, sampled);
 
         // The collection stage's view counts, taken VERBATIM from the banked

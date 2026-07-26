@@ -931,6 +931,31 @@ delete the profile."
   webcache in 2024.
 - Path A desktop-HTTP profile fetch — dead code since FIX 3.4 skipped it.
 
+### Refreshing the collection-identity fixture (do this when TikTok drifts)
+
+The collection identity harness (`server/collectionIdentity.test.ts`) replays
+**recorded raw platform payloads** and asserts four boundaries: the pool after
+API collection, the pool after augmentation, the exact `(id, bucket)` 6-3-3
+sample, and the per-video transcript results. When TikTok changes response
+shapes the fixture goes stale and must be re-recorded:
+
+```bash
+WOMO_COLLECTION_FIXTURE=/tmp/collection.json PORT=3300 \
+  NODE_ENV=development pnpm exec tsx server/_core/index.ts
+# …run ONE creator analysis against localhost:3300, then:
+cp /tmp/collection.json server/__fixtures__/collection.tiktok.json
+npx vitest run server/collectionIdentity.test.ts
+```
+
+The capture lives in `server/phases/fixtureCapture.ts` and is written by the
+capture / augment / transcribe phases at exactly those boundaries. It is
+**inert unless the env var is set** — with the flag off nothing is allocated.
+
+A refreshed fixture must satisfy the harness's non-trivial guard: ≥10 pool
+videos, ≥6 sampled, more than one temporal bucket, and real search payloads. If
+a capture cannot reproduce the boundaries, that is a finding about the pipeline
+— **do not relax the harness to accommodate it.**
+
 ### OPEN FINDING (for the next reliability session — NOT addressed in S2)
 
 **Author-stripped payloads silently empty the pool.**

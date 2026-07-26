@@ -51,7 +51,12 @@ describe("webResearch evidence summary", () => {
 
     // Verify the transcript-first pipeline functions exist (current identifiers)
     expect(source).toContain("fetchVideoTranscriptMultiPath");
-    expect(source).toContain("fetchTikTokTranscripts");
+    // S2 cutover: the inline fetchTikTokTranscripts orchestration was deleted;
+    // the transcript pipeline now lives in the transcribe phase's tool.
+    // NOTE: source-text assertions like these are brittle — they check that a
+    // NAME exists, not that behaviour is right. Worth replacing with behavioural
+    // coverage (the collection harness already does this properly).
+    expect(source).toContain("transcribeSampledVideos");
     expect(source).toContain("WEBVTT");
     // Verify the first-party TikTok search scraper is used to collect video IDs
     expect(source).toContain("searchTikTokVideos");
