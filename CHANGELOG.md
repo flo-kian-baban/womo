@@ -9,6 +9,59 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — the shared user-agent pool is desktop-only
+
+### Fixed
+- **Four mobile agents removed from `USER_AGENTS`** (`scraping/httpClient.ts`),
+  leaving 12 desktop entries. They made ~25% of *every* fetch, on every
+  platform, present as a phone. On TikTok video pages a mobile agent gets a
+  valid ~360KB response carrying `webapp.reflow.*` instead of
+  `webapp.video-detail`, so `extractSubtitleInfos` returns found=true with
+  **zero** entries — structurally, not because the video lacks subtitles. The
+  pipeline banked that as "no subtitles" and substituted the creator's written
+  caption (`post_caption`) for their spoken words.
+- **Nothing caught it, which is the real lesson.** A mobile response is a clean
+  HTTP 200, so `fetchHtml` never re-rolls the agent, and `detectSilentFailure`
+  is not wired into the video-page paths at all.
+
+### Measured, not assumed
+- Every `fetchHtml` caller was compared desktop-pinned vs mobile-pinned before
+  the change. **TikTok video pages: fatal** (0/4 mobile agents yield subtitles;
+  12/12 desktop agents do). **Everything else: unaffected** — Instagram oEmbed,
+  Picuki, DuckDuckGo, Google and the brand crawl are either byte-identical or
+  already broken for every agent. Six videos previously banked as
+  `subtitle_http:empty` yield subtitles on **4/6 desktop, 0/6 mobile**.
+- **Mobile is not lost, it is explicit.** `fetchViaMobileWeb` pins
+  `randomMobileUserAgent()` via `extraHeaders`, spread last in `fetchHtml` and
+  therefore authoritative. Verified after removal: **4/4** mobile-shaped profile
+  captures with the correct `followerCount` — impossible from a 100%-desktop
+  pool, which makes it proof rather than inference.
+- **Acceptance run** `e5f6c6c0` (@chriswillx, 117.8s): 5/5 phases complete, 44
+  scrape events, 3 LLM calls, 115 content_items, 10 transcripts, confidence
+  `high`. **12 video-page fetches, 0 mobile-variant responses.** `subtitle_http`
+  9 success / 3 empty — and all three empties were 1,485-byte rate-limit block
+  pages that *are* detected, not silent degradation. Sources **90% `subtitle` /
+  10% `post_caption`** against a stored baseline of 55.4% / 38.1%. One creator,
+  one run — an observation, not a proof.
+
+### Added
+- `server/userAgentPool.test.ts` (8 tests) — asserts the pool holds no mobile
+  tokens, that every entry positively looks like a desktop browser, that the
+  dedicated mobile pool still reaches all four removed devices, and that
+  `extraHeaders` is still spread **after** `User-Agent` (invert that ordering and
+  the override breaks silently). Confirmed the guard fails on reintroduction.
+
+### Documented
+- `PIPELINE_REFERENCE.md` §1.11 marked **RESOLVED** with the full per-path
+  measurement table and the estimated historical cost (~54 lost subtitle
+  transcripts of ~217 obtainable, TikTok only).
+- **`PIPELINE_REFERENCE.md` §1.12 — new OPEN FINDING:** `subtitle_browser` has
+  **never** succeeded (0 of 227 attempts), so the fallback chain is really one
+  working strategy plus a caption guess. Includes that `detectSilentFailure` is
+  absent from the video-page paths and that its TikTok branch keys on
+  `webapp.user-detail`, which a video page never has. Diagnosis only — the three
+  plausible causes have very different fixes.
+
 ## [Unreleased] — YouTube disabled: TikTok and Instagram only
 
 YouTube is not a platform this product supports. S4b put it behind the contract

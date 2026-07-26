@@ -156,16 +156,63 @@ Profile + posts via the same Instagram scraper; engagement from likes+comments v
 
 **Net:** the diagnostic panel's scrape section under-reports reality for any Playwright-heavy run — a TikTok run shows only its HTTP video-page fetches (Path A transcript attempts), and an Instagram run typically shows nothing. This is a coverage gap in telemetry, not evidence that no scraping occurred.
 
-### 1.11 The desktop user-agent pool contains mobile agents (OPEN FINDING — needs its own investigation, do not "fix" blind)
+### 1.11 The desktop user-agent pool contained mobile agents — ✅ RESOLVED 2026-07-26
 
-**[FACT]** `USER_AGENTS` (`scraping/httpClient.ts:41-68`) has **16 entries, 4 of them mobile** — Chrome on Android (Pixel 8, SM-S928B) and Safari on iOS (2× iPhone). `randomUserAgent()` (`:69-71`) picks uniformly with no desktop/mobile distinction, so **roughly 25% of every `fetchHtml` call** — TikTok profile and video pages, Instagram oEmbed and profile, brand website crawl, Google/Bing search fallback, review research — presents as a phone and may receive a mobile document. `fetchHtml` retries only on transport failure, and a mobile page is a clean HTTP 200, so the agent is never re-rolled. [FACT]
+> **FIXED.** The four mobile agents were removed; `USER_AGENTS` is now 12 desktop
+> entries and `server/userAgentPool.test.ts` prevents reintroduction. The
+> measurement the finding asked for was carried out first — see the verdict table
+> at the end of this section. Mobile is still reachable, but only by explicitly
+> pinning `randomMobileUserAgent()` via `extraHeaders`.
+>
+> **Measured impact, TikTok video pages:** all 4 mobile agents returned a valid
+> ~360KB page carrying `webapp.reflow.*` instead of `webapp.video-detail`, so
+> `extractSubtitleInfos` returned found=true / **n=0** every time, while all 12
+> desktop agents returned n=1. Six videos the pipeline had banked as
+> `subtitle_http:empty` yielded subtitles on **4/6 desktop-pinned, 0/6
+> mobile-pinned**. Every other measured path — Instagram oEmbed, Picuki,
+> DuckDuckGo, Google, brand crawl — was **UA-agnostic** (several are broken for
+> all agents, unrelated to this).
+>
+> **After the fix**, one acceptance run (`e5f6c6c0`): 12 video-page fetches, **0
+> mobile-variant responses**, `subtitle_http` 9 success / 3 empty — and all 3
+> empties were 1,485-byte rate-limit block pages that `detectSilentFailure`
+> *does* catch, not silent mobile degradation. Transcript sources 90% `subtitle`
+> / 10% `post_caption`, against a stored historical baseline of 55.4% / 38.1%.
+> One creator, one run — an observation, not a proof.
+>
+> The original finding is preserved below because the reasoning still matters.
+
+**[FACT — as it stood]** `USER_AGENTS` (`scraping/httpClient.ts:41-68`) had **16 entries, 4 of them mobile** — Chrome on Android (Pixel 8, SM-S928B) and Safari on iOS (2× iPhone). `randomUserAgent()` (`:69-71`) picks uniformly with no desktop/mobile distinction, so **roughly 25% of every `fetchHtml` call** — TikTok profile and video pages, Instagram oEmbed and profile, brand website crawl, Google/Bing search fallback, review research — presents as a phone and may receive a mobile document. `fetchHtml` retries only on transport failure, and a mobile page is a clean HTTP 200, so the agent is never re-rolled. [FACT]
 
 **A separate `randomMobileUserAgent()` already exists at `:588-598`** for the callers that genuinely want mobile, which is the strongest available evidence that the mobile entries in the *desktop* pool are an oversight rather than a deliberate mix. [INFERENCE]
 
 - **Proven fatal for YouTube.** Mobile YouTube (MWEB) serialises `ytInitialData` as a hex-escaped JS string and uses `singleColumnBrowseResultsRenderer`; every extractor pattern misses it and every navigation path diverges. Deterministic under a pinned UA — see [`YOUTUBE_DISABLED.md`](./YOUTUBE_DISABLED.md) defect 1. [FACT]
 - **UNMEASURED everywhere else.** No evidence has been gathered on whether TikTok, Instagram, brand crawl or review research degrade, tolerate, or in some paths *depend on* mobile responses. [FACT — absence of measurement]
 
-**Do not remove the mobile entries until the effect is measured per platform.** Deleting them is a one-line change with an unmeasured blast radius across every scraper. The investigation: for each `fetchHtml` caller, fetch the same URL with a pinned desktop agent and a pinned mobile agent, and record which parsers still produce their expected fields.
+**The measurement that was demanded before touching it — per `fetchHtml` caller, same URL, desktop-pinned vs mobile-pinned:**
+
+| path | mobile HTML parses | note |
+|---|---|---|
+| TikTok **video page** (`transcriptStrategies.ts:209`, `webResearch.ts:3614`) | **not at all** | `webapp.reflow.*` replaces `webapp.video-detail`; `subtitleInfos` n=0 always |
+| TikTok **profile page** (`profileScraper.ts:133`) | **fully — better than desktop** | desktop gets a 1,485 B block page; this path already pins mobile deliberately |
+| Instagram oEmbed ×2, Picuki | n/a | HTML login wall / HTTP 403 for **every** agent — broken independently |
+| DuckDuckGo, brand website crawl | **fully** | byte-identical output desktop vs mobile |
+| Google search fallback | n/a | 0 result blocks parsed on **every** agent — broken independently |
+| YouTube | not at all | platform disabled; see [`YOUTUBE_DISABLED.md`](./YOUTUBE_DISABLED.md) |
+
+**No path depended on the desktop pool's mobile entries.** The one caller that needs mobile (`fetchViaMobileWeb`) pins `randomMobileUserAgent()` through `extraHeaders`, which is spread last in `fetchHtml` and therefore overrides the pool. Verified after removal: 4/4 mobile-shaped profile captures with the correct `followerCount` — and since the pool is now 100% desktop, a mobile-shaped response can only come from the override. [FACT]
+
+**Estimated historical cost, TikTok only:** across 459 `subtitle_http` attempts, ~115 would have been mobile (25%) against a desktop success rate of 47.4%, implying **~54 lost subtitle transcripts of ~217 obtainable — about 1 in 4** — most silently downgraded to `post_caption`. Directionally solid; the per-row marker is not stored, so the exact figure rests on the 25% share. [INFERENCE, from measured rates]
+
+### 1.12 `subtitle_browser` has never succeeded — 0 of 227 attempts (OPEN FINDING — diagnosis only)
+
+**[FACT — live DB]** Across all recorded transcript attempts the browser strategy has produced **zero** successes: `subtitle_browser` shows 198 `empty`, 18 `error`, 11 `timeout`, 66 `skipped` — and **no** `success` row, ever. `subtitle_http` shows 163 success / 296 empty; `caption_fallback` 123 success / 170 empty.
+
+**What that means for the fallback chain.** `defaultTranscriptStrategies` (`tiktok/transcriptStrategies.ts:389`) is documented and budgeted as three ordered strategies, but in practice it is **one working strategy plus a caption guess**: when Path A returns empty, the expensive Playwright path runs, costs its budget (20s/video cap, 120s phase budget, `maxConsecutiveBrowserEmpties` early-bail), contributes nothing, and the pipeline settles for `TRANSCRIPT_SOURCE.postCaption` — the creator's *written caption* substituted for their *spoken words*. That substitution is why 38.1% of stored TikTok transcripts are `post_caption`. [FACT]
+
+**Compounding it — `detectSilentFailure` is not wired into the video-page paths at all.** Its only control-flow call sites are `tiktok/profileScraper.ts:140` and `:306` and `instagram/profileScraper.ts:214`; at `httpClient.ts:366` it runs inside fire-and-forget telemetry, which stamps `scrape_events.silent_failure_detected` but never gates or retries. And its TikTok branch keys on `webapp.user-detail` (`httpClient.ts:441`), a scope key a **video page never has** — so even if it were wired in, it could not classify a video-page degradation. That is precisely why the mobile-agent defect in §1.11 survived unnoticed. [FACT]
+
+**Not fixed here, and deliberately not guessed at.** Whether the browser strategy is genuinely broken, mis-gated, or simply always reaching videos that truly lack subtitles is unresolved — the three have very different fixes. The investigation: instrument one browser attempt end to end on a video with subtitles *confirmed present* via Path A, and determine whether it navigates, whether the subtitle payload is in the page it sees, and what it extracts.
 
 ---
 
