@@ -210,8 +210,19 @@ export interface SchedulerOptions {
   /** Injected for tests; production uses the real clock and a real sleep. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** Called before each attempt so the ledger shows in-flight work. */
-  onAttemptStart?: (phase: AnalysisPhase<never, unknown>, attempt: number) => void;
+  /**
+   * Called twice per attempt so the ledger distinguishes WAITING from WORKING:
+   * `pending` when the attempt is queued for admission, `running` once a permit
+   * is held and the tool is actually executing. Reporting a queued phase as
+   * "running" would make the ledger lie about exactly the state this session
+   * introduced — and `pending` is in READY_STATUSES, so a phase abandoned while
+   * queued is rescannable rather than invisible.
+   */
+  onAttemptStart?: (
+    phase: AnalysisPhase<never, unknown>,
+    attempt: number,
+    status: "pending" | "running",
+  ) => void;
 }
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -232,13 +243,16 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
     let attempt = 1;
 
     for (;;) {
-      opts.onAttemptStart?.(phase, attempt);
+      // Queued: waiting for a permit, holding nothing.
+      opts.onAttemptStart?.(phase, attempt, "pending");
 
       // Admission: the permit is taken HERE, before any tool runs, and dropped
       // when `phase.run` settles — after its contexts are retired.
-      const result = await withResourceSlot(cls, () =>
-        phase.run(input, { ...ctx, attempt }),
-      );
+      const result = await withResourceSlot(cls, () => {
+        // Admitted: a permit is held and the tool is about to touch the network.
+        opts.onAttemptStart?.(phase, attempt, "running");
+        return phase.run(input, { ...ctx, attempt });
+      });
 
       const decision = decideRetry({
         outcome: result.outcome,

@@ -295,8 +295,8 @@ describe("makeSchedulerExecute — attempts, admission and sleeps", () => {
     expect(result.nextEarliestAt).toEqual(new Date(NOW + 1_000));
   });
 
-  it("announces each attempt so the ledger can show in-flight work", async () => {
-    const starts: Array<[string, number]> = [];
+  it("announces each attempt twice — pending while queued, running once admitted", async () => {
+    const starts: Array<string> = [];
     const phase = scriptedPhase("capture", [
       { outcome: "failed", failureClass: "transient" },
       { outcome: "complete" },
@@ -305,9 +305,55 @@ describe("makeSchedulerExecute — attempts, admission and sleeps", () => {
     await makeSchedulerExecute({
       now: () => NOW,
       sleep: async () => {},
-      onAttemptStart: (p, attempt) => starts.push([p.name, attempt]),
+      onAttemptStart: (p, attempt, status) => starts.push(`${p.name}#${attempt}:${status}`),
     })(phase, {} as never, ctx);
 
-    expect(starts).toEqual([["capture", 1], ["capture", 2]]);
+    expect(starts).toEqual([
+      "capture#1:pending", "capture#1:running",
+      "capture#2:pending", "capture#2:running",
+    ]);
+  });
+
+  it("reports `running` only while a permit is actually held — a QUEUED phase reads pending", async () => {
+    // The ledger must not call a phase "running" while it is waiting for
+    // admission. Bound 1: the second campaign's capture queues behind the first.
+    __testSlots.setBounds({ browser: 1 });
+    const seen: Array<{ status: string; held: string | null }> = [];
+    const record = (_p: unknown, _a: number, status: "pending" | "running") =>
+      seen.push({ status, held: currentlyHeldClass() });
+
+    const blocker = gateOpen();
+    const slow = scriptedPhase("capture", [{ outcome: "complete" }]);
+    const slowRun = slow.run.bind(slow);
+    slow.run = async (i, c) => { await blocker.opened; return slowRun(i, c); };
+
+    const queued = scriptedPhase("capture", [{ outcome: "complete" }]);
+
+    const execute = makeSchedulerExecute({ now: () => NOW, onAttemptStart: record });
+    const first = execute(slow, {} as never, ctx);
+    const second = execute(queued, {} as never, ctx);
+
+    await new Promise<void>((r) => setTimeout(r, 20));
+    // Both phases announced themselves as pending (admission is always deferred
+    // by at least a microtask), but only ONE has been admitted — the other is
+    // sitting in the queue and must not be reported as running.
+    expect(seen.filter(s => s.status === "pending")).toHaveLength(2);
+    expect(seen.filter(s => s.status === "running")).toHaveLength(1);
+    // …and every `running` came from INSIDE a permit, every `pending` from outside.
+    expect(seen.filter(s => s.status === "running").every(s => s.held === "browser")).toBe(true);
+    expect(seen.filter(s => s.status === "pending").every(s => s.held === null)).toBe(true);
+
+    blocker.release();
+    await Promise.all([first, second]);
+    // The queued phase is only now reported running — after the first released.
+    expect(seen.filter(s => s.status === "running")).toHaveLength(2);
+    expect(seen[seen.length - 1]).toEqual({ status: "running", held: "browser" });
   });
 });
+
+/** A latch the test opens by hand. */
+function gateOpen() {
+  let release!: () => void;
+  const opened = new Promise<void>((r) => { release = r; });
+  return { opened, release };
+}

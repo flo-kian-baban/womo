@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { publicProcedure, router } from "./trpc";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
-import { getContext, retireContext } from "../scraping/browserClient";
+import { getContext, retireContext, getPoolSnapshot, getPoolStats } from "../scraping/browserClient";
+import { currentBounds, slotSnapshot } from "./resourceSlots";
+import { snapshotMemory } from "../scraping/memoryTelemetry";
 
 type ApiStatusEntry = {
   name: string;
@@ -107,6 +109,26 @@ export const systemRouter = router({
     .query(() => ({
       ok: true,
     })),
+
+  /**
+   * Live admission + browser-pool state (S3a).
+   *
+   * The bounds in resourceSlots.ts are explicitly starting values to be tuned
+   * against telemetry — which is only honest if the telemetry is visible while
+   * work is running. `pipeline_runs.error_log.memory` records per-run peaks
+   * after the fact; this is the same picture live, plus the thing that row
+   * cannot show: how many phases of each class are running versus QUEUED.
+   *
+   * Read-only and cheap: counters and one memory sample, no browser work.
+   */
+  concurrency: publicProcedure.query(() => ({
+    bounds: currentBounds(),
+    slots: slotSnapshot(),
+    pool: getPoolSnapshot(),
+    poolStats: getPoolStats(),
+    memory: snapshotMemory(),
+    at: Date.now(),
+  })),
 
   apiStatus: publicProcedure.query(async () => {
     // Run all three probes in parallel — each has its own timeout/error handling

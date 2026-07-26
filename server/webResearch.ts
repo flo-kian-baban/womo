@@ -2142,15 +2142,18 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     // and stop conditions; nothing about WHAT is gathered changes.
     execute: makeSchedulerExecute({
       deadlineAt: currentDeadlineAt(),
-      // Mark the phase in-flight so the ledger shows work in progress, not just
-      // finished work. Fire-and-forget, like every other observation write.
-      onAttemptStart: (phase, attempt) => {
+      // Show the phase's live state, distinguishing WAITING from WORKING:
+      // `pending` while it queues for a permit, `running` once admitted. Both
+      // fire-and-forget, like every other observation write — recordPhaseState
+      // drops a write older than the row it would overwrite, so an out-of-order
+      // marker can never clobber the terminal outcome.
+      onAttemptStart: (phase, attempt, status) => {
         if (!runId) return;
         void recordPhaseState({
           runId, subjectHint,
           phase: phase.name as PhaseStateWrite["phase"],
           tool: phase.tool,
-          status: "running",
+          status,
           attemptCount: attempt,
         });
       },

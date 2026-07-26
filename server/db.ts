@@ -172,6 +172,13 @@ export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
         output: (w.output ?? null) as Record<string, unknown> | null,
         updatedAt: now,
       },
+      // MONOTONIC WRITES. Since S3a a phase writes this row more than once —
+      // `pending` when queued, `running` when admitted, then its outcome — and
+      // every write is fire-and-forget (`void`), so nothing orders them. A
+      // delayed marker landing after the terminal write would leave a finished
+      // phase reading "running" with the wrong attempt_count. Refuse any write
+      // older than the row it would overwrite; a late marker is simply dropped.
+      setWhere: sql`${analysisPhaseState.updatedAt} <= ${now}`,
     });
   } catch (err) {
     console.warn(`[db] recordPhaseState(${w.runId}, ${w.phase}) failed (ignored):`, (err as Error).message);

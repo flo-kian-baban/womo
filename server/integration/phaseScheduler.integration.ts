@@ -174,4 +174,60 @@ suite("scheduler ledger scan (ephemeral Postgres)", () => {
     const capped = await db.scanReadyWork(new Date(Date.now() + 60 * MIN), 1);
     expect(capped).toHaveLength(1);
   });
+
+  // Since S3a a phase writes this row THREE times — pending (queued), running
+  // (admitted), then its outcome — and every write is fire-and-forget, so
+  // nothing orders them. A delayed marker landing after the terminal write would
+  // leave a finished phase reading "running" with the wrong attempt count.
+  describe("monotonic writes — a late marker cannot clobber a terminal outcome", () => {
+    const RUN = RUN_TERMINAL;
+
+    it("drops a stale write instead of applying it", async () => {
+      await db.recordPhaseState({
+        runId: RUN, subjectHint: "donecreator@TikTok", phase: "extract_commit",
+        tool: "llm:extractCreatorProfile+persist", status: "complete",
+        attemptCount: 2, output: { saved: "full" },
+      });
+      const after = () => db.getPhaseState(RUN).then(rs => rs.find(r => r.phase === "extract_commit")!);
+      const terminal = await after();
+      expect(terminal.status).toBe("complete");
+
+      // Model the race: the marker was ISSUED before the terminal write but
+      // ARRIVES after it. recordPhaseState stamps its own `new Date()`, so the
+      // way to make the incoming write older than the row is to push the row's
+      // updated_at ahead — equivalent to the terminal write having landed later.
+      await client.query(
+        `update analysis_phase_state set updated_at = now() + interval '1 minute'
+          where run_id = $1 and phase = 'extract_commit'`,
+        [RUN],
+      );
+      await db.recordPhaseState({
+        runId: RUN, subjectHint: "donecreator@TikTok", phase: "extract_commit",
+        tool: "llm:extractCreatorProfile+persist", status: "running", attemptCount: 1,
+      });
+
+      const still = await after();
+      expect(still.status).toBe("complete");   // not clobbered
+      expect(still.attemptCount).toBe(2);      // and the attempt count survived
+      expect(still.output).toEqual({ saved: "full" });
+    });
+
+    it("still applies an in-order write", async () => {
+      // Undo the future stamp from the previous case so this write is genuinely
+      // newer than the row — otherwise the guard would (correctly) drop it too.
+      await client.query(
+        `update analysis_phase_state set updated_at = now() - interval '1 minute'
+          where run_id = $1 and phase = 'extract_commit'`,
+        [RUN],
+      );
+      await db.recordPhaseState({
+        runId: RUN, subjectHint: "donecreator@TikTok", phase: "extract_commit",
+        tool: "llm:extractCreatorProfile+persist", status: "partial",
+        attemptCount: 3, output: { saved: "partial" },
+      });
+      const row = (await db.getPhaseState(RUN)).find(r => r.phase === "extract_commit")!;
+      expect(row.status).toBe("partial");
+      expect(row.attemptCount).toBe(3);
+    });
+  });
 });
