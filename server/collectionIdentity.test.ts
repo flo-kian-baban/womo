@@ -57,12 +57,24 @@ vi.mock("./scraping/browserClient", () => ({
   isBrowserDeadError: () => false,
   BROWSER_LAUNCH_ARGS: [],
 }));
+// BOUNDARY 4: the transcript leaf. Returns the recorded per-video result so the
+// enrichment, ordering and null-handling of the real loop are exercised.
+const recordedTranscripts = new Map<string, { text: string; wordCount: number; source: string }>();
+vi.mock("./scraping/tiktok/transcriptStrategies", () => ({
+  fetchVideoTranscript: vi.fn(async (input: { videoId: string }) => {
+    const rec = recordedTranscripts.get(input.videoId);
+    return rec ? { result: { transcript: rec } } : null;
+  }),
+  budgetedTranscriptStrategies: () => [],
+  budgetedTranscriptPhase: () => ({}),
+}));
 
 import {
   collectPoolFromApi,
   collectPoolFromSupplementalSearch,
   selectLongitudinalSample,
   snapshotPool,
+  transcribeSampledVideos,
   type PoolVideoItem,
 } from "./webResearch";
 
@@ -90,6 +102,8 @@ interface CollectionFixture {
     poolAfterApi: PoolSnapshot;
     poolAfterAugment: PoolSnapshot;
     sample: Array<{ id: string; bucket: string }>;
+    /** BOUNDARY 4 — the per-video transcript results, in order. */
+    transcriptsAfterFetch?: Array<Record<string, unknown>>;
   };
 }
 
@@ -182,6 +196,48 @@ suite("collection stages reproduce a recorded run byte-for-byte", () => {
     const { sampledVideos } = selectLongitudinalSample(fx.handle, acc.videoItems, fx.samplingNowSec);
     expect(sampledVideos.map(s => ({ id: s.item.id, bucket: s.bucket })))
       .toEqual(fx.expected.sample);
+  });
+
+  it("BOUNDARY 4 — per-video transcript results are byte-identical, in order", async () => {
+    // The surface the transcribe phase touches. Replays the recorded per-video
+    // strategy results through the REAL loop, so enrichment (musicMetadata,
+    // remixMetadata, videoDuration, collaborations), null-handling for videos
+    // with no transcript, and the ORDER of the resulting array are all
+    // exercised — not just the text.
+    const recorded = fx.expected.transcriptsAfterFetch;
+    expect(recorded, "fixture must carry boundary-4 data").toBeTruthy();
+
+    recordedTranscripts.clear();
+    for (const t of recorded!) {
+      recordedTranscripts.set(String(t.videoId), {
+        text: String(t.transcript),
+        wordCount: Number(t.wordCount),
+        source: String(t.transcriptSource),
+      });
+    }
+
+    // Rebuild the sampled list the run actually transcribed, from the recorded
+    // pool and sample — so this replays the real (item, bucket) pairs.
+    const byId = new Map(fx.expected.poolAfterAugment.videoItems.map(v => [v.id, v]));
+    const sampled = fx.expected.sample
+      .map(s => ({ item: byId.get(s.id)!, bucket: s.bucket as "recent" | "mid" | "anchor" }))
+      .filter(s => s.item);
+
+    const got = await transcribeSampledVideos(fx.handle, sampled);
+    expect(JSON.stringify(got)).toBe(JSON.stringify(recorded));
+  });
+
+  it("BOUNDARY 4b — a video with no transcript is dropped, never fabricated", async () => {
+    // The failure that would silently inflate evidence: emitting an entry for a
+    // video the strategies could not transcribe.
+    recordedTranscripts.clear(); // every lookup misses → leaf returns null
+    const byId = new Map(fx.expected.poolAfterAugment.videoItems.map(v => [v.id, v]));
+    const sampled = fx.expected.sample
+      .map(s => ({ item: byId.get(s.id)!, bucket: s.bucket as "recent" | "mid" | "anchor" }))
+      .filter(s => s.item);
+
+    const got = await transcribeSampledVideos(fx.handle, sampled);
+    expect(got).toEqual([]);
   });
 
   it("BOUNDARY 3b — sampling the recorded pool directly reproduces the recorded sample", () => {

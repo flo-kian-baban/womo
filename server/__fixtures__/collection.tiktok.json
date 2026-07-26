@@ -1,6 +1,6 @@
 {
   "handle": "invisible.ads",
-  "samplingNowSec": 1785031637,
+  "samplingNowSec": 1785033630,
   "raw": {
     "prefetchedProfile": {
       "userInfo": {
@@ -4129,6 +4129,90 @@
             ]
           },
           {
+            "id": "7522519155799526678",
+            "desc": "ad GRWM for a festival using Simple’s brand new Invisible UV Fluid SPF 50! ✨☀️ @SimpleSkincareUK  #AD #SimpleUVFluid #SimpleSkincare #ThePowerofSimple #SimpleSPF #ukfestival #britishweather #SPFRecommendations Festival Essentials, Tanning With SPF 50, Sun Cream Reviews, Best Sun Cream",
+            "createTime": 1751472982,
+            "stats": {
+              "playCount": 20800000,
+              "diggCount": 37200,
+              "commentCount": 137,
+              "collectCount": 2221,
+              "shareCount": 929
+            },
+            "author": {
+              "uniqueId": "imogencribb",
+              "nickname": "Imogen Cribb",
+              "secUid": "MS4wLjABAAAAFrmNxnr6iozRw1VaVFJB5y-E5z7oJhAbpS5Eq_Y0EYWnsR-w9uYEWr0vx-YhkFgT"
+            },
+            "music": {
+              "title": "shine on",
+              "authorName": "choppy.wav",
+              "original": false
+            },
+            "video": {
+              "duration": 19,
+              "id": "7522519155799526678"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "ad"
+              },
+              {
+                "title": "simpleuvfluid"
+              },
+              {
+                "title": "simpleskincare"
+              },
+              {
+                "title": "thepowerofsimple"
+              },
+              {
+                "title": "simplespf"
+              },
+              {
+                "title": "ukfestival"
+              },
+              {
+                "title": "britishweather"
+              },
+              {
+                "title": "spfrecommendations"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "ad"
+              },
+              {
+                "hashtagName": "simpleuvfluid"
+              },
+              {
+                "hashtagName": "simpleskincare"
+              },
+              {
+                "hashtagName": "thepowerofsimple"
+              },
+              {
+                "hashtagName": "simplespf"
+              },
+              {
+                "hashtagName": "ukfestival"
+              },
+              {
+                "hashtagName": "britishweather"
+              },
+              {
+                "hashtagName": "spfrecommendations"
+              }
+            ]
+          },
+          {
             "id": "7119607026564517163",
             "desc": "#Ad No activity is too small or too large for Neutrogena Invisible Daily Defense sunscreen! @Neutrogena #neutrogenapartner",
             "createTime": 1657662689,
@@ -4173,111 +4257,6 @@
               },
               {
                 "hashtagName": "neutrogenapartner"
-              }
-            ]
-          },
-          {
-            "id": "7636475659837050144",
-            "desc": "#fyp #viral #invisible #fouryou ",
-            "createTime": 1778005546,
-            "stats": {
-              "playCount": 2900000,
-              "diggCount": 83400,
-              "commentCount": 1283,
-              "collectCount": 20100,
-              "shareCount": 29500
-            },
-            "author": {
-              "uniqueId": "qxyma",
-              "nickname": "༻ 𝚒𝚗𝚟𝚒𝚜𝚒𝚋𝚕𝚎 ༺",
-              "secUid": "MS4wLjABAAAAsgSKA13aDsa3Ij1i7E9PgOCoZKMwrrqUhCl35srAeSZ4_GUIE6QxyjBfiDvhwv3Z"
-            },
-            "music": {
-              "title": "son original - Mikasa Music",
-              "authorName": "Mikasa Music",
-              "original": true
-            },
-            "video": {
-              "duration": 277,
-              "id": "7636475659837050144"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [
-              {
-                "title": "fyp"
-              },
-              {
-                "title": "viral"
-              },
-              {
-                "title": "invisible"
-              },
-              {
-                "title": "fouryou"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": "fyp"
-              },
-              {
-                "hashtagName": "viral"
-              },
-              {
-                "hashtagName": "invisible"
-              },
-              {
-                "hashtagName": "fouryou"
-              }
-            ]
-          },
-          {
-            "id": "7520987351804382472",
-            "desc": "POV: انتِ Type A personality وحتى واقي الشمس لازم يكون مثالي زي NIVEA Sun Invisible Daily fluid💙  @NIVEA Middle East  #SimplyProtected #SkinAlly AD",
-            "createTime": 1751116330,
-            "stats": {
-              "playCount": 8500000,
-              "diggCount": 36000,
-              "commentCount": 224,
-              "collectCount": 5296,
-              "shareCount": 1459
-            },
-            "author": {
-              "uniqueId": "rewlifts",
-              "nickname": "Rewaa",
-              "secUid": "MS4wLjABAAAABcwjYY-AkgMN6OD9KYZZFNrD5vZBU4BS1AIDLZ4nRrcMz3oPiaEL-aata3FecfYv"
-            },
-            "music": {
-              "title": "original sound",
-              "authorName": "Rewaa",
-              "original": true
-            },
-            "video": {
-              "duration": 42,
-              "id": "7520987351804382472"
-            },
-            "duetEnabled": false,
-            "stitchEnabled": false,
-            "isAd": true,
-            "challenges": [
-              {
-                "title": "simplyprotected"
-              },
-              {
-                "title": "skinally"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": ""
-              },
-              {
-                "hashtagName": "simplyprotected"
-              },
-              {
-                "hashtagName": "skinally"
               }
             ]
           },
@@ -4427,7 +4406,7 @@
             "desc": "#invisible #fyp ",
             "createTime": 1781932679,
             "stats": {
-              "playCount": 560700,
+              "playCount": 560800,
               "diggCount": 41200,
               "commentCount": 1788,
               "collectCount": 2383,
@@ -4468,6 +4447,576 @@
             ]
           },
           {
+            "id": "7641592792745282818",
+            "desc": "I added invisible seasoning and it worked instantly 💅 #foryou #fyp #thecheezyfamily1 #loveyou #viral ",
+            "createTime": 1779196985,
+            "stats": {
+              "playCount": 2300000,
+              "diggCount": 62000,
+              "commentCount": 845,
+              "collectCount": 2948,
+              "shareCount": 1548
+            },
+            "author": {
+              "uniqueId": "thecheezyfamily1",
+              "nickname": "TheCheezyFamily🇬🇧🇵🇰",
+              "secUid": "MS4wLjABAAAAlaUy75CQVr07EEZEqk7O3uD9SkcQz0qHY7g7Bc_WKXCLvx-Ka2R79BrPou8xnkjT"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "TheCheezyFamily🇬🇧🇵🇰",
+              "original": true
+            },
+            "video": {
+              "duration": 67,
+              "id": "7641592792745282818"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "foryou"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "thecheezyfamily1"
+              },
+              {
+                "title": "loveyou"
+              },
+              {
+                "title": "viral"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "foryou"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "thecheezyfamily1"
+              },
+              {
+                "hashtagName": "loveyou"
+              },
+              {
+                "hashtagName": "viral"
+              }
+            ]
+          },
+          {
+            "id": "7638307164255161622",
+            "desc": "ad. @Catrice Cosmetics Invisible Cover Cushion Foundation ⭐️ it has a beautiful matte finish & medium coverage that is buildable! my base makeup looks super smooth and air brushed and it’s also sweat proof 💦 my shade is C027C  #catrice #MyGlassCloudRitual #makeup #cushionfoundation #beautytips ",
+            "createTime": 1778431978,
+            "stats": {
+              "playCount": 10300000,
+              "diggCount": 48700,
+              "commentCount": 167,
+              "collectCount": 7593,
+              "shareCount": 1922
+            },
+            "author": {
+              "uniqueId": "lenkalul",
+              "nickname": "lenkalul",
+              "secUid": "MS4wLjABAAAAZjqUNPbZqKtR4MQuOv8-da6_wK9ozrfCXI0jQINIbPiYVz94yJyWdL3Mz-ukyG5B"
+            },
+            "music": {
+              "title": "romance garbage lofi 2",
+              "authorName": "G Sounds",
+              "original": false
+            },
+            "video": {
+              "duration": 14,
+              "id": "7638307164255161622"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "catrice"
+              },
+              {
+                "title": "myglasscloudritual"
+              },
+              {
+                "title": "makeup"
+              },
+              {
+                "title": "cushionfoundation"
+              },
+              {
+                "title": "beautytips"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "catrice"
+              },
+              {
+                "hashtagName": "myglasscloudritual"
+              },
+              {
+                "hashtagName": "makeup"
+              },
+              {
+                "hashtagName": "cushionfoundation"
+              },
+              {
+                "hashtagName": "beautytips"
+              }
+            ]
+          },
+          {
+            "id": "6836746855762709766",
+            "desc": "don’t mind me I’m crying #5sos #fyp #5secondsofsummer #KeepingItCute #5sosfam",
+            "createTime": 1591804173,
+            "stats": {
+              "playCount": 582800,
+              "diggCount": 103400,
+              "commentCount": 1591,
+              "collectCount": 9414,
+              "shareCount": 6108
+            },
+            "author": {
+              "uniqueId": "nvrag00dtime",
+              "nickname": "K",
+              "secUid": "MS4wLjABAAAA8XF0Bq1h9sOQO1xXKwOA1JAHTvYGardZ4HNMvX7UvmWe5Ejf6dQ2kWCTCSThfpWs"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "bsadozi555",
+              "original": true
+            },
+            "video": {
+              "duration": 10,
+              "id": "6836746855762709766"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "5sos"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "5secondsofsummer"
+              },
+              {
+                "title": "keepingitcute"
+              },
+              {
+                "title": "5sosfam"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "5sos"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "5secondsofsummer"
+              },
+              {
+                "hashtagName": "keepingitcute"
+              },
+              {
+                "hashtagName": "5sosfam"
+              }
+            ]
+          },
+          {
+            "id": "7636475659837050144",
+            "desc": "#fyp #viral #invisible #fouryou ",
+            "createTime": 1778005546,
+            "stats": {
+              "playCount": 2900000,
+              "diggCount": 83400,
+              "commentCount": 1283,
+              "collectCount": 20100,
+              "shareCount": 29500
+            },
+            "author": {
+              "uniqueId": "qxyma",
+              "nickname": "༻ 𝚒𝚗𝚟𝚒𝚜𝚒𝚋𝚕𝚎 ༺",
+              "secUid": "MS4wLjABAAAAsgSKA13aDsa3Ij1i7E9PgOCoZKMwrrqUhCl35srAeSZ4_GUIE6QxyjBfiDvhwv3Z"
+            },
+            "music": {
+              "title": "son original - Mikasa Music",
+              "authorName": "Mikasa Music",
+              "original": true
+            },
+            "video": {
+              "duration": 277,
+              "id": "7636475659837050144"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "invisible"
+              },
+              {
+                "title": "fouryou"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "invisible"
+              },
+              {
+                "hashtagName": "fouryou"
+              }
+            ]
+          },
+          {
+            "id": "7632037258350071062",
+            "desc": "ad SPF that doesn’t leave a white cast absorbs in 1 second >>>>> @CeraVeUKI new invisible sun care range really did that whilst looking after the skin barrier 🧴 ",
+            "createTime": 1776972151,
+            "stats": {
+              "playCount": 27600000,
+              "diggCount": 46400,
+              "commentCount": 110,
+              "collectCount": 2331,
+              "shareCount": 823
+            },
+            "author": {
+              "uniqueId": "kimberleycumberbatch",
+              "nickname": "kimberleycumberbatch",
+              "secUid": "MS4wLjABAAAA25TvE1TL8SvlfGCloSMe6m1LmMdNChCcGjBzZYFzc3oM8PCgsIRHJz29b-ZjAdz9"
+            },
+            "music": {
+              "title": "MONTAGEM COMA",
+              "authorName": "ANDROMEDA & elysian.",
+              "original": false
+            },
+            "video": {
+              "duration": 28,
+              "id": "7632037258350071062"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              }
+            ]
+          },
+          {
+            "id": "7531067202926054663",
+            "desc": "I’ve been trying to be a responsible adult who wears sunscreen everyday and this invisible formula makes it easy! So it’s always in my bag now💙 @NIVEA Middle East  #SimplyProtected #SkinAlly AD",
+            "createTime": 1753463229,
+            "stats": {
+              "playCount": 2900000,
+              "diggCount": 28300,
+              "commentCount": 119,
+              "collectCount": 2452,
+              "shareCount": 534
+            },
+            "author": {
+              "uniqueId": "sukkari.life",
+              "nickname": "Sukkari 🤎 سكري",
+              "secUid": "MS4wLjABAAAAgBfNN0tu_kGJnawXI-8EqimA9RrNgXnTteJLXsrGrIaZcto5HPPyvb6DYg2QqVQJ"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Sukkari 🤎 سكري",
+              "original": true
+            },
+            "video": {
+              "duration": 49,
+              "id": "7531067202926054663"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "simplyprotected"
+              },
+              {
+                "title": "skinally"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "simplyprotected"
+              },
+              {
+                "hashtagName": "skinally"
+              }
+            ]
+          },
+          {
+            "id": "7512675759350238471",
+            "desc": "The powder that ✨literally✨ does it ALL! It’s definitely Better Than Filter, Invisibly doing its job, babes! 💋 Prime. Set. Retouch. No cakey vibes 🎂 Serving looks all day! 💅 #dazzleme #invisiblepowder",
+            "createTime": 1749181136,
+            "stats": {
+              "playCount": 11700000,
+              "diggCount": 29900,
+              "commentCount": 460,
+              "collectCount": 6958,
+              "shareCount": 3240
+            },
+            "author": {
+              "uniqueId": "dazzleme_ph",
+              "nickname": "Dazzle Me Philippines",
+              "secUid": "MS4wLjABAAAAGMRCEHSMn9-H76yuWBy8PhpiCoL_29QRwPGeh4i9Tp2f0nXAardnOjlyeIzlaxdk"
+            },
+            "music": {
+              "title": "Pretty (Sped Up)",
+              "authorName": "MEYY",
+              "original": false
+            },
+            "video": {
+              "duration": 21,
+              "id": "7512675759350238471"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "dazzleme"
+              },
+              {
+                "title": "invisiblepowder"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "dazzleme"
+              },
+              {
+                "hashtagName": "invisiblepowder"
+              }
+            ]
+          },
+          {
+            "id": "7519358797844909342",
+            "desc": "The invisible string theory. Poetry book “between heaven & earth” out now :) #poetrylover #love #poetry ",
+            "createTime": 1750737168,
+            "stats": {
+              "playCount": 2700000,
+              "diggCount": 296000,
+              "commentCount": 653,
+              "collectCount": 53400,
+              "shareCount": 39600
+            },
+            "author": {
+              "uniqueId": "poetryfromanangel",
+              "nickname": "𝖬𝗈𝗋𝗇𝗂𝗇𝗀𝗌𝗍𝖺𝗋",
+              "secUid": "MS4wLjABAAAAIy1K3Zxw3O0rjpta4d_VU6eWYaz6TW5fswyjCYp_6_krXppRK-UEOiZzAqjTYKow"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "𝖬𝗈𝗋𝗇𝗂𝗇𝗀𝗌𝗍𝖺𝗋",
+              "original": true
+            },
+            "video": {
+              "duration": 35,
+              "id": "7519358797844909342"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "poetrylover"
+              },
+              {
+                "title": "Love"
+              },
+              {
+                "title": "poetry"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "poetrylover"
+              },
+              {
+                "hashtagName": "love"
+              },
+              {
+                "hashtagName": "poetry"
+              }
+            ]
+          },
+          {
+            "id": "7627968264953515294",
+            "desc": "",
+            "createTime": 1776024781,
+            "stats": {
+              "playCount": 175800,
+              "diggCount": 42100,
+              "commentCount": 51,
+              "collectCount": 4060,
+              "shareCount": 3551
+            },
+            "author": {
+              "uniqueId": ".08.17.07",
+              "nickname": "invisible.",
+              "secUid": "MS4wLjABAAAArXGlaiNShNrx4Gg8j1aZPcXzVgHcySEquvugZGX-muijfz7OipwBOXmUR5Czx1R4"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "￴ ￴ ￴ ￴￴ ￴ ￴ ￴￴￴ 　 　  ️",
+              "original": true
+            },
+            "video": {
+              "duration": 13,
+              "id": "7627968264953515294"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7520987351804382472",
+            "desc": "POV: انتِ Type A personality وحتى واقي الشمس لازم يكون مثالي زي NIVEA Sun Invisible Daily fluid💙  @NIVEA Middle East  #SimplyProtected #SkinAlly AD",
+            "createTime": 1751116330,
+            "stats": {
+              "playCount": 8500000,
+              "diggCount": 36000,
+              "commentCount": 224,
+              "collectCount": 5296,
+              "shareCount": 1459
+            },
+            "author": {
+              "uniqueId": "rewlifts",
+              "nickname": "Rewaa",
+              "secUid": "MS4wLjABAAAABcwjYY-AkgMN6OD9KYZZFNrD5vZBU4BS1AIDLZ4nRrcMz3oPiaEL-aata3FecfYv"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Rewaa",
+              "original": true
+            },
+            "video": {
+              "duration": 42,
+              "id": "7520987351804382472"
+            },
+            "duetEnabled": false,
+            "stitchEnabled": false,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "simplyprotected"
+              },
+              {
+                "title": "skinally"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "simplyprotected"
+              },
+              {
+                "hashtagName": "skinally"
+              }
+            ]
+          },
+          {
+            "id": "7578864010842344726",
+            "desc": "invisible comment tutorial ☠️ #trollface #edit #tiktok #viral #fyp ",
+            "createTime": 1764591794,
+            "stats": {
+              "playCount": 919400,
+              "diggCount": 23900,
+              "commentCount": 35700,
+              "collectCount": 13200,
+              "shareCount": 8828
+            },
+            "author": {
+              "uniqueId": "kk_editor0",
+              "nickname": "Atta_edits",
+              "secUid": "MS4wLjABAAAAtAsIe04idIneMEJOeMI5WmF3CuB52gD4Acq9aEn-MOLlMoRavUGXxq-FX7yU17Kg"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Atta_edits",
+              "original": true
+            },
+            "video": {
+              "duration": 17,
+              "id": "7578864010842344726"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "trollface"
+              },
+              {
+                "title": "edit"
+              },
+              {
+                "title": "tiktok"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "trollface"
+              },
+              {
+                "hashtagName": "edit"
+              },
+              {
+                "hashtagName": "tiktok"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
             "id": "7643899310119292183",
             "desc": "ad/ disziplinierte diva☀️ @CeraVe hat gerade neue Invisible hydrating fluid sunscreen produkte rausgebracht and i’m obsessed. #cerave #ceraveskincare #ceravedeutschland #ceravesun #anzeige",
             "createTime": 1779734004,
@@ -4475,7 +5024,7 @@
               "playCount": 46400000,
               "diggCount": 34500,
               "commentCount": 1582,
-              "collectCount": 3479,
+              "collectCount": 3478,
               "shareCount": 11600
             },
             "author": {
@@ -4534,83 +5083,108 @@
             ]
           },
           {
-            "id": "7632037258350071062",
-            "desc": "ad SPF that doesn’t leave a white cast absorbs in 1 second >>>>> @CeraVeUKI new invisible sun care range really did that whilst looking after the skin barrier 🧴 ",
-            "createTime": 1776972151,
+            "id": "7342947402166406433",
+            "desc": "#Ad 📢 Wear your SPF every day!!! 📢 ☀️⛅️ @Garnier new Vitamin C Daily UV Invisible SPF50+ is such a lovely one- no white cast, not greasy & sits nicely under my makeup which is always a win ☺️ #garnier #spf #vitaminc #sunscreen",
+            "createTime": 1709663176,
             "stats": {
-              "playCount": 27600000,
-              "diggCount": 46400,
-              "commentCount": 110,
-              "collectCount": 2331,
-              "shareCount": 823
+              "playCount": 3200000,
+              "diggCount": 23200,
+              "commentCount": 373,
+              "collectCount": 1855,
+              "shareCount": 293
             },
             "author": {
-              "uniqueId": "kimberleycumberbatch",
-              "nickname": "kimberleycumberbatch",
-              "secUid": "MS4wLjABAAAA25TvE1TL8SvlfGCloSMe6m1LmMdNChCcGjBzZYFzc3oM8PCgsIRHJz29b-ZjAdz9"
+              "uniqueId": "sophdoeslife",
+              "nickname": "sophdoeslife",
+              "secUid": "MS4wLjABAAAAQBHBhSjND7gRMsqngOw84wc-Z15zT9H4-g44Tr3z8UnKE7xQfmcZxwyEDmnuLlyJ"
             },
             "music": {
-              "title": "MONTAGEM COMA",
-              "authorName": "ANDROMEDA & elysian.",
-              "original": false
+              "title": "original sound",
+              "authorName": "sophdoeslife",
+              "original": true
             },
             "video": {
-              "duration": 28,
-              "id": "7632037258350071062"
+              "duration": 114,
+              "id": "7342947402166406433"
             },
             "duetEnabled": true,
-            "stitchEnabled": true,
+            "stitchEnabled": false,
             "isAd": true,
-            "challenges": [],
+            "challenges": [
+              {
+                "title": "ad"
+              },
+              {
+                "title": "garnier"
+              },
+              {
+                "title": "spf"
+              },
+              {
+                "title": "vitaminc"
+              },
+              {
+                "title": "sunscreen"
+              }
+            ],
             "textExtra": [
               {
+                "hashtagName": "ad"
+              },
+              {
                 "hashtagName": ""
+              },
+              {
+                "hashtagName": "garnier"
+              },
+              {
+                "hashtagName": "spf"
+              },
+              {
+                "hashtagName": "vitaminc"
+              },
+              {
+                "hashtagName": "sunscreen"
               }
             ]
           },
           {
-            "id": "7666341226353888530",
-            "desc": "Udah mau akhir bulan baru join trend Naykilla gakpapa kan yaa?🤭🙏🏻  @otwoo.id #otwooid #otwooprimer #naykilla #transisimakeup #makeupnaykilla ",
-            "createTime": 1785019056,
+            "id": "7372213607905479969",
+            "desc": "Anzeige | Vitamin C ist ein wahres Wundermittel und den Hype wirklich wert, wenn du eine gesunde und strahlende Haut haben möchtest. @Garnierdeutschland hat mit dem Vitamin C Glow Booster Nachtserum & Vitamin C Daily UV Invisible die perfekten Produkte, um dich dabei zu unterstützen. #garnierdeutschland #vitamincfluid #garnierskincare",
+            "createTime": 1716477248,
             "stats": {
-              "playCount": 37800,
-              "diggCount": 741,
-              "commentCount": 8,
-              "collectCount": 44,
-              "shareCount": 11
+              "playCount": 5900000,
+              "diggCount": 19500,
+              "commentCount": 151,
+              "collectCount": 6705,
+              "shareCount": 1244
             },
             "author": {
-              "uniqueId": "adindaksa_makeup",
-              "nickname": "Adindaksa Makeup",
-              "secUid": "MS4wLjABAAAATN_IzfCUll9wo1voubJjSbD9EOFOjmxxntwSUwvHBnerhX3NPm5iF4124ZrvnsRx"
+              "uniqueId": "liovegas",
+              "nickname": "Liandro",
+              "secUid": "MS4wLjABAAAAJcyjkGa6yLYa3_sJxZ2U4lgkA3QhU8Mv8eJo_eCtAyyn7sozSMdk7xCnOF_mlPYe"
             },
             "music": {
-              "title": "Mainan Gue",
-              "authorName": "Ana Luise Fernandes Lima Miranda",
-              "original": false
+              "title": "Originalton",
+              "authorName": "Liandro",
+              "original": true
             },
             "video": {
-              "duration": 81,
-              "id": "7666341226353888530"
+              "duration": 18,
+              "id": "7372213607905479969"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
-            "isAd": false,
+            "isAd": true,
             "challenges": [
               {
-                "title": "otwooid"
+                "title": "garnierdeutschland"
               },
               {
-                "title": "otwooprimer"
+                "title": "vitamincfluid"
               },
               {
-                "title": "naykilla"
-              },
-              {
-                "title": "transisimakeup"
-              },
-              {
-                "title": "makeupnaykilla"
+                "title": "garnierskincare"
               }
             ],
             "textExtra": [
@@ -4618,19 +5192,13 @@
                 "hashtagName": ""
               },
               {
-                "hashtagName": "otwooid"
+                "hashtagName": "garnierdeutschland"
               },
               {
-                "hashtagName": "otwooprimer"
+                "hashtagName": "vitamincfluid"
               },
               {
-                "hashtagName": "naykilla"
-              },
-              {
-                "hashtagName": "transisimakeup"
-              },
-              {
-                "hashtagName": "makeupnaykilla"
+                "hashtagName": "garnierskincare"
               }
             ]
           }
@@ -4671,6 +5239,69 @@
             "textExtra": []
           },
           {
+            "id": "7634821950631595295",
+            "desc": "The bed reacts like something invisible is there #sleep #fyppp #foryoupage #mysteryvideo #scarymoment ",
+            "createTime": 1777620577,
+            "stats": {
+              "playCount": 68600,
+              "diggCount": 256,
+              "commentCount": 6,
+              "collectCount": 50,
+              "shareCount": 19
+            },
+            "author": {
+              "uniqueId": "rongjiangbai586658",
+              "nickname": "rongjiangbai586658",
+              "secUid": "MS4wLjABAAAAE7s1p4KHaFyTsGtsurdp7O4aDWwaOfqDYI855gYdzaxyJV7EW0Ch78xTKXp8eEoL"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "rongjiangbai586658",
+              "original": true
+            },
+            "video": {
+              "duration": 6,
+              "id": "7634821950631595295"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "sleep"
+              },
+              {
+                "title": "fyppp"
+              },
+              {
+                "title": "foryoupage"
+              },
+              {
+                "title": "mysteryvideo"
+              },
+              {
+                "title": "scarymoment"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "sleep"
+              },
+              {
+                "hashtagName": "fyppp"
+              },
+              {
+                "hashtagName": "foryoupage"
+              },
+              {
+                "hashtagName": "mysteryvideo"
+              },
+              {
+                "hashtagName": "scarymoment"
+              }
+            ]
+          },
+          {
             "id": "7631175764947291422",
             "desc": "Guys am I mysterious now? #fyp #invisible #username #mysterious",
             "createTime": 1776771610,
@@ -4683,7 +5314,7 @@
             },
             "author": {
               "uniqueId": "vampievae",
-              "nickname": "vampievae",
+              "nickname": "𝒱𝒶𝓂𝓅𝒾𝑒 𝒱𝒶𝑒",
               "secUid": "MS4wLjABAAAAFwu2Kv6t25s34D_mniKsQ73VGqcRNpasgQLPWdHnFiaI5UnqFFo2QPwn141ihQqY"
             },
             "music": {
@@ -4728,72 +5359,6 @@
             ]
           },
           {
-            "id": "7666396163137867030",
-            "desc": "white cast?? In this day and age?? NEVER happening to me because I'm using this invisible SPF from @Beauty of Joseon . Casper Summer is cancelled! ✨✨ Available at Amazon UK ♥️ #AD #Sunscreen #SPF #BaseMakeup #MakeupTips",
-            "createTime": 1784971959,
-            "stats": {
-              "playCount": 89600,
-              "diggCount": 5432,
-              "commentCount": 11,
-              "collectCount": 986,
-              "shareCount": 63
-            },
-            "author": {
-              "uniqueId": "ohwowitsjenny",
-              "nickname": "💙Jenny | UK Beauty Creator♥️",
-              "secUid": "MS4wLjABAAAAx7HlwemJaNYdwfhxFW-ePjiP1HkdgnodXHrRi-33YFmLTkTrCiTxjQHNlqF5SsS_"
-            },
-            "music": {
-              "title": "PIMBA PIMBA",
-              "authorName": "RezaDead & TAKNAM & Phonk King",
-              "original": false
-            },
-            "video": {
-              "duration": 19,
-              "id": "7666396163137867030"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": true,
-            "challenges": [
-              {
-                "title": "ad"
-              },
-              {
-                "title": "sunscreen"
-              },
-              {
-                "title": "spf"
-              },
-              {
-                "title": "basemakeup"
-              },
-              {
-                "title": "makeuptips"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": ""
-              },
-              {
-                "hashtagName": "ad"
-              },
-              {
-                "hashtagName": "sunscreen"
-              },
-              {
-                "hashtagName": "spf"
-              },
-              {
-                "hashtagName": "basemakeup"
-              },
-              {
-                "hashtagName": "makeuptips"
-              }
-            ]
-          },
-          {
             "id": "7526550385071279367",
             "desc": "Saturdays are meant for Royal palace Bukhari restaurant, Half chicken barbeque with potato wedges or fries and afresh green salad for 25 QR hii utapasuka tummy👌👌 served by akenyan nomareeee 🙏🙏🙏",
             "createTime": 1752411575,
@@ -4829,11 +5394,11 @@
             "desc": "how to do invisible Comment really tutorial 🤔🤬 part 3 🤬 #tiktokgrowthchallenge #foryoupage #edits #blankcomment #sigma ",
             "createTime": 1784861698,
             "stats": {
-              "playCount": 29500,
-              "diggCount": 1166,
-              "commentCount": 2306,
-              "collectCount": 956,
-              "shareCount": 459
+              "playCount": 30000,
+              "diggCount": 1197,
+              "commentCount": 2354,
+              "collectCount": 981,
+              "shareCount": 470
             },
             "author": {
               "uniqueId": "sigma_queen507",
@@ -4888,45 +5453,14 @@
             ]
           },
           {
-            "id": "7482587749472537899",
-            "desc": "Invisible title cards go hard ",
-            "createTime": 1742175743,
-            "stats": {
-              "playCount": 3684,
-              "diggCount": 38,
-              "commentCount": 0,
-              "collectCount": 8,
-              "shareCount": 8
-            },
-            "author": {
-              "uniqueId": "nomadj99",
-              "nickname": "nomadj99",
-              "secUid": "MS4wLjABAAAAJwvzQY4mCtVWkiPJ2_L7BPKtqgTtWeVIz5ZEhlLmGT2NbztXKlYaRyUdX48NOvtn"
-            },
-            "music": {
-              "title": "original sound",
-              "authorName": "nomadj99",
-              "original": true
-            },
-            "video": {
-              "duration": 58,
-              "id": "7482587749472537899"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [],
-            "textExtra": []
-          },
-          {
             "id": "7657191997538798869",
             "desc": "#invisibleusername #ifykyk ",
             "createTime": 1782828947,
             "stats": {
-              "playCount": 382800,
+              "playCount": 382900,
               "diggCount": 39000,
               "commentCount": 615,
-              "collectCount": 2764,
+              "collectCount": 2766,
               "shareCount": 490
             },
             "author": {
@@ -4964,12 +5498,106 @@
             ]
           },
           {
+            "id": "7482587749472537899",
+            "desc": "Invisible title cards go hard ",
+            "createTime": 1742175743,
+            "stats": {
+              "playCount": 3684,
+              "diggCount": 38,
+              "commentCount": 0,
+              "collectCount": 8,
+              "shareCount": 8
+            },
+            "author": {
+              "uniqueId": "nomadj99",
+              "nickname": "nomadj99",
+              "secUid": "MS4wLjABAAAAJwvzQY4mCtVWkiPJ2_L7BPKtqgTtWeVIz5ZEhlLmGT2NbztXKlYaRyUdX48NOvtn"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "nomadj99",
+              "original": true
+            },
+            "video": {
+              "duration": 58,
+              "id": "7482587749472537899"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7665569197568675086",
+            "desc": "Invisible comment tutorial wait for last twist 🤯🤯🤔🤔🤔 #Trollface #edits #viral #foryoupage #tiktokgrowthchallenge ",
+            "createTime": 1784779439,
+            "stats": {
+              "playCount": 2002,
+              "diggCount": 82,
+              "commentCount": 230,
+              "collectCount": 60,
+              "shareCount": 15
+            },
+            "author": {
+              "uniqueId": "cake_sigma0",
+              "nickname": "🎂 sigma",
+              "secUid": "MS4wLjABAAAAIU8BQgTPhXkMsTCwcchOQzjVR2opTR2ab36lf6Kz-4hT41GmwNRnvDBegYXQF5cI"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "🎂 sigma",
+              "original": true
+            },
+            "video": {
+              "duration": 17,
+              "id": "7665569197568675086"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "trollface"
+              },
+              {
+                "title": "edits"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "foryoupage"
+              },
+              {
+                "title": "tiktokgrowthchallenge"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "trollface"
+              },
+              {
+                "hashtagName": "edits"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "foryoupage"
+              },
+              {
+                "hashtagName": "tiktokgrowthchallenge"
+              }
+            ]
+          },
+          {
             "id": "7652074913406176532",
             "desc": "#real #invisible #fyp ",
             "createTime": 1781637535,
             "stats": {
               "playCount": 54700,
-              "diggCount": 4511,
+              "diggCount": 4512,
               "commentCount": 115,
               "collectCount": 154,
               "shareCount": 133
@@ -5015,162 +5643,11 @@
             ]
           },
           {
-            "id": "7471417078117862662",
-            "desc": "Un coeur pour ta maman ",
-            "createTime": 1739574853,
-            "stats": {
-              "playCount": 720,
-              "diggCount": 53,
-              "commentCount": 3,
-              "collectCount": 5,
-              "shareCount": 0
-            },
-            "author": {
-              "uniqueId": "invisible.ad",
-              "nickname": "nostrapô🇲🇱🇲🇱🇲🇱",
-              "secUid": "MS4wLjABAAAAevSQafaXEzXtc0sH95k3CBewUzTpWFyL9ZPYsG4c7wyU7CdczwNm4d9AI5MRzxM6"
-            },
-            "music": {
-              "title": "son original",
-              "authorName": "CommedieptitMallé",
-              "original": true
-            },
-            "video": {
-              "duration": 18,
-              "id": "7471417078117862662"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [],
-            "textExtra": []
-          },
-          {
-            "id": "7661082868940049684",
-            "desc": "#boostthis #fypシ゚viral #invisible #blackpfp",
-            "createTime": 1783734860,
-            "stats": {
-              "playCount": 1700000,
-              "diggCount": 128900,
-              "commentCount": 8518,
-              "collectCount": 8204,
-              "shareCount": 6422
-            },
-            "author": {
-              "uniqueId": "whos_jary",
-              "nickname": "Unknown user :>",
-              "secUid": "MS4wLjABAAAAKlPFPRqgLgzX0HsfG5OS01j4Mrr2B4yNwL_wMEKLHCLRs70RAivJA3v2QHw_MRXz"
-            },
-            "music": {
-              "title": "Sagip (Hanggang Dulo)",
-              "authorName": "Jan Roberts",
-              "original": false
-            },
-            "video": {
-              "duration": 25,
-              "id": "7661082868940049684"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [
-              {
-                "title": "boostthis"
-              },
-              {
-                "title": "fypシ゚viral"
-              },
-              {
-                "title": "invisible"
-              },
-              {
-                "title": "blackpfp"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": "boostthis"
-              },
-              {
-                "hashtagName": "fypシ゚viral"
-              },
-              {
-                "hashtagName": "invisible"
-              },
-              {
-                "hashtagName": "blackpfp"
-              }
-            ]
-          },
-          {
-            "id": "7635102795422518558",
-            "desc": "Free edit #fy #fyp #edit #invincibleedit #invisible ",
-            "createTime": 1777685911,
-            "stats": {
-              "playCount": 5858,
-              "diggCount": 122,
-              "commentCount": 36,
-              "collectCount": 41,
-              "shareCount": 24
-            },
-            "author": {
-              "uniqueId": "speededitz11",
-              "nickname": "speededitz",
-              "secUid": "MS4wLjABAAAAkVBrPOqD9ekKBpevWMszjVJEsS-FFXnYGl2H39Cu0JgPpul97aLCAzi6fXIkp0KK"
-            },
-            "music": {
-              "title": "original sound",
-              "authorName": "speededitz",
-              "original": true
-            },
-            "video": {
-              "duration": 16,
-              "id": "7635102795422518558"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [
-              {
-                "title": "fy"
-              },
-              {
-                "title": "fyp"
-              },
-              {
-                "title": "edit"
-              },
-              {
-                "title": "invincibleedit"
-              },
-              {
-                "title": "invisible"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": "fy"
-              },
-              {
-                "hashtagName": "fyp"
-              },
-              {
-                "hashtagName": "edit"
-              },
-              {
-                "hashtagName": "invincibleedit"
-              },
-              {
-                "hashtagName": "invisible"
-              }
-            ]
-          },
-          {
             "id": "7665482174019226888",
             "desc": "invisible name  #fyp #makeitviral #viral #fyyyyyyyyyyyyyyyy #fyppppppppppppppppppppppp ",
             "createTime": 1784759161,
             "stats": {
-              "playCount": 1745,
+              "playCount": 1750,
               "diggCount": 16,
               "commentCount": 2,
               "collectCount": 5,
@@ -5227,36 +5704,31 @@
                 "hashtagName": "fyppppppppppppppppppppppp"
               }
             ]
-          }
-        ]
-      },
-      {
-        "query": "invisibleads",
-        "items": [
+          },
           {
-            "id": "7630537825309543687",
-            "desc": "",
-            "createTime": 1776623041,
+            "id": "7471417078117862662",
+            "desc": "Un coeur pour ta maman ",
+            "createTime": 1739574853,
             "stats": {
-              "playCount": 6919,
-              "diggCount": 37,
-              "commentCount": 5,
+              "playCount": 720,
+              "diggCount": 53,
+              "commentCount": 3,
               "collectCount": 5,
-              "shareCount": 39
+              "shareCount": 0
             },
             "author": {
-              "uniqueId": "invisible.ads",
-              "nickname": "invisible.ads",
-              "secUid": "MS4wLjABAAAAYRDLAYs4eGcJwc-rBAMYHEgACMxa6yILv1W_r6OEuAu_vzjQDbhnmS0WvClZg19p"
+              "uniqueId": "invisible.ad",
+              "nickname": "nostrapô🇲🇱🇲🇱🇲🇱",
+              "secUid": "MS4wLjABAAAAevSQafaXEzXtc0sH95k3CBewUzTpWFyL9ZPYsG4c7wyU7CdczwNm4d9AI5MRzxM6"
             },
             "music": {
-              "title": "original sound",
-              "authorName": "invisible.ads",
+              "title": "son original",
+              "authorName": "CommedieptitMallé",
               "original": true
             },
             "video": {
-              "duration": 12,
-              "id": "7630537825309543687"
+              "duration": 18,
+              "id": "7471417078117862662"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
@@ -5264,6 +5736,42 @@
             "challenges": [],
             "textExtra": []
           },
+          {
+            "id": "7652546341448568095",
+            "desc": "",
+            "createTime": 1781747311,
+            "stats": {
+              "playCount": 26100,
+              "diggCount": 5952,
+              "commentCount": 7,
+              "collectCount": 512,
+              "shareCount": 266
+            },
+            "author": {
+              "uniqueId": ".08.17.07",
+              "nickname": "invisible.",
+              "secUid": "MS4wLjABAAAArXGlaiNShNrx4Gg8j1aZPcXzVgHcySEquvugZGX-muijfz7OipwBOXmUR5Czx1R4"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "user5000654334567",
+              "original": true
+            },
+            "video": {
+              "duration": 10,
+              "id": "7652546341448568095"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          }
+        ]
+      },
+      {
+        "query": "invisibleads",
+        "items": [
           {
             "id": "7603129525102300438",
             "desc": "Safe ads = INVISIBLE ads 💀 Here's the brutal truth most marketers won't tell you: playing it safe means NO strong opinions, NO memorable message, and NO loyal audience. Your competitors blend in. You need to stand OUT. The brands winning right now? They have BOLD messaging and aren't afraid to take a stand. Stop worrying about offending everyone and start building a tribe that actually cares. Are you playing it too safe? Let me know in the comments! ⬇️ 👉 SMASH that LIKE if you're done being invisible  💬 COMMENT \"BOLD\" if you're ready to stand for something 🔔 FOLLOW for marketing strategies that actually work #ads #marketingtips #digitalmarketing #advertisingtips #brandingstrategy #marketingstrategy  #standout #businessgrowth #entrepreneur #socialmediamarketing #contentmarketing #marketingtips #branding #controversial #viralmarketing #fyp #foryoupage❤️❤️ #foryoupage #trending #business #growthhacking #entrepreneurship #smallbusiness #startup #marketingadvice #2026  #viral #businessowner",
@@ -5463,6 +5971,37 @@
             ]
           },
           {
+            "id": "7630537825309543687",
+            "desc": "",
+            "createTime": 1776623041,
+            "stats": {
+              "playCount": 6919,
+              "diggCount": 37,
+              "commentCount": 5,
+              "collectCount": 5,
+              "shareCount": 39
+            },
+            "author": {
+              "uniqueId": "invisible.ads",
+              "nickname": "invisible.ads",
+              "secUid": "MS4wLjABAAAAYRDLAYs4eGcJwc-rBAMYHEgACMxa6yILv1W_r6OEuAu_vzjQDbhnmS0WvClZg19p"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "invisible.ads",
+              "original": true
+            },
+            "video": {
+              "duration": 12,
+              "id": "7630537825309543687"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
             "id": "7516538464687475990",
             "desc": "I hate invisible ads ",
             "createTime": 1750080496,
@@ -5588,94 +6127,6 @@
             "textExtra": []
           },
           {
-            "id": "7535438929839901959",
-            "desc": "How to make sure ads will never appear on device  #creatorsearchinsights #tip #viphamidu1163 #rohingya ",
-            "createTime": 1754481100,
-            "stats": {
-              "playCount": 8876,
-              "diggCount": 237,
-              "commentCount": 10,
-              "collectCount": 50,
-              "shareCount": 34
-            },
-            "author": {
-              "uniqueId": "viphamidu1163",
-              "nickname": "حميد اركانى",
-              "secUid": "MS4wLjABAAAAAnjDloWOHmhrVpMr_JbFz3_G3Mx25PfrT7wgo8b9ZH3dqEjpmkIHgBpvHTYmfcJ3"
-            },
-            "music": {
-              "title": "original sound - حافظ 🔸 حميدالرحمن",
-              "authorName": "حميد اركانى",
-              "original": true
-            },
-            "video": {
-              "duration": 69,
-              "id": "7535438929839901959"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [
-              {
-                "title": "creatorsearchinsights"
-              },
-              {
-                "title": "tip"
-              },
-              {
-                "title": "viphamidu1163"
-              },
-              {
-                "title": "rohingya"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": "creatorsearchinsights"
-              },
-              {
-                "hashtagName": "tip"
-              },
-              {
-                "hashtagName": "viphamidu1163"
-              },
-              {
-                "hashtagName": "rohingya"
-              }
-            ]
-          },
-          {
-            "id": "7542786285975424269",
-            "desc": "Invisible transparent technology great idea for advertising ",
-            "createTime": 1756191863,
-            "stats": {
-              "playCount": 1603,
-              "diggCount": 3,
-              "commentCount": 0,
-              "collectCount": 0,
-              "shareCount": 0
-            },
-            "author": {
-              "uniqueId": "ledtransparentscreen",
-              "nickname": "ledtransparentscreen",
-              "secUid": "MS4wLjABAAAApHyjwzcFz788PC1LBijjPk9sECNp0i3H2LldEH9_GOi1u8LJ9qtiGNk-YXEcnELV"
-            },
-            "music": {
-              "title": "LOOK AT THIS",
-              "authorName": "Astro Boyke",
-              "original": false
-            },
-            "video": {
-              "duration": 24,
-              "id": "7542786285975424269"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [],
-            "textExtra": []
-          },
-          {
             "id": "7486632910313753887",
             "desc": "Yes these are CIA documents that were exposed #exposed #fyp #tiktok #viral #ads ",
             "createTime": 1743117571,
@@ -5739,59 +6190,59 @@
             ]
           },
           {
-            "id": "6873853259317120262",
-            "desc": "If Chevy commercials were real life - Invisible Trailer pt. 2 #chevy #mahk #zebracorner #fyp",
-            "createTime": 1600443694,
+            "id": "7535438929839901959",
+            "desc": "How to make sure ads will never appear on device  #creatorsearchinsights #tip #viphamidu1163 #rohingya ",
+            "createTime": 1754481100,
             "stats": {
-              "playCount": 2100000,
-              "diggCount": 340300,
-              "commentCount": 632,
-              "collectCount": 16400,
-              "shareCount": 16100
+              "playCount": 8876,
+              "diggCount": 237,
+              "commentCount": 10,
+              "collectCount": 50,
+              "shareCount": 34
             },
             "author": {
-              "uniqueId": "alidoesvideo",
-              "nickname": "Alidoesvideo",
-              "secUid": "MS4wLjABAAAAnsBVMGsPBs703rHJXn46fp7u0vK-S1ZkFw-wcu9EE7rJFMMXgbbdbBmtbkTp0y-j"
+              "uniqueId": "viphamidu1163",
+              "nickname": "حميد اركانى",
+              "secUid": "MS4wLjABAAAAAnjDloWOHmhrVpMr_JbFz3_G3Mx25PfrT7wgo8b9ZH3dqEjpmkIHgBpvHTYmfcJ3"
             },
             "music": {
-              "title": "original sound",
-              "authorName": "Alidoesvideo",
+              "title": "original sound - حافظ 🔸 حميدالرحمن",
+              "authorName": "حميد اركانى",
               "original": true
             },
             "video": {
-              "duration": 58,
-              "id": "6873853259317120262"
+              "duration": 69,
+              "id": "7535438929839901959"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
             "isAd": false,
             "challenges": [
               {
-                "title": "chevy"
+                "title": "creatorsearchinsights"
               },
               {
-                "title": "mahk"
+                "title": "tip"
               },
               {
-                "title": "zebracorner"
+                "title": "viphamidu1163"
               },
               {
-                "title": "fyp"
+                "title": "rohingya"
               }
             ],
             "textExtra": [
               {
-                "hashtagName": "chevy"
+                "hashtagName": "creatorsearchinsights"
               },
               {
-                "hashtagName": "mahk"
+                "hashtagName": "tip"
               },
               {
-                "hashtagName": "zebracorner"
+                "hashtagName": "viphamidu1163"
               },
               {
-                "hashtagName": "fyp"
+                "hashtagName": "rohingya"
               }
             ]
           },
@@ -5898,11 +6349,42 @@
             ]
           },
           {
+            "id": "7542786285975424269",
+            "desc": "Invisible transparent technology great idea for advertising ",
+            "createTime": 1756191863,
+            "stats": {
+              "playCount": 1603,
+              "diggCount": 3,
+              "commentCount": 0,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "ledtransparentscreen",
+              "nickname": "ledtransparentscreen",
+              "secUid": "MS4wLjABAAAApHyjwzcFz788PC1LBijjPk9sECNp0i3H2LldEH9_GOi1u8LJ9qtiGNk-YXEcnELV"
+            },
+            "music": {
+              "title": "LOOK AT THIS",
+              "authorName": "Astro Boyke",
+              "original": false
+            },
+            "video": {
+              "duration": 24,
+              "id": "7542786285975424269"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
             "id": "7624588089473649928",
             "desc": "invisible",
             "createTime": 1775237757,
             "stats": {
-              "playCount": 1912,
+              "playCount": 1914,
               "diggCount": 31,
               "commentCount": 4,
               "collectCount": 6,
@@ -5929,14 +6411,71 @@
             "textExtra": []
           },
           {
+            "id": "6873853259317120262",
+            "desc": "If Chevy commercials were real life - Invisible Trailer pt. 2 #chevy #mahk #zebracorner #fyp",
+            "createTime": 1600443694,
+            "stats": {
+              "playCount": 2100000,
+              "diggCount": 340300,
+              "commentCount": 632,
+              "collectCount": 16400,
+              "shareCount": 16100
+            },
+            "author": {
+              "uniqueId": "alidoesvideo",
+              "nickname": "Alidoesvideo",
+              "secUid": "MS4wLjABAAAAnsBVMGsPBs703rHJXn46fp7u0vK-S1ZkFw-wcu9EE7rJFMMXgbbdbBmtbkTp0y-j"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Alidoesvideo",
+              "original": true
+            },
+            "video": {
+              "duration": 58,
+              "id": "6873853259317120262"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "chevy"
+              },
+              {
+                "title": "mahk"
+              },
+              {
+                "title": "zebracorner"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "chevy"
+              },
+              {
+                "hashtagName": "mahk"
+              },
+              {
+                "hashtagName": "zebracorner"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
             "id": "7666396163137867030",
             "desc": "white cast?? In this day and age?? NEVER happening to me because I'm using this invisible SPF from @Beauty of Joseon . Casper Summer is cancelled! ✨✨ Available at Amazon UK ♥️ #AD #Sunscreen #SPF #BaseMakeup #MakeupTips",
             "createTime": 1784971959,
             "stats": {
-              "playCount": 89600,
-              "diggCount": 5432,
+              "playCount": 92400,
+              "diggCount": 5591,
               "commentCount": 11,
-              "collectCount": 986,
+              "collectCount": 1020,
               "shareCount": 63
             },
             "author": {
@@ -5993,49 +6532,184 @@
                 "hashtagName": "makeuptips"
               }
             ]
-          }
-        ]
-      },
-      {
-        "query": "@invisibleads",
-        "items": [
+          },
           {
-            "id": "7630537825309543687",
-            "desc": "",
-            "createTime": 1776623041,
+            "id": "7633633674356952350",
+            "desc": "Holographic Invisible LED Screen – The future of advertising!    #HolographicScreen * #InvisibleLED * #LEDDisplay * #HolographicLED * #InvisibleScreen",
+            "createTime": 1777343863,
             "stats": {
-              "playCount": 6919,
-              "diggCount": 37,
-              "commentCount": 5,
-              "collectCount": 5,
-              "shareCount": 39
+              "playCount": 231,
+              "diggCount": 5,
+              "commentCount": 0,
+              "collectCount": 1,
+              "shareCount": 0
             },
             "author": {
-              "uniqueId": "invisible.ads",
-              "nickname": "invisible.ads",
-              "secUid": "MS4wLjABAAAAYRDLAYs4eGcJwc-rBAMYHEgACMxa6yILv1W_r6OEuAu_vzjQDbhnmS0WvClZg19p"
+              "uniqueId": "chenhan087",
+              "nickname": "Muyi-LED display",
+              "secUid": "MS4wLjABAAAA1XC0JOCK4K9rLDRGc6eN_SL_8H9T4-vRoUO5sG9xHVXBGMAoS5Yc61i-surxIGiR"
             },
             "music": {
               "title": "original sound",
-              "authorName": "invisible.ads",
+              "authorName": "Muyi-LED display",
               "original": true
             },
             "video": {
               "duration": 12,
-              "id": "7630537825309543687"
+              "id": "7633633674356952350"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
             "isAd": false,
-            "challenges": [],
-            "textExtra": []
+            "challenges": [
+              {
+                "title": "holographicscreen"
+              },
+              {
+                "title": "invisibleled"
+              },
+              {
+                "title": "leddisplay"
+              },
+              {
+                "title": "holographicled"
+              },
+              {
+                "title": "invisiblescreen"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "holographicscreen"
+              },
+              {
+                "hashtagName": "invisibleled"
+              },
+              {
+                "hashtagName": "leddisplay"
+              },
+              {
+                "hashtagName": "holographicled"
+              },
+              {
+                "hashtagName": "invisiblescreen"
+              }
+            ]
+          },
+          {
+            "id": "7650191659623402782",
+            "desc": "Stop using boring old posters. This invisible LED film sticks right onto your glass window. It doesn’t block the sunlight, but it displays high-definition, floating 3D ads that guarantee foot traffic. Upgrade your business to 2026! 🚀#TechDesign #TransparentLED #display #Led ",
+            "createTime": 1781199060,
+            "stats": {
+              "playCount": 171,
+              "diggCount": 0,
+              "commentCount": 0,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "k1.visual.solutions",
+              "nickname": "k1.visual.solutions",
+              "secUid": "MS4wLjABAAAAKtAORvecf8IAWPhr7-WX2wWsRgjcXUzADgYxgvtVbWuw5mjE7m2I4fM0M4DJW-cB"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "𝓗𝓮𝓷𝓸𝓴_𝓛𝓸𝓿𝓮🇺🇸💫",
+              "original": true
+            },
+            "video": {
+              "duration": 9,
+              "id": "7650191659623402782"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "techdesign"
+              },
+              {
+                "title": "transparentled"
+              },
+              {
+                "title": "display"
+              },
+              {
+                "title": "led"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "techdesign"
+              },
+              {
+                "hashtagName": "transparentled"
+              },
+              {
+                "hashtagName": "display"
+              },
+              {
+                "hashtagName": "led"
+              }
+            ]
+          },
+          {
+            "id": "7541310043715554615",
+            "desc": "Revolutionize Your Storefront Boost Foot Traffic with Stunning Transparent LED Window Ads!#supermarket #LED #AdvertisementEquipment ",
+            "createTime": 1755848088,
+            "stats": {
+              "playCount": 416,
+              "diggCount": 2,
+              "commentCount": 0,
+              "collectCount": 1,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "highbright_",
+              "nickname": "highbright",
+              "secUid": "MS4wLjABAAAAILhwKE-ZFLI3i2OyZmlLUi8y64MVevDf3OWtyH3X_vpCrawoeBWbEy3_nW7-xlDg"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "highbright",
+              "original": true
+            },
+            "video": {
+              "duration": 45,
+              "id": "7541310043715554615"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "supermarket"
+              },
+              {
+                "title": "led"
+              },
+              {
+                "title": "advertisementequipment"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "supermarket"
+              },
+              {
+                "hashtagName": "led"
+              },
+              {
+                "hashtagName": "advertisementequipment"
+              }
+            ]
           },
           {
             "id": "7642188312353983764",
             "desc": "invisible edit   her myself. edit 😃😃😃",
             "createTime": 1779335632,
             "stats": {
-              "playCount": 1564,
+              "playCount": 1571,
               "diggCount": 17,
               "commentCount": 10,
               "collectCount": 9,
@@ -6054,37 +6728,6 @@
             "video": {
               "duration": 21,
               "id": "7642188312353983764"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [],
-            "textExtra": []
-          },
-          {
-            "id": "7471417078117862662",
-            "desc": "Un coeur pour ta maman ",
-            "createTime": 1739574853,
-            "stats": {
-              "playCount": 720,
-              "diggCount": 53,
-              "commentCount": 3,
-              "collectCount": 5,
-              "shareCount": 0
-            },
-            "author": {
-              "uniqueId": "invisible.ad",
-              "nickname": "nostrapô🇲🇱🇲🇱🇲🇱",
-              "secUid": "MS4wLjABAAAAevSQafaXEzXtc0sH95k3CBewUzTpWFyL9ZPYsG4c7wyU7CdczwNm4d9AI5MRzxM6"
-            },
-            "music": {
-              "title": "son original",
-              "authorName": "CommedieptitMallé",
-              "original": true
-            },
-            "video": {
-              "duration": 18,
-              "id": "7471417078117862662"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
@@ -6124,14 +6767,179 @@
             "textExtra": []
           },
           {
+            "id": "7356635139042069765",
+            "desc": "Methode to Hide your ads on facebook adlibrary اخفاء اشهارات الفيسبوك ادس. #ecommerce #advertising #التجارة_الالكترونية#cod ",
+            "createTime": 1712850097,
+            "stats": {
+              "playCount": 16700,
+              "diggCount": 547,
+              "commentCount": 12,
+              "collectCount": 692,
+              "shareCount": 82
+            },
+            "author": {
+              "uniqueId": "a_brht",
+              "nickname": "BRHT",
+              "secUid": "MS4wLjABAAAAeUhxYn2cLwPz-4lE9WAKcIHp03Vxl22XY-h4aExmc0Z4SFX_t3z3HWPC7FRyzH3d"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "BRHT",
+              "original": true
+            },
+            "video": {
+              "duration": 57,
+              "id": "7356635139042069765"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ecommerce"
+              },
+              {
+                "title": "advertising"
+              },
+              {
+                "title": "التجارة_الالكترونية"
+              },
+              {
+                "title": "cod"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "ecommerce"
+              },
+              {
+                "hashtagName": "advertising"
+              },
+              {
+                "hashtagName": "التجارة_الالكترونية"
+              },
+              {
+                "hashtagName": "cod"
+              }
+            ]
+          },
+          {
+            "id": "7657191997538798869",
+            "desc": "#invisibleusername #ifykyk ",
+            "createTime": 1782828947,
+            "stats": {
+              "playCount": 382900,
+              "diggCount": 39000,
+              "commentCount": 615,
+              "collectCount": 2766,
+              "shareCount": 490
+            },
+            "author": {
+              "uniqueId": "ssppammskii",
+              "nickname": "￴ ￴ ￴ ￴ ￴ ￴ ￴ ￴ ￴ ￴",
+              "secUid": "MS4wLjABAAAAwZXLpu7q2RCub-F9uXYDjy9wDUQDIR4vPZ-WG9l2_ig77OB620Tv96FjMw9e1ryr"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "akshay iyer",
+              "original": true
+            },
+            "video": {
+              "duration": 10,
+              "id": "7657191997538798869"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisibleusername"
+              },
+              {
+                "title": "ifykyk"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "invisibleusername"
+              },
+              {
+                "hashtagName": "ifykyk"
+              }
+            ]
+          },
+          {
+            "id": "7643756580797762824",
+            "desc": "The Invisible LED Screen That#DigitalDisplay  #CommercialDisplay  #SmartScreen  #AdPlayer  #leddisplay  Sticks Directly On Glass ✨",
+            "createTime": 1779700769,
+            "stats": {
+              "playCount": 342,
+              "diggCount": 7,
+              "commentCount": 0,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "bake18185mg",
+              "nickname": "Bake_LED_Display",
+              "secUid": "MS4wLjABAAAAf5KNv5XTFIGDX_i_SrxmHFRDeJ8tEwIztVAMuMrhoiHmQ00M__pwUG5c6e83RwU7"
+            },
+            "music": {
+              "title": "bunyi asal",
+              "authorName": "Bake_LED_Display",
+              "original": true
+            },
+            "video": {
+              "duration": 24,
+              "id": "7643756580797762824"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "digitaldisplay"
+              },
+              {
+                "title": "commercialdisplay"
+              },
+              {
+                "title": "smartscreen"
+              },
+              {
+                "title": "adplayer"
+              },
+              {
+                "title": "leddisplay"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "digitaldisplay"
+              },
+              {
+                "hashtagName": "commercialdisplay"
+              },
+              {
+                "hashtagName": "smartscreen"
+              },
+              {
+                "hashtagName": "adplayer"
+              },
+              {
+                "hashtagName": "leddisplay"
+              }
+            ]
+          },
+          {
             "id": "7605441948228373781",
             "desc": "Invisible thread reel, magician props #magic #invisiblethread #levitation #tutorial #fyp ",
             "createTime": 1770779951,
             "stats": {
-              "playCount": 250500,
-              "diggCount": 2814,
+              "playCount": 250600,
+              "diggCount": 2816,
               "commentCount": 89,
-              "collectCount": 892,
+              "collectCount": 894,
               "shareCount": 145
             },
             "author": {
@@ -6187,15 +6995,856 @@
             ]
           },
           {
+            "id": "7521857694676929806",
+            "desc": "Most brands are invisible to AI and here’s how you can fix that for your brand #brandfounder #pr #marketing #brandstrategy #entrepreneur #founder #brandmarketing ",
+            "createTime": 1751319012,
+            "stats": {
+              "playCount": 674,
+              "diggCount": 45,
+              "commentCount": 2,
+              "collectCount": 14,
+              "shareCount": 6
+            },
+            "author": {
+              "uniqueId": "emmarosegreis",
+              "nickname": "Emma Rose Greis",
+              "secUid": "MS4wLjABAAAA8wbFokvxzOJFYYG3NoA6VF3yOKUGKWtGoADzfviIapWRTE7IsgmyVRGqA2ABnjra"
+            },
+            "music": {
+              "title": "Walking Around - Instrumental Version",
+              "authorName": "Eldar Kedem",
+              "original": false
+            },
+            "video": {
+              "duration": 59,
+              "id": "7521857694676929806"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "brandfounder"
+              },
+              {
+                "title": "pr"
+              },
+              {
+                "title": "marketing"
+              },
+              {
+                "title": "brandstrategy"
+              },
+              {
+                "title": "entrepreneur"
+              },
+              {
+                "title": "founder"
+              },
+              {
+                "title": "brandmarketing"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "brandfounder"
+              },
+              {
+                "hashtagName": "pr"
+              },
+              {
+                "hashtagName": "marketing"
+              },
+              {
+                "hashtagName": "brandstrategy"
+              },
+              {
+                "hashtagName": "entrepreneur"
+              },
+              {
+                "hashtagName": "founder"
+              },
+              {
+                "hashtagName": "brandmarketing"
+              }
+            ]
+          },
+          {
+            "id": "7286826491126533409",
+            "desc": "#Heinz #Ketchup #Advert #2009 #2000s #00s",
+            "createTime": 1696596508,
+            "stats": {
+              "playCount": 33000,
+              "diggCount": 523,
+              "commentCount": 11,
+              "collectCount": 57,
+              "shareCount": 21
+            },
+            "author": {
+              "uniqueId": "oldskoolcjfs",
+              "nickname": "Old Skool CJFS",
+              "secUid": "MS4wLjABAAAAeNxcC3ocuTw5CdVOBPxoV6YaOQ2YJ7k_28jqZi5mRuvnGbCMi56HBt8ASdNMWylk"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Old Skool CJFS",
+              "original": true
+            },
+            "video": {
+              "duration": 29,
+              "id": "7286826491126533409"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "heinz"
+              },
+              {
+                "title": "ketchup"
+              },
+              {
+                "title": "advert"
+              },
+              {
+                "title": "2009"
+              },
+              {
+                "title": "2000s"
+              },
+              {
+                "title": "00s"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "heinz"
+              },
+              {
+                "hashtagName": "ketchup"
+              },
+              {
+                "hashtagName": "advert"
+              },
+              {
+                "hashtagName": "2009"
+              },
+              {
+                "hashtagName": "2000s"
+              },
+              {
+                "hashtagName": "00s"
+              }
+            ]
+          },
+          {
+            "id": "7542314863972928775",
+            "desc": "invisible [NCS Release] 151M Views  #fyp #edm ##ncs #music #nostalgic ",
+            "createTime": 1756082032,
+            "stats": {
+              "playCount": 5537,
+              "diggCount": 121,
+              "commentCount": 11,
+              "collectCount": 52,
+              "shareCount": 22
+            },
+            "author": {
+              "uniqueId": "the_firefly07",
+              "nickname": "𝙏-𝙁𝙄𝙍𝙀𝙁𝙇𝙔",
+              "secUid": "MS4wLjABAAAAoV1H6vu1Ap23Nsm4sryfcsZHnBV9HLrJ0l2BC-BnoqX4qZWw9LXMjL9-l8nNh3OJ"
+            },
+            "music": {
+              "title": "Invisible",
+              "authorName": "Julius Dreisig & Zeus X Crona",
+              "original": false
+            },
+            "video": {
+              "duration": 201,
+              "id": "7542314863972928775"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "edm"
+              },
+              {
+                "title": "ncs"
+              },
+              {
+                "title": "music"
+              },
+              {
+                "title": "nostalgic"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "edm"
+              },
+              {
+                "hashtagName": "ncs"
+              },
+              {
+                "hashtagName": "music"
+              },
+              {
+                "hashtagName": "nostalgic"
+              }
+            ]
+          },
+          {
+            "id": "7596725702867701014",
+            "desc": "edit my favorite options || invisible edit || New cc || overdid it with the blur #invisibleedit #fyp #edit #invisible ",
+            "createTime": 1768750542,
+            "stats": {
+              "playCount": 12200,
+              "diggCount": 668,
+              "commentCount": 40,
+              "collectCount": 219,
+              "shareCount": 74
+            },
+            "author": {
+              "uniqueId": "maroz6752",
+              "nickname": "𝑴𝑨𝑹𝑶𝒁",
+              "secUid": "MS4wLjABAAAALkdep7YcruKOI2VY35LPaGNHEYrmfWZ006-OPt8JTswx0DJYIViUPDaojXcrlm5E"
+            },
+            "music": {
+              "title": "оригинальный звук",
+              "authorName": "𝑴𝑨𝑹𝑶𝒁",
+              "original": true
+            },
+            "video": {
+              "duration": 20,
+              "id": "7596725702867701014"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisibleedit"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "edit"
+              },
+              {
+                "title": "invisible"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "invisibleedit"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "edit"
+              },
+              {
+                "hashtagName": "invisible"
+              }
+            ]
+          },
+          {
+            "id": "6961852372993805574",
+            "desc": "You guys! I’m in an Invisalign commercial! I’m so grateful to have been apart of this! #Invisalign #invisalignsmile #ad",
+            "createTime": 1620932572,
+            "stats": {
+              "playCount": 61700,
+              "diggCount": 9072,
+              "commentCount": 108,
+              "collectCount": 218,
+              "shareCount": 120
+            },
+            "author": {
+              "uniqueId": "makayladid",
+              "nickname": "Makayla Did",
+              "secUid": "MS4wLjABAAAAXYklRiRPJODURiNsZkZYt9a4K7QNe6ohpVqTCS2yvMQ"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Makayla Did",
+              "original": true
+            },
+            "video": {
+              "duration": 16,
+              "id": "6961852372993805574"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisalign"
+              },
+              {
+                "title": "invisalignsmile"
+              },
+              {
+                "title": "ad"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "invisalign"
+              },
+              {
+                "hashtagName": "invisalignsmile"
+              },
+              {
+                "hashtagName": "ad"
+              }
+            ]
+          },
+          {
+            "id": "7593620824406379784",
+            "desc": "Da Za Yam Invisible Darenda…😱",
+            "createTime": 1768027631,
+            "stats": {
+              "playCount": 74100,
+              "diggCount": 5373,
+              "commentCount": 394,
+              "collectCount": 153,
+              "shareCount": 202
+            },
+            "author": {
+              "uniqueId": "mrinvisiblegaming",
+              "nickname": "Mr Invisible Gaming",
+              "secUid": "MS4wLjABAAAAPwUrJJwCQgMqNofj0AcIoQmLLXJFdpHCFE6lOmM1JPeDxSXevino-TENqaHFMwfb"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Mr Invisible Gaming",
+              "original": true
+            },
+            "video": {
+              "duration": 50,
+              "id": "7593620824406379784"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7531511040685673735",
+            "desc": "إيش المنتجات اللي تخافون لما ما تلقونها؟  الـ NIVEA Sun Invisible Daily Fluid حرفياً صار جزء مني - موجود في كل مكان معي! ✨ 💙@nivea_me #SimplyProtected #InvisibleBeautyShield AD",
+            "createTime": 1753566574,
+            "stats": {
+              "playCount": 5100000,
+              "diggCount": 12500,
+              "commentCount": 91,
+              "collectCount": 2036,
+              "shareCount": 498
+            },
+            "author": {
+              "uniqueId": "alanoudalfallaj",
+              "nickname": "Alanoud Alfallaj|العنود الفلاج",
+              "secUid": "MS4wLjABAAAAnNpu9TQpbuU4TmJySBM2X9CVd94Dqe8R-pfi-yHHN30o6l8xxiObygWyzEdqzloj"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Alanoud Alfallaj|العنود الفلاج",
+              "original": true
+            },
+            "video": {
+              "duration": 38,
+              "id": "7531511040685673735"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": true,
+            "challenges": [
+              {
+                "title": "simplyprotected"
+              },
+              {
+                "title": "invisiblebeautyshield"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "simplyprotected"
+              },
+              {
+                "hashtagName": "invisiblebeautyshield"
+              }
+            ]
+          },
+          {
+            "id": "7666334709542063391",
+            "desc": "I’m officially mysterious #invisibleusername #s#secretaccm#mysteriousf#fypv#viral",
+            "createTime": 1784957658,
+            "stats": {
+              "playCount": 645,
+              "diggCount": 31,
+              "commentCount": 2,
+              "collectCount": 5,
+              "shareCount": 1
+            },
+            "author": {
+              "uniqueId": "secret_126384739",
+              "nickname": "￴￴ ￴ ￴ ￴ ￴￴￴￴ ￴",
+              "secUid": "MS4wLjABAAAAWFckJ_GIt2jXzyiJRZd3OQ2xafwLmMoSTkdV4JTWLMK8E449km-24LWtpahGiJxw"
+            },
+            "music": {
+              "title": "think about you",
+              "authorName": "Zaliyah & asentencewithoutspaces",
+              "original": false
+            },
+            "video": {
+              "duration": 30,
+              "id": "7666334709542063391"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisibleusername"
+              },
+              {
+                "title": "secretacc"
+              },
+              {
+                "title": "mysterious"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "viral"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "invisibleusername"
+              },
+              {
+                "hashtagName": "secretacc"
+              },
+              {
+                "hashtagName": "mysterious"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "viral"
+              }
+            ]
+          },
+          {
+            "id": "7654543324786756894",
+            "desc": "#secretaccountlol #lazerdim700 #wockst★rz #fyppp #viraltiktok ",
+            "createTime": 1782212291,
+            "stats": {
+              "playCount": 2794,
+              "diggCount": 29,
+              "commentCount": 5,
+              "collectCount": 4,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "wokrituals6",
+              "nickname": "⃟",
+              "secUid": "MS4wLjABAAAACIhPXARUWhvub1cn4BIHw7mtHF9oNx5gOVwQapMlTVYwVHYK5Ipk5uXz1qog1o1_"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Tyra",
+              "original": true
+            },
+            "video": {
+              "duration": 7,
+              "id": "7654543324786756894"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "secretaccountlol"
+              },
+              {
+                "title": "lazerdim700"
+              },
+              {
+                "title": "wockst★rz"
+              },
+              {
+                "title": "fyppp"
+              },
+              {
+                "title": "viraltiktok"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "secretaccountlol"
+              },
+              {
+                "hashtagName": "lazerdim700"
+              },
+              {
+                "hashtagName": "wockst★rz"
+              },
+              {
+                "hashtagName": "fyppp"
+              },
+              {
+                "hashtagName": "viraltiktok"
+              }
+            ]
+          },
+          {
+            "id": "7563404428066180366",
+            "desc": "#billymayshere #invisible #infomercialparody #aicomedy #ButWaitTheresAI",
+            "createTime": 1760992350,
+            "stats": {
+              "playCount": 1252,
+              "diggCount": 27,
+              "commentCount": 2,
+              "collectCount": 7,
+              "shareCount": 9
+            },
+            "author": {
+              "uniqueId": "butwaittheresai",
+              "nickname": "butwaittheresai",
+              "secUid": "MS4wLjABAAAADDgLGK0j1lr67w5dxopJwHQ8avqOgzgr0zGHc6RBH22628oR3mj9hynMOGSr5z7X"
+            },
+            "music": {
+              "title": "Originalton",
+              "authorName": "user77461538293",
+              "original": true
+            },
+            "video": {
+              "duration": 10,
+              "id": "7563404428066180366"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "billymayshere"
+              },
+              {
+                "title": "invisible"
+              },
+              {
+                "title": "infomercialparody"
+              },
+              {
+                "title": "aicomedy"
+              },
+              {
+                "title": "butwaittheresai"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "billymayshere"
+              },
+              {
+                "hashtagName": "invisible"
+              },
+              {
+                "hashtagName": "infomercialparody"
+              },
+              {
+                "hashtagName": "aicomedy"
+              },
+              {
+                "hashtagName": "butwaittheresai"
+              }
+            ]
+          },
+          {
+            "id": "7542558090219064598",
+            "desc": "FE-invisible-script-showcase :D #scripts #showcases #script #showcase ",
+            "createTime": 1756138660,
+            "stats": {
+              "playCount": 122300,
+              "diggCount": 1424,
+              "commentCount": 299,
+              "collectCount": 771,
+              "shareCount": 92
+            },
+            "author": {
+              "uniqueId": "fe_scripts",
+              "nickname": "fe_scripts",
+              "secUid": "MS4wLjABAAAApQV0SljUFp4gxPuK53xbSM3RVV6xuoeq63-DerClF5odeY5JR8UdmQcl_BspZygc"
+            },
+            "music": {
+              "title": "beans",
+              "authorName": "yawn.",
+              "original": false
+            },
+            "video": {
+              "duration": 28,
+              "id": "7542558090219064598"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "scripts"
+              },
+              {
+                "title": "showcases"
+              },
+              {
+                "title": "script"
+              },
+              {
+                "title": "showcase"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "scripts"
+              },
+              {
+                "hashtagName": "showcases"
+              },
+              {
+                "hashtagName": "script"
+              },
+              {
+                "hashtagName": "showcase"
+              }
+            ]
+          },
+          {
+            "id": "7619192172314643726",
+            "desc": "My parents never let me get the extra gadgets when I was in school, but luckily my sisters are still kids so I can go to the fair with my own money and buy what I always wanted 😝😝 #fyp #bookfair #invisible #pen #justagirl ",
+            "createTime": 1773981446,
+            "stats": {
+              "playCount": 5123,
+              "diggCount": 225,
+              "commentCount": 3,
+              "collectCount": 9,
+              "shareCount": 2
+            },
+            "author": {
+              "uniqueId": "_arisoamazing",
+              "nickname": "Ari 🫶🏽",
+              "secUid": "MS4wLjABAAAAVuRzbZbVtDCmJmLNpLYvn8hC8yAfVsDo_Xa5aX64ZFWIqHfplZAfx7A9VA07BdB8"
+            },
+            "music": {
+              "title": "Sogni ancora",
+              "authorName": "Piero Piccioni",
+              "original": false
+            },
+            "video": {
+              "duration": 10,
+              "id": "7619192172314643726"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "bookfair"
+              },
+              {
+                "title": "invisible"
+              },
+              {
+                "title": "pen"
+              },
+              {
+                "title": "justagirl"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "bookfair"
+              },
+              {
+                "hashtagName": "invisible"
+              },
+              {
+                "hashtagName": "pen"
+              },
+              {
+                "hashtagName": "justagirl"
+              }
+            ]
+          },
+          {
+            "id": "7545182719408426253",
+            "desc": "Apple spends millions of dollars on their slick 3D ads, but I have a secret: You can remake them easily with Intangible AI. It allows you to create a 3D scene, set the camera however you want, and create hyper-realistic videos and animations with just a single click. The cool thing is that you actually have the freedom to set everything up the way you want it!",
+            "createTime": 1756749773,
+            "stats": {
+              "playCount": 718,
+              "diggCount": 13,
+              "commentCount": 0,
+              "collectCount": 6,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "intangible.ai",
+              "nickname": "Intangible",
+              "secUid": "MS4wLjABAAAAPZwCZOkQGE1Uk3q_tASvUzy3tXwiSGcMttt2Vcjyo9OCh3JO3IYb7oAu0oY9F3DM"
+            },
+            "music": {
+              "title": "original sound - Intangible",
+              "authorName": "Intangible",
+              "original": true
+            },
+            "video": {
+              "duration": 38,
+              "id": "7545182719408426253"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7568025713899490567",
+            "desc": "Annoying Pop Up ADS No More!  #PopUpAds #Adguard #TipsTricks #PopupAdsSettings #tech",
+            "createTime": 1762124400,
+            "stats": {
+              "playCount": 1100000,
+              "diggCount": 14500,
+              "commentCount": 320,
+              "collectCount": 5051,
+              "shareCount": 1691
+            },
+            "author": {
+              "uniqueId": "akosiernanshea",
+              "nickname": "Daily Guides TV",
+              "secUid": "MS4wLjABAAAAeoi_RR2aEgsVZczcHmvAqMEbOIWDAdbyNCyWOOponCUrweNpzP5KejHNT5b29sw0"
+            },
+            "music": {
+              "title": "original sound - aljur.abrenica24",
+              "authorName": "aljur.abrenica24",
+              "original": true
+            },
+            "video": {
+              "duration": 26,
+              "id": "7568025713899490567"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "popupads"
+              },
+              {
+                "title": "adguard"
+              },
+              {
+                "title": "tipstricks"
+              },
+              {
+                "title": "popupadssettings"
+              },
+              {
+                "title": "Tech"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "popupads"
+              },
+              {
+                "hashtagName": "adguard"
+              },
+              {
+                "hashtagName": "tipstricks"
+              },
+              {
+                "hashtagName": "popupadssettings"
+              },
+              {
+                "hashtagName": "tech"
+              }
+            ]
+          },
+          {
+            "id": "7571063764158516492",
+            "desc": "invisible acts, visible smiles 🙌@Melektegnaw_  #melektegnaw ",
+            "createTime": 1762775657,
+            "stats": {
+              "playCount": 114000,
+              "diggCount": 14100,
+              "commentCount": 201,
+              "collectCount": 1393,
+              "shareCount": 1183
+            },
+            "author": {
+              "uniqueId": "_lazzy___",
+              "nickname": "️ʙʏ ʟᴀᴢʏ",
+              "secUid": "MS4wLjABAAAA3Nsyg9GAhq1jPmmoyvqGWad1SKioXt_i4qV_M-YhefJPnEmN6ju2lRHiyMsP-DrY"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "️ʙʏ ʟᴀᴢʏ",
+              "original": true
+            },
+            "video": {
+              "duration": 73,
+              "id": "7571063764158516492"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "melektegnaw"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "melektegnaw"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "query": "@invisibleads",
+        "items": [
+          {
             "id": "7666418062152977684",
             "desc": "Funfooling😂",
             "createTime": 1784977056,
             "stats": {
-              "playCount": 13300,
-              "diggCount": 3667,
-              "commentCount": 132,
-              "collectCount": 199,
-              "shareCount": 31
+              "playCount": 13500,
+              "diggCount": 3749,
+              "commentCount": 134,
+              "collectCount": 203,
+              "shareCount": 32
             },
             "author": {
               "uniqueId": "invisible20th",
@@ -6210,6 +7859,68 @@
             "video": {
               "duration": 61,
               "id": "7666418062152977684"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7471417078117862662",
+            "desc": "Un coeur pour ta maman ",
+            "createTime": 1739574853,
+            "stats": {
+              "playCount": 720,
+              "diggCount": 53,
+              "commentCount": 3,
+              "collectCount": 5,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "invisible.ad",
+              "nickname": "nostrapô🇲🇱🇲🇱🇲🇱",
+              "secUid": "MS4wLjABAAAAevSQafaXEzXtc0sH95k3CBewUzTpWFyL9ZPYsG4c7wyU7CdczwNm4d9AI5MRzxM6"
+            },
+            "music": {
+              "title": "son original",
+              "authorName": "CommedieptitMallé",
+              "original": true
+            },
+            "video": {
+              "duration": 18,
+              "id": "7471417078117862662"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7662908906720529678",
+            "desc": "",
+            "createTime": 1784160032,
+            "stats": {
+              "playCount": 67700,
+              "diggCount": 2732,
+              "commentCount": 92,
+              "collectCount": 600,
+              "shareCount": 101
+            },
+            "author": {
+              "uniqueId": "invisibl73",
+              "nickname": "invisible ToleranceOO🥷🏿",
+              "secUid": "MS4wLjABAAAAzjQAx_qsa5hDukGVlCSa6FfyniMKIcpysp1jTRbxEx2R5TcHa08wkJtUIrJ0lGi_"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "invisible ToleranceOO🥷🏿",
+              "original": true
+            },
+            "video": {
+              "duration": 184,
+              "id": "7662908906720529678"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
@@ -6247,6 +7958,132 @@
             "isAd": false,
             "challenges": [],
             "textExtra": []
+          },
+          {
+            "id": "7605441948228373781",
+            "desc": "Invisible thread reel, magician props #magic #invisiblethread #levitation #tutorial #fyp ",
+            "createTime": 1770779951,
+            "stats": {
+              "playCount": 250600,
+              "diggCount": 2816,
+              "commentCount": 89,
+              "collectCount": 894,
+              "shareCount": 145
+            },
+            "author": {
+              "uniqueId": "ralphmagic",
+              "nickname": "ralphmagic",
+              "secUid": "MS4wLjABAAAA3uTYOgV9UkBX2YnqR5pmKTyqE2P0dPCwqfL8V8eVE8ZRBnHkP5rDb1I3T5zE0Kkt"
+            },
+            "music": {
+              "title": "Swear By It",
+              "authorName": "Chris Alan Lee",
+              "original": false
+            },
+            "video": {
+              "duration": 28,
+              "id": "7605441948228373781"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "magic"
+              },
+              {
+                "title": "invisiblethread"
+              },
+              {
+                "title": "levitation"
+              },
+              {
+                "title": "tutorial"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "magic"
+              },
+              {
+                "hashtagName": "invisiblethread"
+              },
+              {
+                "hashtagName": "levitation"
+              },
+              {
+                "hashtagName": "tutorial"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
+            "id": "7642488837133864225",
+            "desc": "✨🩵🥀 هذا البحر 🌊 الذي بينا ماء لا غير …🌊💎🥀 #fyp #viral #invisible #fouryou #تونس🇹🇳ليبيا🇱🇾الجزائر🇩🇿المغرب🇲🇦 ",
+            "createTime": 1779405603,
+            "stats": {
+              "playCount": 166500,
+              "diggCount": 3754,
+              "commentCount": 112,
+              "collectCount": 578,
+              "shareCount": 517
+            },
+            "author": {
+              "uniqueId": "qxyma",
+              "nickname": "༻ 𝚒𝚗𝚟𝚒𝚜𝚒𝚋𝚕𝚎 ༺",
+              "secUid": "MS4wLjABAAAAsgSKA13aDsa3Ij1i7E9PgOCoZKMwrrqUhCl35srAeSZ4_GUIE6QxyjBfiDvhwv3Z"
+            },
+            "music": {
+              "title": "Originalton",
+              "authorName": "༻ 𝚒𝚗𝚟𝚒𝚜𝚒𝚋𝚕𝚎 ༺",
+              "original": true
+            },
+            "video": {
+              "duration": 127,
+              "id": "7642488837133864225"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "invisible"
+              },
+              {
+                "title": "fouryou"
+              },
+              {
+                "title": "تونس🇹🇳ليبيا🇱🇾الجزائر🇩🇿المغرب🇲🇦"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "invisible"
+              },
+              {
+                "hashtagName": "fouryou"
+              },
+              {
+                "hashtagName": "تونس🇹🇳ليبيا🇱🇾الجزائر🇩🇿المغرب🇲🇦"
+              }
+            ]
           },
           {
             "id": "7596725702867701014",
@@ -6363,92 +8200,29 @@
             ]
           },
           {
-            "id": "7635102795422518558",
-            "desc": "Free edit #fy #fyp #edit #invincibleedit #invisible ",
-            "createTime": 1777685911,
+            "id": "7529636694723792134",
+            "desc": "nostrapô pô@lil dou @ freestyle ",
+            "createTime": 1753130165,
             "stats": {
-              "playCount": 5858,
-              "diggCount": 122,
-              "commentCount": 36,
-              "collectCount": 41,
-              "shareCount": 24
+              "playCount": 621,
+              "diggCount": 85,
+              "commentCount": 6,
+              "collectCount": 3,
+              "shareCount": 35
             },
             "author": {
-              "uniqueId": "speededitz11",
-              "nickname": "speededitz",
-              "secUid": "MS4wLjABAAAAkVBrPOqD9ekKBpevWMszjVJEsS-FFXnYGl2H39Cu0JgPpul97aLCAzi6fXIkp0KK"
+              "uniqueId": "invisible.ad",
+              "nickname": "nostrapô🇲🇱🇲🇱🇲🇱",
+              "secUid": "MS4wLjABAAAAevSQafaXEzXtc0sH95k3CBewUzTpWFyL9ZPYsG4c7wyU7CdczwNm4d9AI5MRzxM6"
             },
             "music": {
-              "title": "original sound",
-              "authorName": "speededitz",
+              "title": "son original",
+              "authorName": "SÈKÈ$lOU KEY OFFICIEL.com",
               "original": true
             },
             "video": {
-              "duration": 16,
-              "id": "7635102795422518558"
-            },
-            "duetEnabled": true,
-            "stitchEnabled": true,
-            "isAd": false,
-            "challenges": [
-              {
-                "title": "fy"
-              },
-              {
-                "title": "fyp"
-              },
-              {
-                "title": "edit"
-              },
-              {
-                "title": "invincibleedit"
-              },
-              {
-                "title": "invisible"
-              }
-            ],
-            "textExtra": [
-              {
-                "hashtagName": "fy"
-              },
-              {
-                "hashtagName": "fyp"
-              },
-              {
-                "hashtagName": "edit"
-              },
-              {
-                "hashtagName": "invincibleedit"
-              },
-              {
-                "hashtagName": "invisible"
-              }
-            ]
-          },
-          {
-            "id": "7662908906720529678",
-            "desc": "",
-            "createTime": 1784160032,
-            "stats": {
-              "playCount": 67700,
-              "diggCount": 2732,
-              "commentCount": 92,
-              "collectCount": 600,
-              "shareCount": 101
-            },
-            "author": {
-              "uniqueId": "invisibl73",
-              "nickname": "invisible ToleranceOO🥷🏿",
-              "secUid": "MS4wLjABAAAAzjQAx_qsa5hDukGVlCSa6FfyniMKIcpysp1jTRbxEx2R5TcHa08wkJtUIrJ0lGi_"
-            },
-            "music": {
-              "title": "original sound",
-              "authorName": "invisible ToleranceOO🥷🏿",
-              "original": true
-            },
-            "video": {
-              "duration": 184,
-              "id": "7662908906720529678"
+              "duration": 19,
+              "id": "7529636694723792134"
             },
             "duetEnabled": true,
             "stitchEnabled": true,
@@ -6539,6 +8313,919 @@
                 "hashtagName": "foryoupage"
               }
             ]
+          },
+          {
+            "id": "7618162422070693134",
+            "desc": "Replying to @yitbarek birhanu ለአንጀት ቁስለት ወይም ብግነት#ኢትዮጵያንቲክቶክ #viral #fyp #ዮሀንስሽፈራው ",
+            "createTime": 1773741806,
+            "stats": {
+              "playCount": 941100,
+              "diggCount": 45200,
+              "commentCount": 261,
+              "collectCount": 10900,
+              "shareCount": 6209
+            },
+            "author": {
+              "uniqueId": "invisible_agent7",
+              "nickname": "ዘ Investigator 🕵️‍♂️",
+              "secUid": "MS4wLjABAAAAkRRSnpKXVz1Ztqa8ASZLdDTrG9ZmKvmfC7Mp4ReXQbx4M5yAg_aiSFnPjXfu4gKV"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "ዘ Investigator 🕵️‍♂️",
+              "original": true
+            },
+            "video": {
+              "duration": 81,
+              "id": "7618162422070693134"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "ዮሀንስሽፈራው"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "ዮሀንስሽፈራው"
+              }
+            ]
+          },
+          {
+            "id": "7615956787325324557",
+            "desc": "አብዛኞቻችን ወደ ውጪ ወጣ በማለት የጠዋት ፀሐይ መሞቅ አቁመናል#ኢትዮጵያንቲክቶክ #viral #fyp ",
+            "createTime": 1773228136,
+            "stats": {
+              "playCount": 98600,
+              "diggCount": 5263,
+              "commentCount": 93,
+              "collectCount": 1131,
+              "shareCount": 1449
+            },
+            "author": {
+              "uniqueId": "invisible_agent7",
+              "nickname": "ዘ Investigator 🕵️‍♂️",
+              "secUid": "MS4wLjABAAAAkRRSnpKXVz1Ztqa8ASZLdDTrG9ZmKvmfC7Mp4ReXQbx4M5yAg_aiSFnPjXfu4gKV"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "ዘ Investigator 🕵️‍♂️",
+              "original": true
+            },
+            "video": {
+              "duration": 155,
+              "id": "7615956787325324557"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
+            "id": "7627687775323573518",
+            "desc": "በሸንኮራ የአስም በሽታን ማከም ይቻላል#ኢትዮጵያንቲክቶክ #viral #fyp #ሐኪም #herbs",
+            "createTime": 1775959478,
+            "stats": {
+              "playCount": 413400,
+              "diggCount": 11800,
+              "commentCount": 137,
+              "collectCount": 2782,
+              "shareCount": 4206
+            },
+            "author": {
+              "uniqueId": "invisible_agent7",
+              "nickname": "ዘ Investigator 🕵️‍♂️",
+              "secUid": "MS4wLjABAAAAkRRSnpKXVz1Ztqa8ASZLdDTrG9ZmKvmfC7Mp4ReXQbx4M5yAg_aiSFnPjXfu4gKV"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "ዘ Investigator 🕵️‍♂️",
+              "original": true
+            },
+            "video": {
+              "duration": 150,
+              "id": "7627687775323573518"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "ሐኪም"
+              },
+              {
+                "title": "herbs"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "ሐኪም"
+              },
+              {
+                "hashtagName": "herbs"
+              }
+            ]
+          },
+          {
+            "id": "7632699873036356895",
+            "desc": "",
+            "createTime": 1777126453,
+            "stats": {
+              "playCount": 376800,
+              "diggCount": 113900,
+              "commentCount": 493,
+              "collectCount": 10500,
+              "shareCount": 8257
+            },
+            "author": {
+              "uniqueId": ".08.17.07",
+              "nickname": "invisible.",
+              "secUid": "MS4wLjABAAAArXGlaiNShNrx4Gg8j1aZPcXzVgHcySEquvugZGX-muijfz7OipwBOXmUR5Czx1R4"
+            },
+            "music": {
+              "title": "sonido original",
+              "authorName": "LaMM",
+              "original": true
+            },
+            "video": {
+              "duration": 10,
+              "id": "7632699873036356895"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7654543324786756894",
+            "desc": "#secretaccountlol #lazerdim700 #wockst★rz #fyppp #viraltiktok ",
+            "createTime": 1782212291,
+            "stats": {
+              "playCount": 2794,
+              "diggCount": 29,
+              "commentCount": 5,
+              "collectCount": 4,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "wokrituals6",
+              "nickname": "⃟",
+              "secUid": "MS4wLjABAAAACIhPXARUWhvub1cn4BIHw7mtHF9oNx5gOVwQapMlTVYwVHYK5Ipk5uXz1qog1o1_"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Tyra",
+              "original": true
+            },
+            "video": {
+              "duration": 7,
+              "id": "7654543324786756894"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "secretaccountlol"
+              },
+              {
+                "title": "lazerdim700"
+              },
+              {
+                "title": "wockst★rz"
+              },
+              {
+                "title": "fyppp"
+              },
+              {
+                "title": "viraltiktok"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "secretaccountlol"
+              },
+              {
+                "hashtagName": "lazerdim700"
+              },
+              {
+                "hashtagName": "wockst★rz"
+              },
+              {
+                "hashtagName": "fyppp"
+              },
+              {
+                "hashtagName": "viraltiktok"
+              }
+            ]
+          },
+          {
+            "id": "7623722071595486478",
+            "desc": "አሪቲ ለታይፈስ እና ታይፎይድ#ዮሐንስሽፈራው #ደሸት13 #ኢትዮጵያንቲክቶክ #viral #fyp ",
+            "createTime": 1775036134,
+            "stats": {
+              "playCount": 73800,
+              "diggCount": 3414,
+              "commentCount": 21,
+              "collectCount": 658,
+              "shareCount": 454
+            },
+            "author": {
+              "uniqueId": "invisible_agent7",
+              "nickname": "ዘ Investigator 🕵️‍♂️",
+              "secUid": "MS4wLjABAAAAkRRSnpKXVz1Ztqa8ASZLdDTrG9ZmKvmfC7Mp4ReXQbx4M5yAg_aiSFnPjXfu4gKV"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "ዘ Investigator 🕵️‍♂️",
+              "original": true
+            },
+            "video": {
+              "duration": 70,
+              "id": "7623722071595486478"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ዮሐንስሽፈራው"
+              },
+              {
+                "title": "ደሸት13"
+              },
+              {
+                "title": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "ዮሐንስሽፈራው"
+              },
+              {
+                "hashtagName": "ደሸት13"
+              },
+              {
+                "hashtagName": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
+            "id": "7624283811001552150",
+            "desc": "No puede hacer más frío #Finland #paratí #invisible ",
+            "createTime": 1775166913,
+            "stats": {
+              "playCount": 612400,
+              "diggCount": 94900,
+              "commentCount": 893,
+              "collectCount": 6891,
+              "shareCount": 6895
+            },
+            "author": {
+              "uniqueId": "eeric_seijo",
+              "nickname": "eric_seijo",
+              "secUid": "MS4wLjABAAAArCqE2WkfEJLzY-NNtGGasvpfVa2HaSrLaz9_-D2TPnNT3CVkKscMzSA95IZMRVQV"
+            },
+            "music": {
+              "title": "sonido original",
+              "authorName": "Leonel",
+              "original": true
+            },
+            "video": {
+              "duration": 13,
+              "id": "7624283811001552150"
+            },
+            "duetEnabled": false,
+            "stitchEnabled": false,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "finland"
+              },
+              {
+                "title": "paratí"
+              },
+              {
+                "title": "invisible"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "finland"
+              },
+              {
+                "hashtagName": "paratí"
+              },
+              {
+                "hashtagName": "invisible"
+              }
+            ]
+          },
+          {
+            "id": "7652272640589155615",
+            "desc": "",
+            "createTime": 1781683617,
+            "stats": {
+              "playCount": 240,
+              "diggCount": 24,
+              "commentCount": 0,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "riionh",
+              "nickname": "￴ ￴￴",
+              "secUid": "MS4wLjABAAAArP-ST5j1QsCV6ZNgF3sI9K_8YqMH0hv14bRd1AsG2lYg4bagfjqBMo1D88ceCQc9"
+            },
+            "music": {
+              "title": "it’s like i’m not even here (slowed)",
+              "authorName": "mthu",
+              "original": false
+            },
+            "video": {
+              "duration": 17,
+              "id": "7652272640589155615"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7585700877592448274",
+            "desc": "invisible message glitch",
+            "createTime": 1766183633,
+            "stats": {
+              "playCount": 107800,
+              "diggCount": 405,
+              "commentCount": 2129,
+              "collectCount": 249,
+              "shareCount": 79
+            },
+            "author": {
+              "uniqueId": "blocky.rocky8",
+              "nickname": "blocky rocky",
+              "secUid": "MS4wLjABAAAABiIIUaurWn6uHhClYvXTD5QVp1XeueTeMPwqsnEjdpDk5p2UUZYpu4amLaxShB8p"
+            },
+            "music": {
+              "title": "original sound - Keith_kate",
+              "authorName": "DID YOU KNOW",
+              "original": true
+            },
+            "video": {
+              "duration": 12,
+              "id": "7585700877592448274"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7623868833521995021",
+            "desc": "የታሸጉ እና በፋብሪካ የተቀነባበሩ ምግቦች ለጤና ጠንቅ ናቸው ከመመገብ ተቆጠብ#ኢትዮጵያንቲክቶክ #ደሸት13 #ዮሐንስሽፈራው #viral #fyp ",
+            "createTime": 1775070316,
+            "stats": {
+              "playCount": 386000,
+              "diggCount": 10700,
+              "commentCount": 61,
+              "collectCount": 2176,
+              "shareCount": 13700
+            },
+            "author": {
+              "uniqueId": "invisible_agent7",
+              "nickname": "ዘ Investigator 🕵️‍♂️",
+              "secUid": "MS4wLjABAAAAkRRSnpKXVz1Ztqa8ASZLdDTrG9ZmKvmfC7Mp4ReXQbx4M5yAg_aiSFnPjXfu4gKV"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "ዘ Investigator 🕵️‍♂️",
+              "original": true
+            },
+            "video": {
+              "duration": 163,
+              "id": "7623868833521995021"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "title": "ደሸት13"
+              },
+              {
+                "title": "ዮሐንስሽፈራው"
+              },
+              {
+                "title": "viral"
+              },
+              {
+                "title": "fyp"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "ኢትዮጵያንቲክቶክ"
+              },
+              {
+                "hashtagName": "ደሸት13"
+              },
+              {
+                "hashtagName": "ዮሐንስሽፈራው"
+              },
+              {
+                "hashtagName": "viral"
+              },
+              {
+                "hashtagName": "fyp"
+              }
+            ]
+          },
+          {
+            "id": "7661950835252923656",
+            "desc": "#invisiblename #blackprofile #creatorsearchinsights #4upageシ ",
+            "createTime": 1783936954,
+            "stats": {
+              "playCount": 1600000,
+              "diggCount": 100100,
+              "commentCount": 6849,
+              "collectCount": 5239,
+              "shareCount": 4823
+            },
+            "author": {
+              "uniqueId": "ur_babyyygurlll",
+              "nickname": "￴￴ ￴￴￴ ￴￴￴ ￴￴￴ ￴￴ ￴￴ ￴￴￴ ￴￴ ￴￴",
+              "secUid": "MS4wLjABAAAA83VlwFpJdfb-lLW9d5j6DUH4wXiQReiyy_8o1G48gTQOVhyousb-gYJKmk-R_LRi"
+            },
+            "music": {
+              "title": "Sagip (Hanggang Dulo)",
+              "authorName": "Jan Roberts",
+              "original": false
+            },
+            "video": {
+              "duration": 29,
+              "id": "7661950835252923656"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisiblename"
+              },
+              {
+                "title": "blackprofile"
+              },
+              {
+                "title": "creatorsearchinsights"
+              },
+              {
+                "title": "4upageシ"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "invisiblename"
+              },
+              {
+                "hashtagName": "blackprofile"
+              },
+              {
+                "hashtagName": "creatorsearchinsights"
+              },
+              {
+                "hashtagName": "4upageシ"
+              }
+            ]
+          },
+          {
+            "id": "7661643818676112670",
+            "desc": "",
+            "createTime": 1783865499,
+            "stats": {
+              "playCount": 956600,
+              "diggCount": 253200,
+              "commentCount": 532,
+              "collectCount": 17700,
+              "shareCount": 24200
+            },
+            "author": {
+              "uniqueId": ".08.17.07",
+              "nickname": "invisible.",
+              "secUid": "MS4wLjABAAAArXGlaiNShNrx4Gg8j1aZPcXzVgHcySEquvugZGX-muijfz7OipwBOXmUR5Czx1R4"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": ".",
+              "original": true
+            },
+            "video": {
+              "duration": 5,
+              "id": "7661643818676112670"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
+          },
+          {
+            "id": "7637383770697370911",
+            "desc": "@b.c1ifton #invisible #trend #fyp #ilovemybf #viral ",
+            "createTime": 1778217007,
+            "stats": {
+              "playCount": 1519,
+              "diggCount": 110,
+              "commentCount": 3,
+              "collectCount": 10,
+              "shareCount": 15
+            },
+            "author": {
+              "uniqueId": "chiefxkvvf",
+              "nickname": "𝕵𝖊𝖓𝖓𝖆ᢉ𐭩",
+              "secUid": "MS4wLjABAAAAXCqwDfmxkvrPjRkJm2_eSGjI14qm4vfyupRG8VPNCrLiHfRJJ4k41DJk4nbVDgO9"
+            },
+            "music": {
+              "title": "Feel It",
+              "authorName": "d4vd",
+              "original": false
+            },
+            "video": {
+              "duration": 20,
+              "id": "7637383770697370911"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "invisible"
+              },
+              {
+                "title": "trend"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "ilovemybf"
+              },
+              {
+                "title": "viral"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": ""
+              },
+              {
+                "hashtagName": "invisible"
+              },
+              {
+                "hashtagName": "trend"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "ilovemybf"
+              },
+              {
+                "hashtagName": "viral"
+              }
+            ]
+          },
+          {
+            "id": "7613870008078257430",
+            "desc": "Seamless effortless and invisible edits #editingtips #creativecontent #capcutediting #beginner",
+            "createTime": 1772742259,
+            "stats": {
+              "playCount": 1084,
+              "diggCount": 19,
+              "commentCount": 3,
+              "collectCount": 4,
+              "shareCount": 1
+            },
+            "author": {
+              "uniqueId": "aleksdoesmedia",
+              "nickname": "Alex | UK Photographer",
+              "secUid": "MS4wLjABAAAAM5jhhjXgbz0o0EgplrcAALDrrkfPdfoHg165YGG38hvI6SuKubVSR0q_YsFLB6zM"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "Alex | UK Photographer",
+              "original": true
+            },
+            "video": {
+              "duration": 43,
+              "id": "7613870008078257430"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "editingtips"
+              },
+              {
+                "title": "creativecontent"
+              },
+              {
+                "title": "capcutediting"
+              },
+              {
+                "title": "beginner"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "editingtips"
+              },
+              {
+                "hashtagName": "creativecontent"
+              },
+              {
+                "hashtagName": "capcutediting"
+              },
+              {
+                "hashtagName": "beginner"
+              }
+            ]
+          },
+          {
+            "id": "7665401098034810120",
+            "desc": "#misterious #nameinvisibletiktok  #fyp #lowprofile ",
+            "createTime": 1784740280,
+            "stats": {
+              "playCount": 686,
+              "diggCount": 26,
+              "commentCount": 3,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "in.visible7",
+              "nickname": "￴￴ ￴￴ ￴ ￴ ￴￴ ￴￴ ￴",
+              "secUid": "MS4wLjABAAAAdDTwHbVISExCEgap4bcLTIa7ONKYFkwzG8oqr5rDEECW2aM-G_ajlnzmBfQ_QpSa"
+            },
+            "music": {
+              "title": "Asleep In Space",
+              "authorName": "Zachariehs",
+              "original": false
+            },
+            "video": {
+              "duration": 12,
+              "id": "7665401098034810120"
+            },
+            "duetEnabled": true,
+            "stitchEnabled": true,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "misterious"
+              },
+              {
+                "title": "nameinvisibletiktok"
+              },
+              {
+                "title": "fyp"
+              },
+              {
+                "title": "lowprofile"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "misterious"
+              },
+              {
+                "hashtagName": "nameinvisibletiktok"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "lowprofile"
+              }
+            ]
+          },
+          {
+            "id": "7645435656084262175",
+            "desc": "This is how to make invisible names on TikTok!  #tiktok #fyp ##️ #invincibleseason4 ",
+            "createTime": 1780091723,
+            "stats": {
+              "playCount": 277200,
+              "diggCount": 2668,
+              "commentCount": 1800,
+              "collectCount": 1424,
+              "shareCount": 510
+            },
+            "author": {
+              "uniqueId": "sd5.lol",
+              "nickname": "SD5",
+              "secUid": "MS4wLjABAAAAozlEWeMmMjItt8q0DpKiy1gkaVw6GA6SaTOI1MLqSJPRAyFmlXAWSI3SZaKh7zyL"
+            },
+            "music": {
+              "title": "original sound",
+              "authorName": "🄺🄸🅃🄻🄾🅅🄴🅁",
+              "original": true
+            },
+            "video": {
+              "duration": 0,
+              "id": "7645435656084262175"
+            },
+            "duetEnabled": false,
+            "stitchEnabled": false,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": [
+              {
+                "hashtagName": "tiktok"
+              },
+              {
+                "hashtagName": "fyp"
+              },
+              {
+                "hashtagName": "#️"
+              },
+              {
+                "hashtagName": "invincibleseason4"
+              }
+            ]
+          },
+          {
+            "id": "7663950782424698145",
+            "desc": "#tt #dlaciebie #foryou #dc #tiktok",
+            "createTime": 1784402596,
+            "stats": {
+              "playCount": 385,
+              "diggCount": 34,
+              "commentCount": 1,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "invisibleeal",
+              "nickname": "Alicja",
+              "secUid": "MS4wLjABAAAAq_OLpzlNIlHCEzzmQxK3BC7aQusudfPoj4W8s0ZMcJ8vGuFa7g0zwaTAHiY6fqdb"
+            },
+            "music": {
+              "title": "son original",
+              "authorName": "cesar.grignio",
+              "original": true
+            },
+            "video": {
+              "duration": 0,
+              "id": "7663950782424698145"
+            },
+            "duetEnabled": false,
+            "stitchEnabled": false,
+            "isAd": false,
+            "challenges": [
+              {
+                "title": "tt"
+              },
+              {
+                "title": "dlaciebie"
+              },
+              {
+                "title": "foryou"
+              },
+              {
+                "title": "dc"
+              },
+              {
+                "title": "tiktok"
+              }
+            ],
+            "textExtra": [
+              {
+                "hashtagName": "tt"
+              },
+              {
+                "hashtagName": "dlaciebie"
+              },
+              {
+                "hashtagName": "foryou"
+              },
+              {
+                "hashtagName": "dc"
+              },
+              {
+                "hashtagName": "tiktok"
+              }
+            ]
+          },
+          {
+            "id": "7664572638429285650",
+            "desc": "Milocado",
+            "createTime": 1784547393,
+            "stats": {
+              "playCount": 19,
+              "diggCount": 1,
+              "commentCount": 0,
+              "collectCount": 0,
+              "shareCount": 0
+            },
+            "author": {
+              "uniqueId": "invisible.wk",
+              "nickname": "￴ ￴ ￴ ￴ ￴ ￴￴ ￴ ￴ ￴ ￴",
+              "secUid": "MS4wLjABAAAAOvpJ0vynaZhZ9BWuisRPdIr-1G4TPJs338ri6g717PJimtwIAuZ8B-mb_5QRf0Wg"
+            },
+            "music": {
+              "title": "original sound - Shin.",
+              "authorName": "Shin.",
+              "original": true
+            },
+            "video": {
+              "duration": 0,
+              "id": "7664572638429285650"
+            },
+            "duetEnabled": false,
+            "stitchEnabled": false,
+            "isAd": false,
+            "challenges": [],
+            "textExtra": []
           }
         ]
       }
@@ -9879,7 +12566,7 @@
       ],
       "hashtags": [],
       "musicTitles": [],
-      "foreignVideosRejected": 45
+      "foreignVideosRejected": 96
     },
     "sample": [
       {
@@ -9929,6 +12616,179 @@
       {
         "id": "7595014667156622613",
         "bucket": "anchor"
+      }
+    ],
+    "transcriptsAfterFetch": [
+      {
+        "videoId": "7649412270107233543",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7649412270107233543",
+        "caption": "",
+        "transcript": "Dinner with Drake or $250,000? Dinner with Drake. Why is that? Drake? And like a nice dinner. What are you gonna talk about? Um, ice Man and who Janice is. How about for you? Dinner with Drake or $250,000? Maybe $250,000. And what are you gonna do with the money? Probably invest it or put it in like TSA or like something in that end.",
+        "wordCount": 65,
+        "bucket": "recent",
+        "createTime": 1781017590,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 25
+      },
+      {
+        "videoId": "7649388930923646216",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7649388930923646216",
+        "caption": "Did she make the right choice ",
+        "transcript": "Dinner with Drake or 250K? Dinner with Drake. What are you gonna talk about? Anything and everything. You don't want the money? Yeah, I'd rather. I'd rather dinner with Drake. Yeah, actually, I would. I would. Drake, if you're seeing this, she would not take the money. There's more money there. More opportunity. There's more opportunity there. More doors. Yeah.",
+        "wordCount": 60,
+        "bucket": "recent",
+        "createTime": 1781012154,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 19
+      },
+      {
+        "videoId": "7649388569412324615",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7649388569412324615",
+        "caption": "Comments section assemble ",
+        "transcript": "What's a red flag you're secretly attracted to? Oh, definitely somebody who hits me. You know what's sexy on a guy? A black guy. And how are you gonna get that besides your own women hitting you? I love you. I'm telling you, I'm gonna tell everybody that a guy I got in a fight, no, I didn't. My woman just didn't like when I didn't clean the dishes.",
+        "wordCount": 69,
+        "bucket": "recent",
+        "createTime": 1781012072,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 17
+      },
+      {
+        "videoId": "7597286834783178005",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7597286834783178005",
+        "caption": "We ask people on the street to identify what type of man would wear a particular scent and rate it on a scale of 1-The responses range from not fully toxic to a solid 7 out of 10, with most agreeing it's somewhere between sweet and husband material.",
+        "transcript": "We ask people on the street to identify what type of man would wear a particular scent and rate it on a scale of 1-The responses range from not fully toxic to a solid 7 out of 10, with most agreeing it's somewhere between sweet and husband material.",
+        "wordCount": 48,
+        "bucket": "mid",
+        "createTime": 1768881200,
+        "transcriptSource": "post_caption",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 30
+      },
+      {
+        "videoId": "7596200212750814484",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7596200212750814484",
+        "caption": "Let’s go talk to strangers ",
+        "transcript": "Today we're gonna be going around Toronto and asking random strangers what they think about this men's perfume. Can I ask you a question? Can you give me a rating of 1 to 10 what you think of this? It's men's. Just be honest. Okay? Yeah, nice. What do you think? 1 to 10? 8 or 8? 9? 9.",
+        "wordCount": 59,
+        "bucket": "mid",
+        "createTime": 1768628201,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 23
+      },
+      {
+        "videoId": "7595017270754168085",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7595017270754168085",
+        "caption": "Getting Honest Men's Perfume Reviews - Rating a Top-Rated Fragrance We ask a guy for his honest opinion on a highly-rated perfume, and he gives it an eight out of ten. He explains that while he doesn't know much about fragrances, he thinks it smells really good, which is what matters most.",
+        "transcript": "Hey, brother. How you doing? I'm trying to get men's honest reviews on how this smells. Can you tell me from 1 to 10 what you think this. Yeah, just, it's rated number one. Be honest. Maybe an 8. An 8. Why'd you rate it? An 8? That's good. Like, cause, like, I don't have like, much, you know, like knowledge of, like the perfumes and everything. Yeah, I think it's, it smells good. Stomach is good. It's good. Thank you very much.",
+        "wordCount": 83,
+        "bucket": "mid",
+        "createTime": 1768352784,
+        "transcriptSource": "subtitle",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 35
+      },
+      {
+        "videoId": "7594996890542935316",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7594996890542935316",
+        "caption": "Testing Azzaro Perfume: Getting Honest Ratings from Strangers We test out Azzaro men's perfume on the street and ask random people to rate it from one to ten. The responses are overwhelmingly positive, with most people giving it ratings between 7-We discover that this low-key brand gets people asking about the scent and starts conversations, with one person even saying they'd wear it right now if they could. People are impressed by how good it smells, and we learn that it's available at Shoppers Drug Mart. #AzzaroPerfume #PerfumeReview #MensPerfume #StreetReview #FragranceTest ",
+        "transcript": "Testing Azzaro Perfume: Getting Honest Ratings from Strangers We test out Azzaro men's perfume on the street and ask random people to rate it from one to ten. The responses are overwhelmingly positive, with most people giving it ratings between 7-We discover that this low-key brand gets people asking about the scent and starts conversations, with one person even saying they'd wear it right now if they could. People are impressed by how good it smells, and we learn that it's available at Shoppers Drug Mart. #AzzaroPerfume #PerfumeReview #MensPerfume #StreetReview #FragranceTest",
+        "wordCount": 91,
+        "bucket": "anchor",
+        "createTime": 1768348042,
+        "transcriptSource": "post_caption",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 81
+      },
+      {
+        "videoId": "7595014338558135573",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7595014338558135573",
+        "caption": "Street Perfume Rating Challenge - Subscribers' #1 Pick We ask people on the street to smell and rate a men's perfume that our subscribers voted as number one, getting honest opinions ranging from 6.5 to 9 out of 10. #PerfumeReview #StreetInterview #MensPerfume #RatingChallenge    ",
+        "transcript": "Street Perfume Rating Challenge - Subscribers' #1 Pick We ask people on the street to smell and rate a men's perfume that our subscribers voted as number one, getting honest opinions ranging from 6.5 to 9 out of 10. #PerfumeReview #StreetInterview #MensPerfume #RatingChallenge",
+        "wordCount": 43,
+        "bucket": "anchor",
+        "createTime": 1768352103,
+        "transcriptSource": "post_caption",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 70
+      },
+      {
+        "videoId": "7595014667156622613",
+        "videoUrl": "https://www.tiktok.com/@invisible.ads/video/7595014667156622613",
+        "caption": "Street Cologne Rating Challenge We stop people on the street and ask them to rate different men's colognes on a scale of one to ten, getting their honest reactions and feedback on various fragrances. #CologneTesting #FragranceReview #StreetInterview #MensCologne #RatingChallenge     ",
+        "transcript": "Street Cologne Rating Challenge We stop people on the street and ask them to rate different men's colognes on a scale of one to ten, getting their honest reactions and feedback on various fragrances. #CologneTesting #FragranceReview #StreetInterview #MensCologne #RatingChallenge",
+        "wordCount": 39,
+        "bucket": "anchor",
+        "createTime": 1768352174,
+        "transcriptSource": "post_caption",
+        "musicMetadata": {
+          "soundName": "original sound",
+          "isOriginal": true
+        },
+        "remixMetadata": {
+          "duetCount": 0,
+          "stitchCount": 0
+        },
+        "videoDuration": 46
       }
     ]
   }
