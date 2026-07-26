@@ -16,7 +16,7 @@ import {
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
-  setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
+  setObservationReviewStatus, getRunDiagnostics, getStrategyOutcomesForRun, getEvidenceSnapshotByObservation,
   getLatestObservationId,
   recordPhaseObservation, getPhaseState,
   // V2 read functions
@@ -1051,6 +1051,20 @@ export const appRouter = router({
             includeTerminal: input.includeTerminal,
           }),
         };
+      }),
+
+    /**
+     * Per-strategy attempt outcomes for one campaign. READ ONLY.
+     *
+     * A phase reports a single outcome, so a strategy chain whose middle
+     * strategy contributes nothing is indistinguishable from one that works —
+     * which is how `subtitle_browser` reached 227 attempts and 0 successes
+     * unnoticed. The events were always recorded; nothing read them back.
+     */
+    strategyBreakdown: publicProcedure
+      .input(z.object({ runId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return { rows: await getStrategyOutcomesForRun(input.runId) };
       }),
 
     list: publicProcedure

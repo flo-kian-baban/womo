@@ -164,6 +164,83 @@ const HEALTH_TONE: Record<string, string> = {
   thin: "border-amber-400/30 text-amber-400/90 bg-amber-400/5",
 };
 
+/**
+ * PER-STRATEGY OUTCOMES — what the phase summary cannot tell you.
+ *
+ * A phase reports ONE outcome, so a chain whose middle strategy contributes
+ * nothing looks exactly like one where it works. `subtitle_browser` reached 227
+ * attempts with 0 successes unnoticed for that reason. The attempt events were
+ * always being recorded; no surface read them back. This is that surface.
+ *
+ * Grouped by the marker's `kind` (profile / search / transcript / …), which is
+ * whatever the emitting chain called itself. Nothing here knows a platform or a
+ * strategy NAME — a new platform emitting the same `#kind=strategy:outcome`
+ * convention shows up with no change to this file.
+ */
+function StrategyBreakdown({ runId }: { runId: string }) {
+  const q = trpc.creator.strategyBreakdown.useQuery({ runId }, { staleTime: 30_000, retry: false });
+  const rows = q.data?.rows ?? [];
+
+  if (q.isLoading) return <p className="text-[11px] text-muted-foreground/40">…</p>;
+  if (rows.length === 0) {
+    return (
+      <p className="text-[11px] text-muted-foreground/50 italic">
+        No per-attempt records for this run — the chains that emit them may not have run.
+      </p>
+    );
+  }
+
+  // kind → strategy → outcome → attempts
+  const byKind = new Map<string, Map<string, Record<string, number>>>();
+  for (const r of rows) {
+    const k = byKind.get(r.kind) ?? new Map<string, Record<string, number>>();
+    const s = k.get(r.strategy) ?? {};
+    s[r.outcome] = (s[r.outcome] ?? 0) + r.attempts;
+    k.set(r.strategy, s);
+    byKind.set(r.kind, k);
+  }
+
+  return (
+    <div className="space-y-2">
+      {Array.from(byKind.entries()).map(([kind, strategies]) => (
+        <div key={kind}>
+          <div className="text-[9px] uppercase tracking-wide text-muted-foreground/40 mb-1">{kind}</div>
+          <div className="space-y-1">
+            {Array.from(strategies.entries()).map(([strategy, outcomes]) => {
+              const ok = outcomes.success ?? 0;
+              const attempted = Object.entries(outcomes)
+                .filter(([o]) => o !== "skipped")
+                .reduce((n, [, v]) => n + (v as number), 0);
+              const skipped = outcomes.skipped ?? 0;
+              // THE SIGNAL THIS EXISTS FOR: really tried, never once worked.
+              const deadWeight = ok === 0 && attempted > 0;
+              return (
+                <div key={strategy} className="flex items-baseline gap-2 text-[11px]">
+                  <span className={`font-mono ${deadWeight ? "text-destructive/80" : "text-foreground/70"}`}>
+                    {strategy}
+                  </span>
+                  <span className="flex-1 border-b border-dashed border-border/30" />
+                  <span className="font-mono whitespace-nowrap">
+                    <span className={ok > 0 ? "text-green-400" : "text-muted-foreground/40"}>{ok}✓</span>
+                    <span className="text-muted-foreground/30"> / </span>
+                    <span className={attempted - ok > 0 ? "text-amber-400/80" : "text-muted-foreground/40"}>
+                      {attempted - ok}✗
+                    </span>
+                    {skipped > 0 && <span className="text-muted-foreground/40"> · {skipped} skipped</span>}
+                  </span>
+                  {deadWeight && (
+                    <span className="text-[9px] text-destructive/70 whitespace-nowrap">never succeeded</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** A single fact. `null` value renders as "unknown", never as 0 or blank. */
 function Fact({
   label, value, loading, tone,
@@ -282,6 +359,13 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
               <p className="text-destructive/90 leading-relaxed">{campaign.message}</p>
             </div>
           )}
+
+          <div className="pt-1">
+            <div className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/40 mb-1.5">
+              Strategy attempts
+            </div>
+            <StrategyBreakdown runId={campaign.runId} />
+          </div>
 
           <div className="pt-1">
             <div className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/40 mb-1.5">

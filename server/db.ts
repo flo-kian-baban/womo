@@ -465,6 +465,49 @@ export async function getPhaseStateForRuns(runIds: string[]) {
     .orderBy(analysisPhaseState.createdAt);
 }
 
+/**
+ * PER-STRATEGY OUTCOMES for one run. READ-PATH ONLY.
+ *
+ * Strategy chains record one event per ATTEMPT, tagged on the url fragment with
+ * the convention `#<kind>=<strategy>:<outcome>` — e.g.
+ * `…#transcript=subtitle_browser:empty`, `…#search=search_xhr_scroll:empty`,
+ * `…#profile=profile_xhr_scroll:empty-retrying`.
+ *
+ * This reads that GRAMMAR, not a list of known strategy names. Any platform
+ * that emits the same convention appears here with no code change — which is
+ * the point, since Instagram has its own strategies and brand campaigns arrive
+ * on the same spine in S5.
+ *
+ * WHY IT EXISTS. A phase reports one outcome, so a chain whose middle strategy
+ * contributes NOTHING looks identical to one where it works. `subtitle_browser`
+ * recorded 0 successes in 227 attempts before anyone noticed, because no
+ * surface ever showed per-strategy results. This is that surface.
+ */
+export async function getStrategyOutcomesForRun(runId: string): Promise<Array<{
+  kind: string; strategy: string; outcome: string; attempts: number;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      kind: sql<string>`substring(${scrapeEvents.urlRequested} from '#([a-z_]+)=')`,
+      strategy: sql<string>`split_part(substring(${scrapeEvents.urlRequested} from '#[a-z_]+=(.*)$'), ':', 1)`,
+      outcome: sql<string>`split_part(substring(${scrapeEvents.urlRequested} from '#[a-z_]+=(.*)$'), ':', 2)`,
+      attempts: sql<number>`count(*)::int`,
+    })
+    .from(scrapeEvents)
+    .where(and(
+      eq(scrapeEvents.runId, runId),
+      sql`${scrapeEvents.urlRequested} ~ '#[a-z_]+=[^:]+:'`,
+    ))
+    .groupBy(
+      sql`substring(${scrapeEvents.urlRequested} from '#([a-z_]+)=')`,
+      sql`split_part(substring(${scrapeEvents.urlRequested} from '#[a-z_]+=(.*)$'), ':', 1)`,
+      sql`split_part(substring(${scrapeEvents.urlRequested} from '#[a-z_]+=(.*)$'), ':', 2)`,
+    );
+  return rows.filter(r => r.kind && r.strategy && r.outcome);
+}
+
 /** Read a run's ledger rows (diagnostics / verification). */
 export async function getPhaseState(runId: string) {
   const db = await getDb();

@@ -282,8 +282,31 @@ export function makeSubtitleBrowserStrategy(opts?: StrategyOptions): TranscriptS
 
           const subtitleUrls = await page.evaluate(() => {
             try {
+              /**
+               * READ THE SCRIPT ELEMENT'S TEXT. Never trust the window global.
+               *
+               * The payload lives in <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">,
+               * and because that element carries an `id`, named element access
+               * puts THE ELEMENT ITSELF on window under the same name. The
+               * previous code read the global first and only fell back to
+               * parsing when it was falsy — but an HTMLScriptElement is truthy,
+               * so the fallback was unreachable, `__DEFAULT_SCOPE__` was always
+               * undefined, and this returned [] on EVERY video. That is the
+               * whole reason this strategy recorded 0 successes in 227 attempts
+               * while the HTTP path was reading the same field successfully.
+               *
+               * The global is still accepted, but only after proving it is a
+               * plain object that actually carries __DEFAULT_SCOPE__ — which an
+               * element never does.
+               */
               const win = window as any;
-              let rehydrationData = win.__UNIVERSAL_DATA_FOR_REHYDRATION__;
+              const fromGlobal = win.__UNIVERSAL_DATA_FOR_REHYDRATION__;
+              let rehydrationData =
+                fromGlobal && typeof fromGlobal === "object" &&
+                !(typeof Node !== "undefined" && fromGlobal instanceof Node) &&
+                "__DEFAULT_SCOPE__" in fromGlobal
+                  ? fromGlobal
+                  : null;
               if (!rehydrationData) {
                 const scriptEl = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
                 if (scriptEl?.textContent) {
