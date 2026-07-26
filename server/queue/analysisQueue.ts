@@ -62,7 +62,7 @@ export interface SubmitRequest {
  * platform is queueable only once it has a registered toolset, and toolsetFor
  * throws loudly for the rest rather than producing an empty analysis.
  */
-export type QueueablePlatform = "TikTok" | "Instagram" | "YouTube";
+export type QueueablePlatform = "TikTok" | "Instagram";
 
 export interface SubmittedCampaign {
   runId: string;
@@ -293,7 +293,11 @@ async function recordTerminalFailure(
  */
 async function processCampaign(runId: string, subjectHint: string, deps: CreatorCampaignDeps): Promise<CampaignOutcome | null> {
   const [handle, platform] = subjectHint.split("@");
-  if (platform !== "TikTok" && platform !== "Instagram" && platform !== "YouTube") {
+  // The boot loop resumes from the ledger, which outlives any single release —
+  // so it can meet a campaign for a platform that WAS supported when the row was
+  // written and is not any more (YouTube). Skipping here is what keeps a
+  // disabled platform from being resurrected by resumption.
+  if (platform !== "TikTok" && platform !== "Instagram") {
     console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
     return null;
   }

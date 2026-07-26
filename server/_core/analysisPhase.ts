@@ -63,8 +63,15 @@ export const PHASE_NAMES = [
 
 export type PhaseName = (typeof PHASE_NAMES)[number];
 
-/** Platform tools plug into the SAME phase; a fourth platform is an
- *  implementation, not an architecture change. */
+/**
+ * Platform tools plug into the SAME phase; a fourth platform is an
+ * implementation, not an architecture change.
+ *
+ * "YouTube" stays in this union although the platform is DISABLED. The union
+ * names what the system can *describe* — historical rows still carry it, and
+ * `toolsetFor("YouTube")` has to typecheck in order to throw. What a platform
+ * can *do* is decided solely by the REGISTRY in phases/platformTools.ts.
+ */
 export type PlatformName = "TikTok" | "Instagram" | "YouTube";
 
 /**

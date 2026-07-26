@@ -990,10 +990,11 @@ export const appRouter = router({
     submit: publicProcedure
       .input(z.object({
         handles: z.array(z.string().min(1)).min(1).max(50),
-        // S4/S4b: all three platforms behind the same contract. A platform is
-        // queueable only once it has a registered toolset; toolsetFor still
-        // throws loudly for anything else.
-        platform: z.enum(["TikTok", "Instagram", "YouTube"]),
+        // A platform is queueable only while it has a REGISTERED toolset.
+        // YouTube is disabled (see YOUTUBE_TOOLSET in phases/platformTools.ts),
+        // so it is rejected here at the edge — zod answers BAD_REQUEST before a
+        // campaign row exists, rather than letting it fail deep in the runner.
+        platform: z.enum(["TikTok", "Instagram"]),
         /** Session 7: required to proceed when a handle already exists. */
         confirmDuplicate: z.boolean().optional(),
       }))
@@ -1165,14 +1166,16 @@ export const appRouter = router({
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Creator profile not found" });
         const lower = String(existing.platform).toLowerCase();
+        // YouTube is intentionally absent: legacy YouTube profiles are still
+        // readable, but they cannot be re-analysed while the platform has no
+        // registered toolset.
         const platform = lower === "instagram" ? "Instagram" as const
           : lower === "tiktok" ? "TikTok" as const
-          : lower === "youtube" ? "YouTube" as const
           : null;
         if (!platform) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: `Re-analysis supports TikTok, Instagram and YouTube (this profile is ${existing.platform}).`,
+            message: `Re-analysis supports TikTok and Instagram (this profile is ${existing.platform}).`,
           });
         }
         const campaigns = await submitCampaigns([{ handle: existing.handle ?? input.id, platform }]);

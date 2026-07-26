@@ -889,6 +889,35 @@ const youtubeGate: PlatformToolset["gate"] = (input) => {
   return { ok: true };
 };
 
+/**
+ * ─── DISABLED — NOT REGISTERED. YouTube is not a supported platform. ─────────
+ *
+ * This toolset is complete and correct against the contract; it is deliberately
+ * left out of `REGISTRY`, so `toolsetFor("YouTube")` throws like any other
+ * unsupported platform and no YouTube campaign can be created or processed.
+ *
+ * WHY IT IS DISABLED — four defects, all diagnosed, none repaired:
+ *   1. `USER_AGENTS` (httpClient.ts) holds 4 mobile agents in 16, so ~25% of
+ *      fetches return MWEB HTML that serialises `ytInitialData` as a
+ *      hex-escaped JS string. Every extractor pattern misses it.
+ *   2. The videos tab moved from `richItemRenderer.content.videoRenderer` to
+ *      `…content.lockupViewModel`, so the channel video list parses to zero.
+ *   3. The channel page dropped `c4TabbedHeaderRenderer` for
+ *      `pageHeaderRenderer`, so title and subscribers read empty — and
+ *      `videoCount` was never assigned at all.
+ *   4. `/api/timedtext` now answers HTTP 200 with an EMPTY body without a
+ *      proof-of-origin (`pot`) token, so no captions can be downloaded.
+ *
+ * RE-ENABLING requires (1)–(3) repaired AND a decision on (4): captions cannot
+ * be fetched at all today, so YouTube transcripts would have to come from audio
+ * speech-to-text — which changes `transcriptSource` from `subtitle` to
+ * `speech_to_text`, a FROZEN classification that needs explicit sign-off.
+ *
+ * Full diagnosis: docs/YOUTUBE_DISABLED.md. The scrapers under
+ * server/scraping/youtube/ are kept for the same reason — the diagnosis is
+ * complete, so deleting them would throw away work, but leaving them wired
+ * would keep a broken path live.
+ */
 export const YOUTUBE_TOOLSET: PlatformToolset = {
   capture: youtubeCapture,
   // The contract's optional-phase semantics, used for the first time: YouTube
@@ -909,13 +938,17 @@ export const YOUTUBE_TOOLSET: PlatformToolset = {
 };
 
 /**
- * Tool registry. S4 adds Instagram and YouTube entries here — that is the
- * WHOLE change at the architecture level.
+ * Tool registry — the ONE place a platform becomes supported.
+ *
+ * YouTube is deliberately absent: `YOUTUBE_TOOLSET` above is written and
+ * contract-complete, but not registered, so every path that resolves a toolset
+ * refuses it in exactly the same way it refuses an unknown platform. Removing
+ * the entry is the whole disable — no phase, runner, scheduler, queue or
+ * harness change is needed, which is the point of the contract.
  */
 const REGISTRY: Partial<Record<PlatformName, PlatformToolset>> = {
   TikTok: TIKTOK_TOOLSET,
   Instagram: INSTAGRAM_TOOLSET,
-  YouTube: YOUTUBE_TOOLSET,
 };
 
 export function toolsetFor(platform: PlatformName): PlatformToolset {

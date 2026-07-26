@@ -3493,6 +3493,22 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
+/**
+ * DEAD CODE, and the "Multi" platform is RETIRED IN PRACTICE.
+ *
+ * Nothing calls this. S3b made the queue the single entry point, so the live
+ * path is creatorCampaign → runCollection; `analysisQueue.test.ts` asserts that
+ * routers.ts never calls this function.
+ *
+ * Its "Multi" branch merged TikTok WITH YouTube. With YouTube disabled that
+ * branch has one working leg left, so it would return a TikTok result labelled
+ * `platform: "Multi"` — a worse TikTok analysis under a misleading name. Multi
+ * is therefore not meaningful and must not be revived as-is: `creator.submit`
+ * has never accepted it, and no caller can reach it.
+ *
+ * Kept, not deleted, for the same reason as the YouTube scrapers — see
+ * docs/YOUTUBE_DISABLED.md.
+ */
 export async function researchCreator(
   handleOrUrl: string,
   platform: string

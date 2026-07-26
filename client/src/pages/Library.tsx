@@ -986,7 +986,11 @@ export default function Library() {
                 <div className="text-[10px] font-semibold uppercase text-muted-foreground/40 mb-1.5">Platform</div>
                 <div className="flex flex-wrap gap-1.5">
                   <FilterChip label="All" active={!creatorFilters.platform} onClick={() => setCreatorFilters(f => ({ ...f, platform: undefined }))} />
-                  {["tiktok", "instagram", "youtube"].map(p => (
+                  {/* Supported platforms only — YouTube is disabled. The label,
+                      colour and icon for "youtube" are deliberately KEPT below
+                      so legacy YouTube rows still render correctly in the list;
+                      they just can no longer be filtered for or re-analysed. */}
+                  {["tiktok", "instagram"].map(p => (
                     <FilterChip key={p} label={PLATFORM_LABELS[p] ?? p} active={creatorFilters.platform === p} onClick={() => setCreatorFilters(f => ({ ...f, platform: f.platform === p ? undefined : p }))} />
                   ))}
                 </div>

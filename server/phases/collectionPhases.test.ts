@@ -47,15 +47,24 @@ describe("platform tool seam", () => {
     expect(ts.transcribe.name).toBe("instagram:reel_speech_to_text");
   });
 
-  it("YouTube is registered, with a NULL augment tool (S4b)", () => {
-    expect(registeredPlatforms()).toContain("YouTube");
-    const ts = toolsetFor("YouTube");
-    expect(ts.capture.name).toBe("youtube:channel_html");
-    expect(ts.transcribe.name).toBe("youtube:caption_xml");
-    // The contract's optional-phase semantics, exercised for the first time:
-    // YouTube has no augmentation step and says so, rather than registering a
-    // tool that does nothing.
-    expect(ts.augment).toBeNull();
+  it("YouTube is DISABLED — not registered, and resolving it throws", () => {
+    // YouTube is not a platform this product supports. The toolset still exists
+    // in the source (its parsers are broken and its caption endpoint returns an
+    // empty body — see docs/YOUTUBE_DISABLED.md), but it is absent from the
+    // registry, which is the ONLY thing that grants a platform capability.
+    expect(registeredPlatforms()).not.toContain("YouTube");
+    expect(() => toolsetFor("YouTube")).toThrow(/No phase toolset registered/);
+  });
+
+  it("the optional-augment contract is still exercised by a registered platform", () => {
+    // Guards what the deleted YouTube test used to prove: `augment: null` is a
+    // supported declaration, not an accident of one platform. TikTok and
+    // Instagram both declare an augment tool, so assert the contract shape
+    // rather than silently losing the coverage.
+    for (const p of registeredPlatforms()) {
+      const ts = toolsetFor(p);
+      expect(ts.augment === null || typeof ts.augment?.augment === "function").toBe(true);
+    }
   });
 
   it("an unregistered platform still fails LOUDLY", () => {
