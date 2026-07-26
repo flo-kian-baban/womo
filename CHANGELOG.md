@@ -12,6 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased] — Phased architecture S2 (in progress)
 
 ### Added
+- **Collection identity harness** (`collectionIdentity.test.ts`) — the
+  regression gate for the phased restructuring of collection, which the
+  evidence harness is structurally blind to. Replays recorded raw platform
+  payloads and asserts pool order, author-guard reject counts, and the exact
+  `(id, bucket)` sample sequence. Guards the invisible regression: a merge-order
+  or sampling-input change that shifts *which* videos become the corpus.
+- **Platform tool seam** (`phases/platformTools.ts`) — `CaptureTool` /
+  `AugmentTool` / `TranscribeTool` behind a registry. Adding Instagram or
+  YouTube in S4 is an implementation, not an architecture change; an
+  unregistered platform throws loudly rather than producing a silently empty
+  analysis.
+- **Phase units** for capture / augment / transcribe-selection / derive /
+  extract_commit, implementing the S1 contract: declared inputs read from
+  banked output, durable output, outcome + failure class. `extract_commit` is
+  FUSED (assemble → extract → snapshot → persist) so an extraction can never be
+  orphaned from its commit.
 - **Resume from banked output (M3)** — a campaign whose capture/augment/
   transcribe succeeded but which died at derive or extract_commit can re-run
   ONLY phases 4-5 from the ledger, without re-scraping. This is the failure
