@@ -9,6 +9,35 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phased architecture S2 (in progress)
+
+### Added
+- **Resume from banked output (M3)** — a campaign whose capture/augment/
+  transcribe succeeded but which died at derive or extract_commit can re-run
+  ONLY phases 4-5 from the ledger, without re-scraping. This is the failure
+  class that lost three historical runs when the LLM key went dead. Triggered
+  explicitly via `creator.resumeRun({runId})`; the analyst-facing button is S6
+  and automatic requeue is S3.
+- **Ledger round-trip guard** (`phaseLedger.integration.ts`) — asserts the
+  `output` column is `json`, that a realistic transcript round-trips
+  byte-identically, and that re-running a phase replaces only its own row.
+- Unit coverage for the 6-3-3 sampler, extracted and testable for the first
+  time (the identity harness cannot reach it).
+
+### Changed
+- **`analysis_phase_state.output`: `jsonb` → `json`** (womo_0010). Not
+  cosmetic: phases read their inputs back from this column and those values
+  land in the womo_0007 evidence snapshot, which the identity harness compares
+  byte-for-byte. `jsonb` normalizes key order and silently re-serialized every
+  transcript. Measured: jsonb round-trip byte-identical **false**, json **true**.
+- **`fetchTikTokTranscripts` decomposed** into four stages (API pool collection,
+  supplemental search, 6-3-3 sampling, per-video transcription). Statements
+  moved verbatim; the shared accumulators are now passed explicitly instead of
+  closed over. The hardened internals are untouched.
+- Prepared-evidence derivations extracted as pure functions
+  (`computeDeriveInputs`, `computeLocalPrepared`), preserving the deliberate
+  LLM-concurrency window.
+
 ## [Unreleased]
 
 ## [0.10.0] — 2026-07-25 — Phased architecture S1: foundation
