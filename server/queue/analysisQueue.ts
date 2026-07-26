@@ -234,6 +234,50 @@ async function loadBankedPhases(runId: string): Promise<CampaignState["phases"]>
 }
 
 /**
+ * Record that a campaign ended without committing, so it LEAVES the queue.
+ *
+ * ─── Why this is not optional ───────────────────────────────────────────────
+ * A campaign is "unfinished" until extract_commit banks a usable outcome. If a
+ * run ends any other way — a FROZEN evidence gate refusing to extract, a
+ * collection throw, an exhausted retry ladder — and nothing is written, the
+ * campaign stays unfinished forever: offered by findIncompleteCampaigns on
+ * every drain and displayed to the analyst as "queued" indefinitely, with no
+ * reason given. Found in ACCEPTANCE 1, where eight pre-S3b campaigns sat in the
+ * queue view as permanently queued.
+ *
+ * The failure class matters. A min-data refusal is `genuine_empty`: a
+ * deliberate, honest "we will not extract from this", terminal by definition and
+ * never retried. Everything else is `structural` — parked for a human rather
+ * than looped on, because a campaign that cannot succeed should stop asking.
+ */
+async function recordTerminalFailure(
+  runId: string,
+  subjectHint: string,
+  phase: PhaseName | null,
+  message: string | null,
+  status: CampaignOutcome["status"],
+): Promise<void> {
+  const terminal = status === "min_data_rejection";
+  try {
+    await recordPhaseState({
+      runId,
+      subjectHint,
+      phase: phase ?? "extract_commit",
+      tool: "queue:terminal",
+      status: terminal ? "genuine_empty" : "failed",
+      failureClass: terminal ? "genuine_empty" : "structural",
+      attemptCount: 1,
+      output: { terminal: true, status, message },
+    });
+    console.warn(`[queue] ${runId} (${subjectHint}) ended without committing: ${status} — ${message ?? "no detail"}`);
+  } catch (err) {
+    // The campaign is already failing; a failed terminal write would leave it
+    // spinning, so this is loud rather than swallowed.
+    console.error(`[queue] ${runId}: could not record terminal failure — it will be retried:`, err);
+  }
+}
+
+/**
  * Run one campaign to completion, beating its heartbeat so a live phase is never
  * mistaken for an abandoned one.
  */
@@ -256,12 +300,15 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
 
   try {
     const banked = await loadBankedPhases(runId);
-    return await withAnalysisRun(runId, () => runCreatorCampaign(
+    const outcome = await withAnalysisRun(runId, () => runCreatorCampaign(
       { runId, handle: handle!, platform: "TikTok", initialPhases: banked },
       deps,
     ));
+    if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);
+    return outcome;
   } catch (err) {
     console.error(`[queue] ${runId} (${subjectHint}) threw:`, err);
+    await recordTerminalFailure(runId, subjectHint, null, err instanceof Error ? err.message : String(err), "error");
     return null;
   } finally {
     clearInterval(beat);

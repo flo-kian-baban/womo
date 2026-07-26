@@ -312,12 +312,34 @@ export async function reclaimStaleRunning(
  * failed/blocked, or extract_commit never reached a usable outcome. This is the
  * boot loop's "what did the last process leave behind?" query.
  */
-export async function findIncompleteCampaigns(limit = 100): Promise<Array<{
+export const RESUMABLE_AGE_MS = 24 * 60 * 60 * 1000;
+
+export async function findIncompleteCampaigns(
+  limit = 100,
+  /**
+   * How far back a campaign may be and still count as "in flight".
+   *
+   * WHY THIS BOUND EXISTS. Without it the boot loop resurrects the entire
+   * history of unfinished campaigns and runs them with TODAY's code. That is not
+   * hypothetical: a pre-S2 run was resumed whose `augment` output still had the
+   * S1 shadow-bank shape (`{searchTitles: []}`) instead of the phase shape
+   * (`{pool: {...}}`), and the assembly died on
+   * "Cannot read properties of undefined (reading 'videoTitles')". Phase outputs
+   * carry no schema version, so old rows are not safely replayable.
+   *
+   * A campaign from days ago is history, not in-flight work. Resumption is for
+   * what the last process was actually doing.
+   */
+  maxAgeMs: number = RESUMABLE_AGE_MS,
+): Promise<Array<{
   runId: string; subjectHint: string; phases: Array<{ phase: string; status: string; nextEarliestAt: Date | null }>;
 }>> {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(analysisPhaseState).orderBy(analysisPhaseState.createdAt);
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const rows = await db.select().from(analysisPhaseState)
+    .where(sql`${analysisPhaseState.createdAt} >= ${cutoff}`)
+    .orderBy(analysisPhaseState.createdAt);
   const byRun = new Map<string, typeof rows>();
   for (const r of rows) {
     const list = byRun.get(r.runId) ?? [];
@@ -410,6 +432,16 @@ export async function scanReadyWork(now: Date = new Date(), limit = 50) {
   return db.select().from(analysisPhaseState)
     .where(and(
       inArray(analysisPhaseState.status, [...READY_STATUSES]),
+      // A structural failure NEVER requeues, and a genuine_empty is a confirmed
+      // fact — `isRequeueable` in the S1 contract says so. The scan has to agree:
+      // without this, a permanently-failed phase reads as ready on every tick and
+      // the queue retries it forever. Observed live — a campaign whose banked
+      // output predated the current phase schema failed structurally and was
+      // picked up again on every drain.
+      or(
+        isNull(analysisPhaseState.failureClass),
+        sql`${analysisPhaseState.failureClass} NOT IN ('structural','genuine_empty')`,
+      ),
       or(
         isNull(analysisPhaseState.nextEarliestAt),
         sql`${analysisPhaseState.nextEarliestAt} <= ${now}`,

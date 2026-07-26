@@ -154,6 +154,58 @@ suite("analysis queue durability (ephemeral Postgres)", () => {
     expect((await getCampaignStatus(runId))?.state).toBe("complete");
   });
 
+  it("a STRUCTURAL failure is never rescanned — the infinite-retry bug", async () => {
+    // The S1 contract's isRequeueable says structural never requeues. The scan
+    // has to agree, or a permanently-failed phase reads as ready on every tick
+    // and the queue retries it forever. Observed live during ACCEPTANCE 2: a
+    // campaign whose banked output predated the current phase schema failed
+    // structurally and was picked up again on every single drain.
+    const runId = crypto.randomUUID();
+    runIds.push(runId);
+    await db.recordPhaseState({
+      runId, subjectHint: "structural@TikTok", phase: "extract_commit", tool: "queue:terminal",
+      status: "failed", failureClass: "structural", attemptCount: 1,
+      output: { terminal: true, message: "shape changed" },
+    });
+
+    expect((await db.scanReadyWork(new Date(), 200)).filter(r => r.runId === runId)).toHaveLength(0);
+    expect((await db.findIncompleteCampaigns(200)).map(c => c.runId)).not.toContain(runId);
+    expect((await getCampaignStatus(runId))?.state).toBe("failed");
+  });
+
+  it("a TRANSIENT failure with no gate is still ready — retries must survive", async () => {
+    // The guard above must not over-block: transient is the class that SHOULD
+    // come back.
+    const runId = crypto.randomUUID();
+    runIds.push(runId);
+    await db.recordPhaseState({
+      runId, subjectHint: "transient@TikTok", phase: "capture", tool: "t",
+      status: "failed", failureClass: "transient", attemptCount: 1,
+    });
+    expect((await db.scanReadyWork(new Date(), 200)).filter(r => r.runId === runId)).toHaveLength(1);
+  });
+
+  it("resumption is bounded by age — history is not in-flight work", async () => {
+    // Phase outputs carry no schema version, so an old row is not safely
+    // replayable with today's code. A pre-S2 campaign WAS resumed in
+    // ACCEPTANCE 1 whose augment output still had the S1 shadow-bank shape
+    // ({searchTitles: []} rather than {pool: {...}}), and the assembly died on
+    // "Cannot read properties of undefined (reading 'videoTitles')".
+    const runId = crypto.randomUUID();
+    runIds.push(runId);
+    await bankedComplete(runId, "ancient@TikTok", "capture", { ok: true });
+    await client.query(
+      `update analysis_phase_state set created_at = now() - interval '3 days' where run_id = $1`,
+      [runId],
+    );
+
+    // Unfinished, but far too old to be what the last process was doing.
+    expect((await db.findIncompleteCampaigns(200)).map(c => c.runId)).not.toContain(runId);
+    // Widen the window and it reappears — the row is intact, only excluded.
+    expect((await db.findIncompleteCampaigns(200, 7 * 24 * 60 * 60 * 1000)).map(c => c.runId))
+      .toContain(runId);
+  });
+
   it("a PARKED phase waits for its gate, then becomes ready", async () => {
     const runId = crypto.randomUUID();
     runIds.push(runId);
