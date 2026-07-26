@@ -21,6 +21,7 @@ import type {
   CampaignState,
   PhaseResult,
   PhaseRunContext,
+  PlatformName,
 } from "../_core/analysisPhase";
 import { NOT_READY } from "../_core/analysisPhase";
 import {
@@ -33,6 +34,7 @@ import {
   type ResumableBankedPhases,
 } from "../webResearch";
 import { classifyPhaseError } from "./collectionPhases";
+import { toolsetFor } from "./platformTools";
 import type { CapturePhaseOutput, AugmentPhaseOutput, TranscribePhaseOutput } from "./collectionPhases";
 export type { TranscribePhaseOutput };
 
@@ -155,6 +157,7 @@ export function makeDerivePhase(deps: {
  */
 export function assembleFromPhases(
   handle: string,
+  platform: PlatformName,
   input: DerivePhaseInput,
   derived: DerivePhaseOutput,
 ): CreatorResearchResult {
@@ -179,7 +182,7 @@ export function assembleFromPhases(
   const bankedEvidence: BankedCreatorEvidence = {
     schemaVersion: 1,
     handle,
-    platform: "TikTok",
+    platform,
     capture: {
       displayName: input.capture.stats.displayName,
       bio: input.capture.stats.bio,
@@ -188,7 +191,7 @@ export function assembleFromPhases(
       videoCount: input.capture.stats.videoCount,
       totalLikes: input.capture.stats.totalLikes,
       location: localPrepared.location,
-      profileUrl: `https://www.tiktok.com/@${handle}`,
+      profileUrl: toolsetFor(platform).profileUrl(handle),
     },
     collection: {
       transcripts: input.transcribe.transcripts,
@@ -207,7 +210,12 @@ export function assembleFromPhases(
     derived: { contentThemeLabels: derived.contentThemeLabels, decodedSymbols: derived.decodedSymbols },
   };
 
-  return assembleCreatorResearchResult(bankedEvidence);
+  // S4: the platform appends its own evidence, verbatim. TikTok returns "",
+  // which the evidence harness proves keeps the assembly byte-identical.
+  return assembleCreatorResearchResult(
+    bankedEvidence,
+    toolsetFor(platform).evidenceExtras({ handle, capture: input.capture }),
+  );
 }
 
 // ─── P5: extract_commit (FUSED — see module header) ──────────────────────────
@@ -219,7 +227,7 @@ export interface ExtractCommitOutput {
   evidenceSummaryBytes: number;
 }
 
-export function makeExtractCommitPhase(deps: {
+export function makeExtractCommitPhase(platform: PlatformName, deps: {
   extract: (handleOrUrl: string, platform: string, evidenceSummary: string) => Promise<Record<string, unknown>>;
   buildSnapshot: (handleOrUrl: string, platform: string, evidenceSummary: string | undefined, structured: unknown) => unknown;
   persist: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -241,17 +249,17 @@ export function makeExtractCommitPhase(deps: {
       const started = Date.now();
       try {
         // FUSED: assemble → extract → snapshot → persist, in one unit.
-        const research = assembleFromPhases(input.handle, input, input.derived);
-        const extracted = await deps.extract(input.handle, "TikTok", research.evidenceSummary ?? "");
+        const research = assembleFromPhases(input.handle, platform, input, input.derived);
+        const extracted = await deps.extract(input.handle, platform, research.evidenceSummary ?? "");
         const persistResult = await deps.persist({
           handle: input.handle,
-          platform: "TikTok",
+          platform,
           profileUrl: research.profileUrl,
           displayName: extracted.displayName,
           pronouns: extracted.pronouns,
           extracted,
           research,
-          evidenceSnapshot: deps.buildSnapshot(input.handle, "TikTok", research.evidenceSummary, research),
+          evidenceSnapshot: deps.buildSnapshot(input.handle, platform, research.evidenceSummary, research),
         });
         const persistence = deps.summarize(persistResult);
         const outcome = persistence.saved === "full" ? "complete" as const

@@ -34,11 +34,11 @@
  * and makes a campaign runnable in tests without a database or an LLM.
  */
 import { TRPCError } from "@trpc/server";
-import type { CampaignState, PhaseName, PhaseStateEntry } from "../_core/analysisPhase";
+import type { CampaignState, PhaseName, PhaseStateEntry, PlatformName } from "../_core/analysisPhase";
 import { runPhases, bankedOutput, type BankFn } from "./phaseRunner";
 import { makeSchedulerExecute } from "./phaseScheduler";
 import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
-import { runTikTokCollection } from "../webResearch";
+import { runCollection } from "../webResearch";
 import type { CreatorResearchResult } from "../webResearch";
 
 /** Everything the campaign needs from routers.ts, injected. */
@@ -75,7 +75,7 @@ export interface CampaignPersistenceSummary {
 export interface CampaignOutcome {
   runId: string;
   handle: string;
-  platform: "TikTok";
+  platform: PlatformName;
   /** Did the campaign reach a committed observation? */
   committed: boolean;
   subjectId: string | null;
@@ -122,7 +122,7 @@ export async function runCreatorCampaign(
   args: {
     runId: string;
     handle: string;
-    platform: "TikTok";
+    platform: PlatformName;
     deadlineAt?: number;
     initialPhases?: CampaignState["phases"];
   },
@@ -138,14 +138,14 @@ export async function runCreatorCampaign(
   // ── Phases 1-4 + the FROZEN gates + the pure assembly ──
   let collected;
   try {
-    collected = await runTikTokCollection(args.handle, args.initialPhases);
+    collected = await runCollection(args.handle, args.platform, args.initialPhases);
   } catch (err) {
     const { status, message } = classifyCollectionFailure(err);
     return { ...base, status, message };
   }
 
   // ── Phase 5: extract_commit, through the same runner ──
-  const extractCommitPhase = makeExtractCommitPhase({
+  const extractCommitPhase = makeExtractCommitPhase(args.platform, {
     extract: deps.extract,
     buildSnapshot: deps.buildSnapshot,
     persist: deps.persist,

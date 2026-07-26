@@ -23,7 +23,7 @@ import { Client } from "pg";
 import { TRPCError } from "@trpc/server";
 
 // Mock ONLY the two impure boundaries so a campaign runs offline and
-// deterministically. runTikTokCollection (scraping) and extractCreatorProfile
+// deterministically. runCollection (scraping) and extractCreatorProfile
 // (LLM) are overridden; everything else in those modules — and all of db.ts /
 // routers.ts — stays real, including buildCreatorExtractionPrompts used by the
 // evidence-snapshot writer.
@@ -35,7 +35,7 @@ import { TRPCError } from "@trpc/server";
 // your own knowledge" prompt branch would fabricate a profile.
 vi.mock("../webResearch", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../webResearch")>();
-  return { ...actual, runTikTokCollection: vi.fn() };
+  return { ...actual, runCollection: vi.fn() };
 });
 vi.mock("../aiExtraction", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../aiExtraction")>();
@@ -44,7 +44,7 @@ vi.mock("../aiExtraction", async (importOriginal) => {
 
 import * as db from "../db";
 import { persistCreatorToV2, creatorCampaignDeps } from "../routers";
-import { runTikTokCollection } from "../webResearch";
+import { runCollection } from "../webResearch";
 import { runCreatorCampaign } from "../phases/creatorCampaign";
 import { extractCreatorProfile } from "../aiExtraction";
 import { newRunId, withAnalysisRun } from "../_core/runContext";
@@ -54,7 +54,7 @@ if (TEST_URL) process.env.DATABASE_URL = TEST_URL;
 
 const suite = TEST_URL ? describe : describe.skip;
 const here = path.dirname(fileURLToPath(import.meta.url));
-const mockCollect = runTikTokCollection as unknown as ReturnType<typeof vi.fn>;
+const mockCollect = runCollection as unknown as ReturnType<typeof vi.fn>;
 const mockExtract = extractCreatorProfile as unknown as ReturnType<typeof vi.fn>;
 
 
@@ -215,7 +215,7 @@ suite("session 8: correctness fixes (ephemeral Postgres)", () => {
       contentThemes: ["Theme"], transcripts: [], transcriptCount: 0, transcriptExcerpts: "",
       // Non-empty evidence summary → the guard passes and extraction runs.
       evidenceSummary: "CREATOR RESEARCH EVIDENCE — @happy_target (TikTok)\nFollowers: 700",
-    } } as unknown as Awaited<ReturnType<typeof runTikTokCollection>>);
+    } } as unknown as Awaited<ReturnType<typeof runCollection>>);
 
     mockExtract.mockResolvedValueOnce({
       handle: "happy_target", platform: "TikTok", displayName: "Happy Target",

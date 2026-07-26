@@ -54,8 +54,9 @@ import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseObservation, type PhaseStateWrite } from "./db";
 import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
+import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
-import type { CampaignState } from "./_core/analysisPhase";
+import type { CampaignState, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
   makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
@@ -76,7 +77,7 @@ export interface TranscriptEntry {
   caption: string;       // The video's text caption / title
   transcript: string;    // Full spoken transcript (plain text)
   wordCount: number;
-  bucket?: "recent" | "mid" | "anchor"; // 6-3-3 temporal bucket
+  bucket?: SampleBucket; // temporal bucket where the platform samples temporally
   createTime?: number;   // Unix timestamp (seconds)
   transcriptSource?: string; // normalized via @shared/transcriptSource (subtitle | speech_to_text | post_caption)
   // Phase 1.6 metadata
@@ -139,7 +140,7 @@ export interface CreatorResearchResult {
     musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
     durationSec: number;
     /** C3: 6-3-3 sample membership, set for all 12 sampled videos regardless of transcript success. */
-    temporalBucket?: "recent" | "mid" | "anchor";
+    temporalBucket?: SampleBucket;
   }>;
 }
 
@@ -418,7 +419,7 @@ async function fetchVideoTranscriptMultiPath(
   handle: string,
   videoId: string,
   caption: string,
-  bucket: "recent" | "mid" | "anchor" = "recent",
+  bucket: SampleBucket = "recent",
   createTime?: number,
   metadata?: { musicTitle?: string; musicOriginal?: boolean; duetEnabled?: boolean; stitchEnabled?: boolean; durationMs?: number; collaborations?: string[] },
   /** Shared Playwright context — reused across the batch to avoid one browser tab per video */
@@ -978,7 +979,7 @@ export function selectLongitudinalSample(
  */
 export async function transcribeSampledVideos(
   handle: string,
-  sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>,
+  sampledVideos: Array<{ item: PoolVideoItem; bucket: SampleBucket }>,
 ): Promise<TranscriptEntry[]> {
   const transcripts: TranscriptEntry[] = [];
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
@@ -1044,7 +1045,7 @@ export function assembleTranscribeOutputs(
   handle: string,
   videoItems: PoolVideoItem[],
   transcripts: TranscriptEntry[],
-  sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>,
+  sampledVideos: Array<{ item: PoolVideoItem; bucket: SampleBucket }>,
 ): {
   engagementSignals: EngagementSignals;
   longitudinalSample: LongitudinalSample;
@@ -1836,7 +1837,16 @@ export function computeLocalPrepared(input: {
  * that, formatDecodedSymbolsBlock) are untouched by the seam work — only where
  * their inputs come from changed.
  */
-export function assembleCreatorResearchResult(b: BankedCreatorEvidence): CreatorResearchResult {
+export function assembleCreatorResearchResult(
+  b: BankedCreatorEvidence,
+  /**
+   * S4: platform-specific evidence appended verbatim to the summary. Instagram
+   * contributes its business-signals block here; TikTok and YouTube contribute
+   * "". Defaulted so every existing caller — including the evidence harness's
+   * frozen pre-seam reference — behaves exactly as before.
+   */
+  evidenceExtras = "",
+): CreatorResearchResult {
   const decodedSymbolsBlock = b.derived.decodedSymbols
     ? formatDecodedSymbolsBlock(b.derived.decodedSymbols)
     : "";
@@ -1862,7 +1872,7 @@ export function assembleCreatorResearchResult(b: BankedCreatorEvidence): Creator
     transcripts: b.collection.transcripts,
     engagementSignals: b.collection.engagementSignals,
     decodedSymbolsBlock,
-  });
+  }) + evidenceExtras;
 
   // Compute data confidence level (thresholds FROZEN — unchanged).
   const dataConfidenceLevel: CreatorResearchResult["dataConfidenceLevel"] =
@@ -2130,7 +2140,7 @@ RULE 4: If data confidence is LOW, set identityCoherenceScore to 40 or below and
  *                   retry → "retry in a minute", NOT "verify the handle";
  *   unknown       — no assessment available (prefetch itself failed) → generic.
  */
-function emptyCaptureMessage(
+export function emptyCaptureMessage(
   handle: string,
   capture: { videosCaptured: number; statedVideoCount: number | null; emptyCaptureRetried: boolean; genuineEmpty: boolean } | undefined,
   generic: string,
@@ -2193,8 +2203,9 @@ export interface TikTokCollectionCampaign {
  * They throw, exactly as before; the campaign turns that throw into a terminal
  * campaign outcome carrying the same honest message.
  */
-export async function runTikTokCollection(
+export async function runCollection(
   handleOrUrl: string,
+  platform: PlatformName,
   /**
    * Banked state from a previous attempt (S3b). The runner skips any phase
    * already banked as usable, so a RESUMED campaign re-runs only what it has
@@ -2204,12 +2215,12 @@ export async function runTikTokCollection(
   initialPhases?: CampaignState["phases"],
 ): Promise<TikTokCollectionCampaign> {
   const handle = extractHandle(handleOrUrl);
-  const subjectHint = `${handle}@TikTok`;
+  const subjectHint = `${handle}@${platform}`;
   const runId = currentRunId();
 
-  const capturePhase = makeCapturePhase("TikTok");
-  const augmentPhase = makeAugmentPhase("TikTok");
-  const transcribePhase = makeTranscribePhase("TikTok");
+  const capturePhase = makeCapturePhase(platform);
+  const augmentPhase = makeAugmentPhase(platform);
+  const transcribePhase = makeTranscribePhase(platform);
   const derivePhase = makeDerivePhase({
     translateKeywordsToThemes,
     decodeCreatorSymbols: (i) => decodeCreatorSymbols(i),
@@ -2218,7 +2229,7 @@ export async function runTikTokCollection(
   const summary = await runPhases({
     runId: runId ?? "no-run-context",
     handle,
-    platform: "TikTok",
+    platform,
     phases: [capturePhase, augmentPhase, transcribePhase, derivePhase] as never,
     // Resumed campaigns skip whatever the ledger already holds as usable.
     initialPhases,
@@ -2266,15 +2277,21 @@ export async function runTikTokCollection(
   const transcribe = bankedOutput<TranscribePhaseOutput>(summary, "transcribe");
   const derived = bankedOutput<DerivePhaseOutput>(summary, "derive");
 
-  // ── Gate: the capture phase produced nothing usable ──
-  // Mirrors the inline path's !hasAnyData branch, including the honest
-  // transient-vs-genuine message (scraper-reliability Part 2).
-  const captureAssessment = capture?.assessment as Parameters<typeof emptyCaptureMessage>[1];
+  // ── Evidence gate (S4) ──
+  // The platform decides whether its evidence is fit to extract from, and words
+  // that decision in its own FROZEN text. The driver only asks and throws.
+  // Runs BETWEEN phase 4 and phase 5: a single five-phase pass would persist a
+  // profile the min-data gate exists to refuse.
+  const verdict = toolsetFor(platform).gate({ handle, capture, augment, transcribe });
+  if (!verdict.ok) {
+    throw new TRPCError({ code: verdict.code, message: verdict.message });
+  }
   if (!capture) {
+    // Unreachable once a gate refuses a null capture, but the assembly below
+    // dereferences it, so this keeps the type honest rather than asserting.
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: emptyCaptureMessage(handle, captureAssessment,
-        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
+      message: `No public content found for @${handle}.`,
     });
   }
 
@@ -2297,41 +2314,8 @@ export async function runTikTokCollection(
   };
   const { allTitles } = reconstructMergedInputs(banked);
 
-  const hasContentData = transcripts.length > 0 || allTitles.length > 0;
-  const hasAnyData = hasContentData || capture.stats.followerCount > 0 || capture.stats.bio.length > 0;
-
-  // ── Gate: quota exhausted with no content (FROZEN) ──
-  if (augment?.quotaExhausted && !hasContentData) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: `The TikTok data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
-    });
-  }
   if (augment?.quotaExhausted) {
     console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
-  }
-
-  // ── Gate: truly nothing available (FROZEN) ──
-  if (!hasAnyData) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: emptyCaptureMessage(handle, captureAssessment,
-        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
-    });
-  }
-
-  // ── Gate: minimum data threshold (FROZEN — thresholds unchanged) ──
-  const realTranscripts = transcripts.filter(t => isSpeechTranscript(t.transcriptSource));
-  const totalVideoPool = transcribe?.discoveredVideoPool?.length ?? 0;
-  console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
-
-  if (realTranscripts.length < 2 && allTitles.length < 4) {
-    const counts = `${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles.`;
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, captureAssessment,
-        `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
-    });
   }
 
   if (!augment || !transcribe || !derived) {
@@ -2345,7 +2329,7 @@ export async function runTikTokCollection(
   if (runId) flushCollectionFixture(runId);
 
   // Stage E — the SAME pure assembly the resume path uses.
-  const result = assembleFromPhases(handle, { handle, capture, augment, transcribe }, derived);
+  const result = assembleFromPhases(handle, platform, { handle, capture, augment, transcribe }, derived);
   maybeDumpEvidenceFixture({
     schemaVersion: 1, handle, platform: "TikTok",
     capture: {
@@ -2378,7 +2362,7 @@ export async function runTikTokCollection(
  * assembled evidence. Unchanged behaviour; the banked state is simply dropped.
  */
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
-  return (await runTikTokCollection(handleOrUrl)).research;
+  return (await runCollection(handleOrUrl, "TikTok")).research;
 }
 
 // ─── Instagram Creator Research ───────────────────────────────────────────────

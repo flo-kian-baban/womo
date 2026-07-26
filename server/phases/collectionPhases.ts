@@ -25,6 +25,7 @@ import type {
   PlatformName,
 } from "../_core/analysisPhase";
 import { NOT_READY } from "../_core/analysisPhase";
+import type { SampleBucket } from "../_core/analysisPhase";
 import { isBrowserDeadError } from "../scraping/browserClient";
 import type {
   CreatorResearchResult, EngagementSignals, LongitudinalSample,
@@ -252,7 +253,7 @@ export function selectSampleForPlatform(
   handle: string,
   pool: PoolVideoItem[],
   nowSec: number,
-): Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }> {
+): Array<{ item: PoolVideoItem; bucket: SampleBucket }> {
   return toolsetFor(platform).transcribe.selectSample(handle, pool, nowSec);
 }
 

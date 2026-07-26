@@ -28,7 +28,7 @@
  * persist into ONE content_items table and one CreatorResearchResult today,
  * which is what makes a single contract honest here.
  */
-import type { PlatformName } from "../_core/analysisPhase";
+import type { PlatformName, SampleBucket } from "../_core/analysisPhase";
 import type {
   CreatorResearchResult, EngagementSignals, LongitudinalSample,
   PoolVideoItem, TranscriptEntry,
@@ -40,6 +40,8 @@ import {
   selectLongitudinalSample,
   transcribeSampledVideos,
 } from "../webResearch";
+import { emptyCaptureMessage } from "../webResearch";
+import { isSpeechTranscript } from "@shared/transcriptSource";
 import { scrapeTikTokProfile } from "../scraping/tiktok/profileScraper";
 
 // ─── Shared shapes every platform tool speaks ────────────────────────────────
@@ -99,7 +101,34 @@ export interface AugmentTool {
   augment(handle: string, pool: ToolPoolState): Promise<void>;
 }
 
-export type SampledVideo = { item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" };
+/** Declared in the contract (_core/analysisPhase.ts) — see SampleBucket there. */
+export type { SampleBucket };
+
+export type SampledVideo = { item: PoolVideoItem; bucket: SampleBucket };
+
+// ─── Evidence gate (S4 contract extension) ───────────────────────────────────
+
+/**
+ * A platform's verdict on whether the evidence it collected is fit to extract
+ * from. Returned as DATA so the shared driver decides what to do with it.
+ */
+export type GateVerdict =
+  | { ok: true }
+  | {
+      ok: false;
+      /** tRPC code, preserved per platform (NOT_FOUND / TOO_MANY_REQUESTS / …). */
+      code: "NOT_FOUND" | "TOO_MANY_REQUESTS" | "PRECONDITION_FAILED";
+      /** The analyst-facing message, FROZEN and platform-specific. */
+      message: string;
+    };
+
+/** What the gate reads: the banked outputs of phases 1-4. */
+export interface GateInput {
+  handle: string;
+  capture: unknown;
+  augment: unknown;
+  transcribe: unknown;
+}
 
 export interface TranscribeTool {
   platform: PlatformName;
@@ -132,6 +161,49 @@ export interface PlatformToolset {
    *  phase records a skipped outcome rather than failing. */
   augment: AugmentTool | null;
   transcribe: TranscribeTool;
+
+  /**
+   * S4 CONTRACT EXTENSION — the evidence gate.
+   *
+   * WHY THIS IS A TOOL AND NOT A BRANCH. Every platform decides "is this
+   * evidence fit to extract from at all?", and every platform words that
+   * decision differently in FROZEN, analyst-facing text: TikTok distinguishes a
+   * transient block from a genuinely empty profile, Instagram says "on
+   * Instagram", YouTube names its data API. Those messages are interpretation,
+   * not plumbing. A shared driver with three message sets inside it would be a
+   * platform branch in shared code — exactly what the architecture forbids. As a
+   * tool, the driver only ever asks the toolset and throws what it is handed.
+   *
+   * Runs BETWEEN phase 4 and phase 5: a campaign that runs all five phases in
+   * one pass would persist a profile the min-data gate exists to refuse.
+   */
+  gate(input: GateInput): GateVerdict;
+
+  /**
+   * The canonical public profile URL for a handle. Platform-specific by nature
+   * and previously hardcoded in the shared assembly; a pure per-platform fact,
+   * so it belongs with the platform's other facts rather than in a branch.
+   */
+  profileUrl(handle: string): string;
+
+  /**
+   * S4 CONTRACT EXTENSION — platform-specific evidence.
+   *
+   * Appended verbatim to the assembled evidence summary. TikTok and YouTube
+   * return ""; Instagram returns its business-signals block, which the monolith
+   * appended after buildCreatorEvidenceSummary and which the shared assembly had
+   * no way to produce — routing Instagram through the shared path without this
+   * would silently drop it from what the model reads.
+   *
+   * Must be a PURE function of banked evidence: the assembly is byte-compared.
+   */
+  evidenceExtras(banked: EvidenceExtrasInput): string;
+}
+
+/** The banked capture stats an extras block may draw on. */
+export interface EvidenceExtrasInput {
+  handle: string;
+  capture: unknown;
 }
 
 // ─── TikTok implementation (reuses the hardened internals verbatim) ──────────
@@ -212,10 +284,85 @@ const tiktokTranscribe: TranscribeTool = {
   },
 };
 
+/**
+ * TikTok's evidence gate. Every message below is VERBATIM from the pre-S4
+ * collection driver — the transient-vs-genuine discriminator
+ * (`emptyCaptureMessage`, scraper-reliability Part 2), the quota refusal, and
+ * the no-data refusal. Moving them must not reword them.
+ */
+const tiktokGate: PlatformToolset["gate"] = (input) => {
+  const capture = input.capture as TikTokGateCapture | null;
+  const augment = input.augment as { quotaExhausted?: boolean; pool?: { videoTitles?: string[] } } | null;
+  const transcribe = input.transcribe as { transcripts?: unknown[]; discoveredVideoPool?: unknown[] } | null;
+  const handle = input.handle;
+
+  const generic = `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`;
+
+  // ── Gate: the capture phase produced nothing usable ──
+  if (!capture) {
+    return { ok: false, code: "NOT_FOUND", message: emptyCaptureMessage(handle, undefined, generic) };
+  }
+
+  // Defensive reads throughout: a RESUMED campaign can hand this banked output
+  // written by an older schema, and a gate that throws is reported by the queue
+  // as a crash rather than as the refusal it actually is.
+  const transcripts = transcribe?.transcripts ?? [];
+  const allTitles = augment?.pool?.videoTitles ?? capture.pool?.videoTitles ?? [];
+  const hasContentData = transcripts.length > 0 || allTitles.length > 0;
+  const followerCount = Number(capture.stats?.followerCount ?? 0);
+  const bio = String(capture.stats?.bio ?? "");
+  const hasAnyData = hasContentData || followerCount > 0 || bio.length > 0;
+
+  // ── Gate: quota exhausted with no content (FROZEN) ──
+  if (augment?.quotaExhausted && !hasContentData) {
+    return {
+      ok: false,
+      code: "TOO_MANY_REQUESTS",
+      message: `The TikTok data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
+    };
+  }
+
+  const assessment = capture.assessment as Parameters<typeof emptyCaptureMessage>[1];
+
+  // ── Gate: truly nothing available (FROZEN) ──
+  if (!hasAnyData) {
+    return { ok: false, code: "NOT_FOUND", message: emptyCaptureMessage(handle, assessment, generic) };
+  }
+
+  // ── Gate: minimum data threshold (FROZEN — thresholds unchanged) ──
+  const realTranscripts = (transcripts as Array<{ transcriptSource?: string }>)
+    .filter(t => isSpeechTranscript(t.transcriptSource));
+  const totalVideoPool = transcribe?.discoveredVideoPool?.length ?? 0;
+  console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
+
+  if (realTranscripts.length < 2 && allTitles.length < 4) {
+    const counts = `${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles.`;
+    return {
+      ok: false,
+      code: "PRECONDITION_FAILED",
+      message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, assessment,
+        `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
+    };
+  }
+
+  return { ok: true };
+};
+
+interface TikTokGateCapture {
+  stats?: { followerCount?: number; bio?: string };
+  pool?: { videoTitles?: string[] };
+  assessment?: unknown;
+}
+
 export const TIKTOK_TOOLSET: PlatformToolset = {
   capture: tiktokCapture,
   augment: tiktokAugment,
   transcribe: tiktokTranscribe,
+  gate: tiktokGate,
+  profileUrl: (handle) => `https://www.tiktok.com/@${handle}`,
+  // TikTok contributes no evidence beyond what the shared builder produces.
+  // The evidence harness proves this keeps the assembly byte-identical.
+  evidenceExtras: () => "",
 };
 
 /**

@@ -91,7 +91,7 @@ describe("declared inputs", () => {
     translateKeywordsToThemes: async () => [],
     decodeCreatorSymbols: async () => null,
   });
-  const commit = makeExtractCommitPhase({
+  const commit = makeExtractCommitPhase("TikTok", {
     extract: async () => ({}), buildSnapshot: () => ({}),
     persist: async () => ({}), summarize: () => ({ saved: "full" }),
   });
@@ -150,7 +150,7 @@ describe("derive phase execution", () => {
 describe("extract_commit is FUSED", () => {
   it("a persist failure fails the whole phase — no orphaned extraction", async () => {
     const extract = vi.fn(async () => ({ displayName: "d", pronouns: "they/them" }));
-    const commit = makeExtractCommitPhase({
+    const commit = makeExtractCommitPhase("TikTok", {
       extract,
       buildSnapshot: () => ({}),
       persist: async () => { throw new Error("db down"); },
@@ -163,7 +163,7 @@ describe("extract_commit is FUSED", () => {
   });
 
   it("a partial persist is reported as partial, carrying the observation id", async () => {
-    const commit = makeExtractCommitPhase({
+    const commit = makeExtractCommitPhase("TikTok", {
       extract: async () => ({ displayName: "d" }),
       buildSnapshot: () => ({}),
       persist: async () => ({ subjectId: "s1", observationId: "o1" }),
@@ -179,7 +179,7 @@ describe("extract_commit is FUSED", () => {
     // produced this extraction. Fusing them is what guarantees it.
     let extractedSummary = "";
     let snapshotSummary: string | undefined = "";
-    const commit = makeExtractCommitPhase({
+    const commit = makeExtractCommitPhase("TikTok", {
       extract: async (_h, _p, summary) => { extractedSummary = summary; return { displayName: "d" }; },
       buildSnapshot: (_h, _p, summary) => { snapshotSummary = summary; return {}; },
       persist: async () => ({ subjectId: "s", observationId: "o" }),
@@ -193,13 +193,13 @@ describe("extract_commit is FUSED", () => {
 
 describe("assembleFromPhases", () => {
   it("is deterministic — same banked phases produce byte-identical evidence", () => {
-    const a = assembleFromPhases("fixture.creator", input, derived);
-    const b = assembleFromPhases("fixture.creator", input, derived);
+    const a = assembleFromPhases("fixture.creator", "TikTok", input, derived);
+    const b = assembleFromPhases("fixture.creator", "TikTok", input, derived);
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
   it("includes the search-discovered titles in the evidence the model reads", () => {
-    const res = assembleFromPhases("fixture.creator", input, derived);
+    const res = assembleFromPhases("fixture.creator", "TikTok", input, derived);
     expect(res.recentVideoTitles).toContain("search title a #alpha");
     expect(res.evidenceSummary).toContain("search title a");
   });

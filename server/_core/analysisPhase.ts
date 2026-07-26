@@ -67,6 +67,21 @@ export type PhaseName = (typeof PHASE_NAMES)[number];
  *  implementation, not an architecture change. */
 export type PlatformName = "TikTok" | "Instagram" | "YouTube";
 
+/**
+ * Which slice of a creator's history a sampled video came from.
+ *
+ * S4: `unbucketed` exists because not every platform samples temporally.
+ * TikTok's 6-3-3 sampler deliberately spreads across recent / mid / anchor to
+ * measure drift over time. Instagram takes the most recent reels in feed order —
+ * there is no temporal stratification to report, and stamping those "recent"
+ * would put a claim in the ledger and in `content_items.temporal_bucket` that
+ * the sampler never made. An honest absence beats a plausible fabrication.
+ *
+ * Declared here, in the contract, because both the platform tools and the
+ * collection internals need it and neither may import the other.
+ */
+export type SampleBucket = "recent" | "mid" | "anchor" | "unbucketed";
+
 // ─── Outcomes and failure classification ─────────────────────────────────────
 
 /**
