@@ -25,7 +25,7 @@
  * NO YouTube fallback for TikTok creators — it causes hallucinations.
  */
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { fetchHtml, requestGovernor, recordScrapeEvent } from "./scraping/httpClient";
 import { getContext, retireContext } from "./scraping/browserClient";
 import pLimit from "p-limit";
@@ -669,6 +669,19 @@ export function snapshotPool(acc: {
  * by default — a future session will need it again when TikTok's response
  * shapes drift and the fixtures must be refreshed.
  */
+/** Merge additional recorded boundaries into an existing collection fixture. */
+function appendCollectionFixture(target: string, extra: Record<string, unknown>): void {
+  try {
+    const existing = JSON.parse(readFileSync(target, "utf-8")) as Record<string, unknown>;
+    const expected = (existing.expected ?? {}) as Record<string, unknown>;
+    existing.expected = { ...expected, ...extra };
+    writeFileSync(target, JSON.stringify(existing, null, 2), "utf-8");
+    console.log(`[webResearch] collection fixture extended: ${Object.keys(extra).join(",")}`);
+  } catch (err) {
+    console.warn("[webResearch] collection fixture append failed (ignored):", (err as Error).message);
+  }
+}
+
 function dumpCollectionFixture(target: string, payload: unknown): void {
   try {
     writeFileSync(target, JSON.stringify(payload, null, 2), "utf-8");
@@ -972,93 +985,20 @@ export function selectLongitudinalSample(
   return { sampledVideos };
 }
 
-async function fetchTikTokTranscripts(
+/**
+ * Per-video transcription over the 6-3-3 sample (phased architecture S2,
+ * Part 2). Body moved VERBATIM out of the orchestrator; transcriptStrategies
+ * and its budgets/early-bail are called, never modified.
+ *
+ * Exported so the transcribe phase unit owns it and the collection harness can
+ * replay it with the transcript leaf mocked (boundary 4).
+ */
+export async function transcribeSampledVideos(
   handle: string,
-  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
-): Promise<{
-  transcripts: TranscriptEntry[];
-  videoTitles: string[];
-  hashtags: string[];
-  viewCounts: number[];
-  musicTitles: string[];
-  engagementSignals: EngagementSignals;
-  quotaExhausted: boolean;
-  longitudinalSample: LongitudinalSample;
-  discoveredVideoPool: Array<{
-    id: string; url: string; caption: string; createTime: number;
-    views: number; likes: number; comments: number; saves: number; shares: number;
-    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
-    durationSec: number;
-    /** C3: 6-3-3 sample membership, independent of transcript success. */
-    temporalBucket?: "recent" | "mid" | "anchor";
-  }>;
-  /** Session 10: count of foreign / author-less videos rejected by the guard. */
-  foreignVideosRejected: number;
-}> {
-  const normalizedHandle = normalizeHandle(handle);
+  sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>,
+  collectionFixturePath?: string,
+): Promise<TranscriptEntry[]> {
   const transcripts: TranscriptEntry[] = [];
-  const videoTitles: string[] = [];
-  const hashtags: string[] = [];
-  const viewCounts: number[] = [];
-  const musicTitles: string[] = [];
-  const seen = new Set<string>();
-  let searchQuotaExhausted = false;
-
-  // S2 decomposition: the collection stages share these accumulators explicitly
-  // instead of closing over them. Same array objects, same mutation order.
-  const collectionFixturePath = process.env.WOMO_COLLECTION_FIXTURE;
-  const acc: PoolAccumulator = {
-    videoItems: [], seen, viewCounts, videoTitles, hashtags, musicTitles,
-    foreignVideosRejected: 0, searchQuotaExhausted: false, apiVideoCount: 0,
-    ...(collectionFixturePath ? { rawCapture: { searchResponses: [] } } : {}),
-  };
-  const videoItems = acc.videoItems;
-
-  // ─── Stage 1: PRIMARY SOURCE — TikTok API (get_user_post_list) ─────────────
-  await collectPoolFromApi(handle, prefetchedProfile, acc);
-  // Boundary snapshot for the collection harness (opt-in only).
-  const poolAfterApi = collectionFixturePath ? snapshotPool(acc) : null;
-
-  // ─── Stage 2: SUPPLEMENTAL SOURCE — multi-query search (the `augment` phase) ─
-  await collectPoolFromSupplementalSearch(handle, normalizedHandle, acc);
-  let foreignVideosRejected = acc.foreignVideosRejected;
-  searchQuotaExhausted = acc.searchQuotaExhausted;
-
-
-  const apiVideoCount = acc.apiVideoCount;
-  const supplementalVideoCount = videoItems.length - apiVideoCount;
-  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
-
-  if (videoItems.length < 4) {
-    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
-  }
-
-  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
-
-  // ─── Stage 3: 6-3-3 stratified sampling (FROZEN selection logic) ──────────
-  // The clock is injected at this orchestration boundary rather than read
-  // inside the sampler. Identical value (the sampler computed exactly this when
-  // the argument was absent), but now it is explicit and RECORDABLE — which is
-  // what lets the collection harness reproduce a sample exactly instead of
-  // merely checking it is stable.
-  const samplingNowSec = Math.floor(Date.now() / 1000);
-  const { sampledVideos } = selectLongitudinalSample(handle, videoItems, samplingNowSec);
-  if (collectionFixturePath) {
-    dumpCollectionFixture(collectionFixturePath, {
-      handle,
-      samplingNowSec,
-      raw: {
-        prefetchedProfile: prefetchedProfile ?? null,
-        searchResponses: acc.rawCapture?.searchResponses ?? [],
-      },
-      expected: {
-        poolAfterApi,
-        poolAfterAugment: snapshotPool(acc),
-        sample: sampledVideos.map(s => ({ id: s.item.id, bucket: s.bucket })),
-      },
-    });
-  }
-
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
   const transcriptLimit = pLimit(3);
   // One shared phase for the whole batch: budgets + early-bail state common to
@@ -1101,6 +1041,15 @@ async function fetchTikTokTranscripts(
     }
   }
 
+  // Boundary 4 capture (opt-in): the per-video transcript results, recorded so
+  // the collection harness can replay them and assert byte-identity of text,
+  // wordCount, source, metadata enrichment and ORDER.
+  if (collectionFixturePath) {
+    appendCollectionFixture(collectionFixturePath, {
+      transcriptsAfterFetch: transcripts.map(t => ({ ...t })),
+    });
+  }
+
   // Clean up shared context after batch is done
   if (sharedCtx) {
     try { await retireContext(sharedCtx.context); } catch { /* ignore */ }
@@ -1108,6 +1057,25 @@ async function fetchTikTokTranscripts(
 
   console.log(`[webResearch] @${handle}: ${transcripts.length} transcripts fetched out of ${sampledVideos.length} sampled videos`);
 
+  return transcripts;
+}
+
+/**
+ * Engagement signals + LongitudinalSample + discoveredVideoPool, assembled
+ * from the collected pool and the fetched transcripts. Body moved VERBATIM;
+ * the cultural-velocity heuristic and the 6-3-3 membership stamping are
+ * FROZEN interpretation and are called, not changed.
+ */
+export function assembleTranscribeOutputs(
+  handle: string,
+  videoItems: PoolVideoItem[],
+  transcripts: TranscriptEntry[],
+  sampledVideos: Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>,
+): {
+  engagementSignals: EngagementSignals;
+  longitudinalSample: LongitudinalSample;
+  discoveredVideoPool: NonNullable<CreatorResearchResult["discoveredVideoPool"]>;
+} {
   // ─── Compute engagement signals from all collected videoItems ───────────────
   const nowSec = Math.floor(Date.now() / 1000);
   const threeMonthsSec = 90 * 24 * 3600;
@@ -1240,6 +1208,102 @@ async function fetchTikTokTranscripts(
       alreadySampled: sampledIds.has(v.id),
       temporalBucket: sampledBucketById.get(v.id),
     }));
+  return { engagementSignals, longitudinalSample, discoveredVideoPool };
+}
+
+async function fetchTikTokTranscripts(
+  handle: string,
+  prefetchedProfile?: Awaited<ReturnType<typeof scrapeTikTokProfile>>,
+): Promise<{
+  transcripts: TranscriptEntry[];
+  videoTitles: string[];
+  hashtags: string[];
+  viewCounts: number[];
+  musicTitles: string[];
+  engagementSignals: EngagementSignals;
+  quotaExhausted: boolean;
+  longitudinalSample: LongitudinalSample;
+  discoveredVideoPool: Array<{
+    id: string; url: string; caption: string; createTime: number;
+    views: number; likes: number; comments: number; saves: number; shares: number;
+    musicOriginal: boolean; musicTitle?: string; musicArtist?: string;
+    durationSec: number;
+    /** C3: 6-3-3 sample membership, independent of transcript success. */
+    temporalBucket?: "recent" | "mid" | "anchor";
+  }>;
+  /** Session 10: count of foreign / author-less videos rejected by the guard. */
+  foreignVideosRejected: number;
+}> {
+  const normalizedHandle = normalizeHandle(handle);
+  const videoTitles: string[] = [];
+  const hashtags: string[] = [];
+  const viewCounts: number[] = [];
+  const musicTitles: string[] = [];
+  const seen = new Set<string>();
+  let searchQuotaExhausted = false;
+
+  // S2 decomposition: the collection stages share these accumulators explicitly
+  // instead of closing over them. Same array objects, same mutation order.
+  const collectionFixturePath = process.env.WOMO_COLLECTION_FIXTURE;
+  const acc: PoolAccumulator = {
+    videoItems: [], seen, viewCounts, videoTitles, hashtags, musicTitles,
+    foreignVideosRejected: 0, searchQuotaExhausted: false, apiVideoCount: 0,
+    ...(collectionFixturePath ? { rawCapture: { searchResponses: [] } } : {}),
+  };
+  const videoItems = acc.videoItems;
+
+  // ─── Stage 1: PRIMARY SOURCE — TikTok API (get_user_post_list) ─────────────
+  await collectPoolFromApi(handle, prefetchedProfile, acc);
+  // Boundary snapshot for the collection harness (opt-in only).
+  const poolAfterApi = collectionFixturePath ? snapshotPool(acc) : null;
+
+  // ─── Stage 2: SUPPLEMENTAL SOURCE — multi-query search (the `augment` phase) ─
+  await collectPoolFromSupplementalSearch(handle, normalizedHandle, acc);
+  let foreignVideosRejected = acc.foreignVideosRejected;
+  searchQuotaExhausted = acc.searchQuotaExhausted;
+
+
+  const apiVideoCount = acc.apiVideoCount;
+  const supplementalVideoCount = videoItems.length - apiVideoCount;
+  console.log(`[webResearch] @${handle}: supplemental search returned ${supplementalVideoCount} matching videos. Total pool: ${videoItems.length} (API: ${apiVideoCount}, search: ${supplementalVideoCount})`);
+
+  if (videoItems.length < 4) {
+    console.warn(`[webResearch] @${handle}: ⚠️ BELOW MINIMUM THRESHOLD — only ${videoItems.length} videos collected. Analysis quality will be degraded.`);
+  }
+
+  console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
+
+  // ─── Stage 3: 6-3-3 stratified sampling (FROZEN selection logic) ──────────
+  // The clock is injected at this orchestration boundary rather than read
+  // inside the sampler. Identical value (the sampler computed exactly this when
+  // the argument was absent), but now it is explicit and RECORDABLE — which is
+  // what lets the collection harness reproduce a sample exactly instead of
+  // merely checking it is stable.
+  const samplingNowSec = Math.floor(Date.now() / 1000);
+  const { sampledVideos } = selectLongitudinalSample(handle, videoItems, samplingNowSec);
+  if (collectionFixturePath) {
+    dumpCollectionFixture(collectionFixturePath, {
+      handle,
+      samplingNowSec,
+      raw: {
+        prefetchedProfile: prefetchedProfile ?? null,
+        searchResponses: acc.rawCapture?.searchResponses ?? [],
+      },
+      expected: {
+        poolAfterApi,
+        poolAfterAugment: snapshotPool(acc),
+        sample: sampledVideos.map(s => ({ id: s.item.id, bucket: s.bucket })),
+      },
+    });
+  }
+
+  // ─── Stage 4: per-video transcription (the `transcribe` phase) ───────────
+  const transcripts = await transcribeSampledVideos(handle, sampledVideos, collectionFixturePath);
+
+  // ─── Stage 4b: engagement signals + longitudinal + pool assembly ─────────
+  const { engagementSignals, longitudinalSample, discoveredVideoPool } =
+    assembleTranscribeOutputs(handle, videoItems, transcripts, sampledVideos);
+
 
   return { transcripts, videoTitles, hashtags, viewCounts, musicTitles, engagementSignals, quotaExhausted: searchQuotaExhausted, longitudinalSample, discoveredVideoPool, foreignVideosRejected };
 }
