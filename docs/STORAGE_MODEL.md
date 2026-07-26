@@ -508,15 +508,23 @@ Unique: `(creator_subject_id, brand_subject_id, created_at)`.
 | tool | varchar(64) | yes | — | which platform tool ran this phase (e.g. `tiktok:profile_xhr_scroll`) |
 | status | varchar(24) | **no** | `'pending'` | `pending` / `running` / `complete` / `partial` / `blocked` / `genuine_empty` / `failed` |
 | attempt_count | integer | **no** | 0 | attempts for this phase in this run |
-| failure_class | varchar(24) | yes | — | `transient` / `structural` / `genuine_empty` — drives requeue policy (S3) |
-| next_earliest_at | timestamptz | yes | — | backoff gate for the scheduler scan (S3) |
+| failure_class | varchar(24) | yes | — | `transient` / `structural` / `genuine_empty` — drives requeue policy; read by `decideRetry` (`phases/phaseScheduler.ts`) |
+| next_earliest_at | timestamptz | yes | — | backoff gate for the scheduler scan; **written since S3a** by the scheduler when it parks or requeues a phase |
 | output | **json** (not jsonb) | yes | — | **durable banked output** of this phase — what later phases read instead of in-memory threading. **`json` DELIBERATELY (womo_0010):** `jsonb` normalizes key order (length-then-bytewise); these values are read back by later phases and land in the womo_0007 evidence snapshot, which the identity harness compares **byte-for-byte**. Verified: jsonb round-trip byte-identical = **false**, json = **true**. Never flip this back — the ledger round-trip test in `evidenceIdentity.test.ts` fails loudly if anyone does |
 | created_at | timestamptz | no | now() | |
 | updated_at | timestamptz | no | now() | |
 
 Indexes: `aps_run_phase_unique (run_id, phase)` UNIQUE — one row per phase per run, and the run lookup index; `aps_ready_idx (status, next_earliest_at)` — the scheduler's "what is ready now?" scan.
 
-**[FACT] S1 (shadow banking):** the monolith **writes** this table as each stage completes — purely additive observation. **Nothing reads it to make a decision and nothing resumes from it yet**; execution is unchanged. Phase execution and resumption land in S2/S3.
+**[FACT] S1 (shadow banking):** the monolith **wrote** this table as each stage completed — purely additive observation, read by nothing. Superseded below.
+
+**[FACT] S2 (phase execution):** the five-phase runner is the only path. Each phase's `output` is the durable input the NEXT phase declares and reads, so the table is load-bearing during a run, not merely observational. `creator.resumeRun({runId})` reads it to re-run phases 4–5 without re-scraping (`loadResumableBankedPhases`).
+
+**[FACT] S3a (scheduler):** the scheduler now writes the retry columns too — `status='running'` before each attempt (so the table shows work **in progress**, not only finished work), plus the real `attempt_count` and the `next_earliest_at` gate whenever it parks or requeues a phase. `db.scanReadyWork(now, limit)` is the "what is ready now?" query `aps_ready_idx` exists for: `status IN ('pending','failed','blocked')` AND (`next_earliest_at IS NULL` OR `<= now`), soonest gate first. `running` is excluded deliberately — those rows belong to a live campaign in the current process.
+
+**[FACT] S3a — `scanReadyWork` is not called on a schedule yet.** The endpoint is still synchronous, so a rescanned campaign would have no caller to return its result to, and `extract_commit` still runs inline in `routers.ts` rather than in the runner, so a resumed campaign could not reach a commit. The boot loop lands with enqueue-and-poll in S3b; the query is built and proven ahead of it (`integration/phaseScheduler.integration.ts`).
+
+**[GOTCHA] `recordPhaseState` swallows every error** so observation can never add latency to, or fail, an analysis. That makes this table a best-effort mirror, not a transactional queue. It is the right trade while the in-memory campaign state is authoritative (S3a). **It must be revisited in S3b**, when the ledger becomes the queue of record.
 
 ### 21. `users` (9 cols) — `schema.ts:793` — **orphaned; empty**
 | Column | Type | Null | Default | Meaning |

@@ -9,7 +9,86 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Phased architecture S2 (in progress)
+## [Unreleased] — Phased architecture S3a: scheduler and real concurrency bounds
+
+**No interface change.** `creator.analyze` / `creator.reanalyze` stay synchronous:
+same response shape, same error codes, same race semantics. A client cannot tell
+the difference. Enqueue-and-poll is S3b.
+
+### Fixed
+- **The concurrency semaphore bounded nothing.** `analysisConcurrencyLimit =
+  pLimit(2)` in `instrumentedRun.ts` was documented as a shared pool that kept
+  3+ concurrent runs from exhausting the browser pool. It could not: `workPromise`
+  is an IIFE, so `args.work(...)` ran synchronously at construction and the
+  limiter was handed a promise that had already started. The callback it deferred
+  was only `Promise.race([workPromise, timeoutPromise])` — it gated when a run's
+  race was *observed*, never when its work *began*. Concurrent analyses therefore
+  all scraped at once, and a run that had already finished could be held back
+  waiting for an unrelated run's race to reject.
+
+### Added
+- **Per-resource-class admission** (`_core/resourceSlots.ts`) — `fn` is not called
+  until a permit is held. Bounded by what the work actually contends for rather
+  than by one global number: **browser 2** (capture/augment/transcribe),
+  **llm 4** (derive + the inline extraction), compute unbounded. Both env-tunable
+  (`PHASE_BROWSER_CONCURRENCY` / `PHASE_LLM_CONCURRENCY`) — starting values to be
+  moved against the memory telemetry, not truths. `slotSnapshot()` reports live
+  occupancy, queue depth and the peak high-water mark per class.
+- **Phase scheduler** (`phases/phaseScheduler.ts`) — retry policy as **data** the
+  scheduler reads, not logic inside phases. The phase classifies; the scheduler
+  decides: transient → 30s/2m/5m then park; blocked/quota → 5m/15m parks;
+  structural → no requeue, parked for attention; genuine_empty → terminate the
+  campaign immediately. `decideRetry` is pure (clock and deadline injected), so
+  every class is provable without a phase, a database or a browser. A phase's
+  **declared** `retry` overrides the table in full — per the S1 contract, "absent
+  class = no requeue" means absent, not "fall through to the defaults".
+- **Deadline awareness** — a backoff that would land past the campaign's race
+  deadline is downgraded from retry to park. The gate is still written to
+  `next_earliest_at` as real data for S3b's poller; what does not happen is an
+  open request sleeping 15 minutes behind a 5-minute timeout.
+- **`execute` seam on the phase runner** — the scheduler plugs in; the runner
+  keeps owning order, stop conditions and banked-state semantics. All existing
+  runner tests pass unedited.
+- **`db.scanReadyWork(now, limit)`** — the "what is ready now?" query
+  `aps_ready_idx (status, next_earliest_at)` was created for. Built and proven
+  (`integration/phaseScheduler.integration.ts`), **deliberately uncalled**: with a
+  synchronous endpoint a rescanned campaign has no caller to return to, and
+  `extract_commit` still runs inline in `routers.ts`, so a resumed campaign could
+  not reach a commit. S3b wires the loop.
+- Ledger writes now carry the real `attempt_count`, the `next_earliest_at` gate,
+  and a `running` row before each attempt — the table finally shows work **in
+  progress**, not only work that finished. No migration: womo_0009 already had
+  every column and index this needs.
+
+### Changed
+- The race deadline rides the analysis-run `AsyncLocalStorage` context alongside
+  the run id, for the same reason: the scheduler needs it deep inside the phase
+  runner, which has no parameter to take it through and no business knowing about
+  the endpoint's timeout.
+
+### Invariants worth keeping
+- **PERMIT ⊃ CONTEXT, ALWAYS.** Admission precedes `phase.run()`; every
+  `getContext()` lives inside it; the permit releases after the phase settles. A
+  *waiting* job holds no browser context. This is what keeps the TTL reaper race
+  (f04329b) dead: a queued job sitting on a context either stays `busy` and pushes
+  pool occupancy past `MAX_CONCURRENT_CONTEXTS` — where `acquireContextPage`
+  creates contexts *over* the cap instead of blocking — or outlives
+  `CONTEXT_TTL_MS` and gets closed out from under itself.
+- **One permit per phase, never nested** — enforced structurally, not documented.
+  `withResourceSlot` throws on re-entrant acquisition, so "just grab an LLM slot
+  inside transcribe" cannot reintroduce hold-and-wait or deadlock.
+- **A permit is never held across a backoff sleep** — release, sleep, re-acquire.
+
+### Known, deliberately unchanged
+- `requestGovernor` (`scraping/httpClient.ts`) is per-platform pacing over
+  process-global state, **not a mutex**: concurrent callers read the same
+  `lastRequestTime` and can wake together. Real concurrency means a bigger
+  thundering herd at the platform. Changing it changes scraping behaviour.
+- `recordPhaseState` swallows every error by design. Correct while in-memory
+  campaign state is authoritative; **must be revisited in S3b**, when the ledger
+  becomes the queue of record.
+
+## [Unreleased] — Phased architecture S2
 
 ### Added
 - **Collection identity harness** (`collectionIdentity.test.ts`) — the

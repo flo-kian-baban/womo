@@ -775,7 +775,11 @@ All 22 `creator_observations` analytic fields + metrics (`total_likes, video_cou
 ```
 submit (client, TikTok|Instagram)
   └─ creator.preflight ── findExistingCreatorByHandle ─→ duplicate dialog
-  └─ creator.analyze  [auth + 10/hr + duplicate gate + runId(ALS) + 5-min race + pLimit(2)]
+  └─ creator.analyze  [duplicate gate + runId(ALS) + 5-min race + per-phase admission]
+       │  (S3a: the old run-level pLimit(2) is GONE — it bounded nothing, because
+       │   workPromise was already running when the limiter got it. Admission is
+       │   now per resource class, per phase, taken before any tool runs:
+       │   browser=2 for capture/augment/transcribe, llm=4 for derive + extraction.)
        ├─ researchCreator(platform)
        │    ├─ TikTok  : scrapeTikTokProfile (Playwright XHR)  +  fetchTikTokTranscripts
        │    │             ├─ pool = API itemList + 4× search (author-guarded)
