@@ -17,21 +17,29 @@
  *                 Commit 7: a timed-out run is no longer lost work). Its later
  *                 rejection is swallowed (no unhandled rejection).
  *
- * All runs — analyze AND reanalyze — share ONE concurrency pool
- * (analysisConcurrencyLimit, 2 slots): each run holds Playwright contexts and
- * LLM slots; 3+ concurrent runs exhaust the browser pool (max 5 contexts) and
- * cause context eviction mid-analysis.
+ * ─── This wrapper does NOT bound concurrency (S3a) ──────────────────────────
+ * It used to hold a `pLimit(2)` described as a shared pool. That pool bounded
+ * NOTHING. `workPromise` below is an IIFE — `args.work(...)` is invoked
+ * synchronously at construction — so the limiter was handed a promise that had
+ * already started, and the callback it deferred was only
+ * `Promise.race([workPromise, timeoutPromise])`. It gated when a run's race was
+ * OBSERVED, never when its work began: three concurrent analyses all scraped at
+ * once, exhausted the 5-context browser pool and evicted each other's contexts,
+ * while a third caller could be made to wait after its own work had finished.
+ *
+ * Admission now lives where the contention actually is — per resource class,
+ * per phase, taken before any tool runs (_core/resourceSlots.ts, applied by
+ * phases/phaseScheduler.ts). This wrapper is left with what it always really
+ * did: the run context, the memory tracker, the race, and terminal telemetry.
+ *
+ * What it DOES publish for the scheduler is the race deadline, on the run
+ * context — a backoff that would land past it is parked rather than slept.
  */
 import { TRPCError } from "@trpc/server";
-import pLimit from "p-limit";
 import { recordRunOutcome, type RunOutcomeStatus } from "../db";
 import { withAnalysisRun } from "./runContext";
 import { startRunMemoryTracker } from "../scraping/memoryTelemetry";
 import { isBrowserDeadError } from "../scraping/browserClient";
-
-// ─── Concurrency limiter (moved verbatim from routers.ts) ────────────────────
-// Limits simultaneous full creator/brand analyses to 2.
-export const analysisConcurrencyLimit = pLimit(2);
 
 // Session 11 (Commit 7): map a run failure to a terminal-outcome status for
 // pipeline_runs telemetry. TIMEOUT is owned by the outer racer; here we classify
@@ -125,9 +133,7 @@ export async function runInstrumentedAnalysis<T>(args: {
     );
 
     try {
-      return await analysisConcurrencyLimit(() =>
-        Promise.race([workPromise, timeoutPromise])
-      );
+      return await Promise.race([workPromise, timeoutPromise]);
     } catch (err) {
       if (err instanceof TRPCError && err.code === "TIMEOUT") {
         // Provisional: the client sees a timeout, but workPromise keeps running

@@ -14,8 +14,13 @@
  *   timeout  → caller gets TIMEOUT immediately, a PROVISIONAL "timeout" row is
  *              written, the work KEEPS RUNNING and its own terminal write
  *              supersedes the provisional one (in-race persistence / salvage);
- *              a late rejection never surfaces as an unhandled rejection;
- *   plus the shared 2-slot concurrency pool.
+ *              a late rejection never surfaces as an unhandled rejection.
+ *
+ * S3a removed the `pLimit(2)` this file used to call "the shared 2-slot
+ * concurrency pool". It never bounded anything (see the module header), and the
+ * case that pinned its behaviour was pinning the bug. Real admission is proven
+ * in resourceSlots.test.ts; what remains here is the proof that this wrapper
+ * does not gate a run behind an unrelated one.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -136,18 +141,22 @@ describe("runInstrumentedAnalysis — the three exits", () => {
     // Reaching here without vitest flagging an unhandled rejection IS the assertion.
   });
 
-  it("CONCURRENCY: the shared 2-slot pool gates race observation (the original contract, preserved)", async () => {
-    // Faithful to the ORIGINAL analyze shape: workPromise is created EAGERLY,
-    // so the pool never delayed work START — it gates when a run's race is
-    // observed/settled. (Latent gap in the original, deliberately preserved by
-    // the extraction per the analyze-unchanged mandate; flagged in the session
-    // report, not silently fixed.) Order-based assertions: memTracker's initial
-    // synchronous sample costs tens of ms when many Chromium processes exist,
-    // so wall-clock bounds are brittle here.
+  // ─── S3a: this wrapper no longer pretends to bound anything ───────────────
+  //
+  // The old case here asserted the pLimit(2) contract as it actually behaved:
+  // work started EAGERLY and the pool merely gated when a run's race settled.
+  // That was the bug, pinned as a feature. Admission moved to where the
+  // contention is — per resource class, per phase, taken before any tool runs
+  // (resourceSlots.ts / phaseScheduler.ts), and it is proven in
+  // resourceSlots.test.ts by assertions about when a body is CALLED.
+  //
+  // What is pinned here now is the inverse: a run's wrapper must not hold a
+  // finished run back waiting on some unrelated run.
+
+  it("NO RUN-LEVEL GATE: a run settles on its own work, never behind another run", async () => {
     const order: string[] = [];
 
-    // Two runs whose work hangs far past their own 600ms race deadline — they
-    // hold both pool slots until their races reject.
+    // Two long runs that would have occupied both old pool slots.
     const hog = (id: string) =>
       runInstrumentedAnalysis({
         runId: id,
@@ -158,14 +167,12 @@ describe("runInstrumentedAnalysis — the three exits", () => {
           await sleep(2_000);
           return { value: id, status: "success" as const };
         },
-      }).catch(() => order.push(`slot-free-${id}`));
+      }).catch(() => order.push(`hog-settled-${id}`));
 
     const a = hog("run-hog-a");
     const b = hog("run-hog-b");
-    await sleep(20); // both slots taken
+    await sleep(20);
 
-    // Third run: its work runs eagerly (original behavior), but its wrapper
-    // cannot settle until one of the hogs' races rejects and frees a slot.
     const c = runInstrumentedAnalysis({
       runId: "run-re-c",
       runType: "creator_reanalysis",
@@ -175,16 +182,21 @@ describe("runInstrumentedAnalysis — the three exits", () => {
         order.push("c-work-started");
         return { value: "c", status: "success" as const };
       },
-    }).then(() => order.push("c-resolved"));
+    }).then((v) => { order.push("c-resolved"); return v; });
 
-    await Promise.all([a, b, c]);
-    // Eager work start: c's work ran while both slots were still held…
-    expect(order.indexOf("c-work-started")).toBeLessThan(order.indexOf("slot-free-run-hog-a"));
-    expect(order.indexOf("c-work-started")).toBeLessThan(order.indexOf("slot-free-run-hog-b"));
-    // …but its wrapper only settled after a slot freed (the pool contract).
-    expect(order.indexOf("c-resolved")).toBeGreaterThan(
-      Math.min(order.indexOf("slot-free-run-hog-a"), order.indexOf("slot-free-run-hog-b")),
-    );
+    expect(await c).toBe("c");
+
+    // c finished while both hogs are still running: its result is not held
+    // hostage to their races. Under the old pool, c-resolved could only appear
+    // after a hog freed a slot.
+    expect(order).toEqual(["c-work-started", "c-resolved"]);
+
+    await Promise.all([a, b]);
     await sleep(1_600); // let the hogs' detached works finish before the file ends
+  });
+
+  it("does not import a global limiter any more", async () => {
+    const mod = await import("./_core/instrumentedRun");
+    expect("analysisConcurrencyLimit" in mod).toBe(false);
   });
 });
