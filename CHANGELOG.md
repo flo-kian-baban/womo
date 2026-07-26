@@ -9,6 +9,80 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phased architecture S4: Instagram behind the platform contract
+
+Instagram is registered and runs through the queue. **Implementation, not
+architecture**: nothing in the phases, runner, scheduler, queue, ledger or
+harness learned that Instagram exists — they still only call
+`toolsetFor(platform)`.
+
+### Added
+- **Instagram tools** — `instagram:profile_multipath` (capture),
+  `instagram:oembed_supplement` (augment), `instagram:reel_speech_to_text`
+  (transcribe). Every scraper is CALLED, not reimplemented; the inline reel
+  transcription was extracted verbatim into `transcribeInstagramReels`.
+- **`creator.submit` accepts Instagram.** The queue's `QueueablePlatform` is
+  deliberately narrower than `PlatformName`: a platform is queueable only once it
+  has a registered toolset.
+- **Instagram identity harness** — proves the shared assembly reproduces the
+  recorded monolith evidence BYTE-FOR-BYTE from the same banked inputs. TikTok is
+  proven against a frozen pre-seam function; Instagram has no such museum piece,
+  so a real monolith run recorded its inputs *and* its output first
+  (`WOMO_MONOLITH_BASELINE`).
+- **Instrumentation parity** — the Instagram transcription leg emitted nothing;
+  it now emits one `scrape_event` per attempt (success, failure and thrown).
+
+### Changed — FOUR contract extensions, each approved deliberately
+1. **`gate(input): GateVerdict`** — every platform decides whether its evidence
+   is fit to extract from, in its own FROZEN wording. Returned as data; the
+   driver throws it. TikTok's **four** gates moved verbatim.
+2. **`evidenceExtras(banked): string`** — appended verbatim by the shared
+   assembly. TikTok returns `""`; Instagram returns its business block.
+3. **`SampleBucket` gains `unbucketed`** — not every platform samples
+   temporally. Stamping feed order as `"recent"` would write a claim into the
+   ledger the sampler never made.
+4. **`engagementRate(input): number`** — `computeDeriveInputs` hardcoded
+   TikTok's formula as universal. On a real capture (25,568 followers, avg 8,403
+   likes) the monolith gives **32.9** and the shared formula gives **100**,
+   clamped from 749%. Both formulas move verbatim, including their different
+   rounding paths. **Do not normalise them.**
+
+`BankedCreatorEvidence.collection.engagementSignals` and `.longitudinalSample`
+are now optional — Instagram computes neither and never has.
+
+### Removed
+- `resumeResearchFromBanked`. S3b's boot loop already resumes incomplete
+  campaigns through the runner; this second path had no caller. The capability is
+  strictly better now — the queue's version survives a restart.
+
+### Findings for the YouTube session — read before starting
+- **TikTok has FOUR gates, not three.** The min-data threshold
+  (`realTranscripts < 2 && allTitles < 4` → `PRECONDITION_FAILED`) sits *after*
+  the assembly, which is why an earlier survey missed it.
+- **The business-signal branch is only reachable via
+  `extractProfileFromGraphqlUser`.** Live `playwright-mobile-xhr` captures leave
+  `is_business_account` false, so real fixtures cannot exercise it — including a
+  25.5k-follower commercial account. It is tested synthetically and labelled.
+- **`video_duration` is never populated** by the Instagram scrape paths in use —
+  every post read `durationSec: 0` across both captures. A sampler filtering on
+  duration selects nothing and yields zero transcripts silently.
+- **Instagram has NO min-data floor.** Its only gate is
+  `hasProfileData || hasPostData`, inherited verbatim. A 0-post capture passes
+  and produces an analysis from bio alone — observed live when Instagram
+  rate-limited post extraction. TikTok refuses this; Instagram does not.
+- **Instagram rate-limits post extraction aggressively.** After ~6 runs from one
+  IP it returns the profile with 0 posts while still reporting success.
+
+### Not done
+- **No Instagram collection fixture.** The four collection boundaries are
+  fixture-replayed for TikTok only. Two capture attempts returned 0 posts
+  (see rate-limiting above), and a vacuous fixture would assert nothing while
+  looking green, so none was committed. The evidence-assembly proof
+  (`instagramIdentity.test.ts`) and the live acceptance campaigns stand in the
+  meantime.
+- **YouTube** — its own session: capture and transcribe are fused in one call, it
+  emits no `scrape_events` at all, and it samples non-temporally.
+
 ## [Unreleased] — Phased architecture S3b: the queue is the single entry point
 
 **This is the client-visible interface change the program has been building
