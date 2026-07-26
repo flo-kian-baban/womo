@@ -34,6 +34,8 @@
  * second limiter here would silently re-cap what S3a deliberately tuned.
  */
 import {
+  recordRunOutcome,
+  type RunOutcomeStatus,
   findIncompleteCampaigns,
   getPhaseState,
   heartbeatPhase,
@@ -43,6 +45,7 @@ import {
   HEARTBEAT_MS,
 } from "../db";
 import { newRunId, withAnalysisRun } from "../_core/runContext";
+import { startRunMemoryTracker } from "../scraping/memoryTelemetry";
 import { runCreatorCampaign, type CreatorCampaignDeps, type CampaignOutcome } from "../phases/creatorCampaign";
 import type { CampaignState, PhaseName, PhaseStateEntry } from "../_core/analysisPhase";
 import { PHASE_NAMES } from "../_core/analysisPhase";
@@ -298,6 +301,15 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
   }, HEARTBEAT_MS);
   if (typeof beat === "object" && "unref" in beat) (beat as NodeJS.Timeout).unref();
 
+  // Terminal run telemetry. runInstrumentedAnalysis used to own this on the
+  // synchronous path; the queue does not use it (its Promise.race deadline is a
+  // CLIENT deadline, and abandoning a campaign nobody is waiting for would just
+  // let the next drain double-start it). The memory summary and the terminal
+  // pipeline_runs row are what S3a's bounds are tuned against, so they are
+  // written here rather than lost with the endpoint.
+  const startedAt = new Date();
+  const memTracker = startRunMemoryTracker();
+
   try {
     const banked = await loadBankedPhases(runId);
     const outcome = await withAnalysisRun(runId, () => runCreatorCampaign(
@@ -305,12 +317,35 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
       deps,
     ));
     if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);
+
+    await recordRunOutcome(runId, outcome.status as RunOutcomeStatus, {
+      runType: "creator_analysis",
+      startedAt,
+      detail: {
+        ...(outcome.message ? { message: outcome.message.slice(0, 300) } : {}),
+        memory: memTracker.stop(),
+      },
+      captureEvidence: {
+        transcripts: outcome.research?.transcriptCount ?? 0,
+        titles: outcome.research?.recentVideoTitles?.length ?? 0,
+      },
+    }).catch(err => console.warn(`[queue] ${runId}: run telemetry write failed:`, err));
+
     return outcome;
   } catch (err) {
     console.error(`[queue] ${runId} (${subjectHint}) threw:`, err);
     await recordTerminalFailure(runId, subjectHint, null, err instanceof Error ? err.message : String(err), "error");
+    await recordRunOutcome(runId, "error", {
+      runType: "creator_analysis",
+      startedAt,
+      detail: {
+        message: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+        memory: memTracker.stop(),
+      },
+    }).catch(() => {});
     return null;
   } finally {
+    memTracker.stop(); // idempotent — clears the sampler on every exit
     clearInterval(beat);
     _inFlight.delete(runId);
   }

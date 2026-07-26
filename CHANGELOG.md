@@ -9,6 +9,81 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phased architecture S3b: the queue is the single entry point
+
+**This is the client-visible interface change the program has been building
+toward.** Every analysis is enqueued and processed from the queue. There is no
+synchronous bypass, no direct-to-pipeline path, no "run now" shortcut. A single
+creator is a queue of one — submission and queue submission are the same
+operation.
+
+### Why one entry point
+`analyze`, `reanalyze` and `bulkAnalyze` were three copies of the same
+orchestration, and they drifted. `bulkAnalyze` ended up with **no timeout, no
+memory tracker, no terminal `pipeline_runs` telemetry, no extraction retry, and
+it dropped `followingCount`** — and it had no client surface at all. One entry
+point cannot drift from itself.
+
+### Added
+- **`creator.submit({ handles, platform })`** — n handles or one, same path.
+  Returns as soon as the campaigns are DURABLY enqueued. The duplicate gate runs
+  **before** enqueue, so the analyst confirms before anything is queued.
+- **`creator.queueStatus({ runId? })`** — one campaign or all. Reports real
+  ledger state: current phase, per-phase status and attempt count, parks with
+  their next-attempt time, terminal outcome.
+- **`server/queue/analysisQueue.ts`** — the worker. Polls `scanReadyWork`,
+  reclaims heartbeat-dead phases, drives unfinished campaigns, and resumes on
+  boot whatever the last process left behind.
+- **`server/phases/creatorCampaign.ts`** — a campaign that completes end to end
+  with nobody watching.
+- Heartbeat + **10-minute** stale-`running` reclaim, and a **24-hour** bound on
+  what counts as resumable.
+
+### Changed
+- **`extract_commit` runs in the phase runner** (was inline in `routers.ts`).
+  The ledger is now 5 runner rows, not 4 plus a hand-written shadow row. The
+  fabrication guard, the extraction retry and the `researchData` mapping moved
+  into injected deps verbatim; the manual `withResourceSlot("llm", …)` wrap was
+  **deleted**, because the scheduler already admits the phase against the llm
+  bound and wrapping twice trips S3a's nesting guard.
+- **The lost-work class is closed structurally.** The old defence was in-race
+  salvage, which only worked while the process survived; a crash between
+  extraction and commit lost the work. extract_commit is now a ledger phase, so a
+  campaign killed after collection re-runs only phase 5, from banked evidence,
+  with no re-scraping.
+- **`recordPhaseState` throws; `recordPhaseObservation` is best-effort.** Queue
+  state must be durable — a swallowed enqueue is a campaign nobody will run and
+  nobody can see. Observation stays best-effort: losing a banked output costs one
+  phase, losing the enqueue row costs the campaign.
+- **The client never blocks**, including for one creator. The time-based phase
+  estimator is gone — it advanced a highlight on hardcoded elapsed-time marks and
+  kept guessing while the run did something else. Real phase state or nothing.
+- `creator.reanalyze` is a submission. `creator.resumeRun` is now just "clear the
+  backoff and run it now"; the boot loop resumes automatically.
+
+### Removed
+- `creator.bulkAnalyze`, `bulk.getJobProgress`, and `server/bulkAnalysisJobs.ts`.
+  Bulk is not a concept: it is n submissions.
+
+### Explicitly OUT OF SCOPE — read before extending the rule
+- **The brand path (`brand.analyze` / `brand.reanalyze`) is NOT queued.** It has
+  no phase model, no platform toolset and no ledger, so forcing it through the
+  queue would mean building the brand phase model first. That is **S5**, and it
+  needs its own work order. The no-bypass test is deliberately scoped to the
+  creator router for this reason.
+- **`creator.ingestSupplementalVideo` is NOT queued.** It fetches one transcript
+  for one already-analyzed video and writes a content row. It is not a campaign:
+  no phases, no observation, nothing to resume.
+
+### Found by running it, not by the tests
+- A campaign that could not complete never left the queue (no terminal row), so
+  it showed as "queued" forever with no reason.
+- Boot resumption was unbounded in time and replayed campaigns whose banked
+  output predated the current phase schema — **phase outputs carry no schema
+  version**, which is worth knowing before widening the window.
+- `scanReadyWork` returned structural failures, so a permanently-failed phase was
+  retried on every tick — contradicting the S1 contract's `isRequeueable`.
+
 ## [Unreleased] — content_items observation attribution (blocks S3b)
 
 ### Fixed
