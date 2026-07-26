@@ -630,6 +630,52 @@ interface PoolAccumulator {
   foreignVideosRejected: number;
   searchQuotaExhausted: boolean;
   apiVideoCount: number;
+  /**
+   * Opt-in raw-payload capture for the collection harness
+   * (WOMO_COLLECTION_FIXTURE). Absent in normal operation — when absent, not a
+   * single extra object is allocated.
+   */
+  rawCapture?: { searchResponses: Array<{ query: string; items: unknown[] }> };
+}
+
+/**
+ * Snapshot the accumulator at a stage boundary. ORDER IS THE POINT: the id
+ * sequence, title order and view-count order are what decide which videos the
+ * 6-3-3 sampler picks, so the harness compares these arrays element-for-element.
+ */
+export function snapshotPool(acc: {
+  videoItems: PoolVideoItem[]; viewCounts: number[]; videoTitles: string[];
+  hashtags: string[]; musicTitles: string[]; foreignVideosRejected: number;
+}): {
+  videoIds: string[]; videoItems: PoolVideoItem[]; viewCounts: number[];
+  videoTitles: string[]; hashtags: string[]; musicTitles: string[];
+  foreignVideosRejected: number;
+} {
+  return {
+    videoIds: acc.videoItems.map(v => v.id),
+    videoItems: acc.videoItems.map(v => ({ ...v })),
+    viewCounts: [...acc.viewCounts],
+    videoTitles: [...acc.videoTitles],
+    hashtags: [...acc.hashtags],
+    musicTitles: [...acc.musicTitles],
+    foreignVideosRejected: acc.foreignVideosRejected,
+  };
+}
+
+/**
+ * Opt-in collection-fixture dump (`WOMO_COLLECTION_FIXTURE=<path>`). Records
+ * the RAW platform payloads plus the expected output at each stage boundary,
+ * so the collection harness can replay a real run offline. Permanent and inert
+ * by default — a future session will need it again when TikTok's response
+ * shapes drift and the fixtures must be refreshed.
+ */
+function dumpCollectionFixture(target: string, payload: unknown): void {
+  try {
+    writeFileSync(target, JSON.stringify(payload, null, 2), "utf-8");
+    console.log(`[webResearch] collection fixture written: ${target}`);
+  } catch (err) {
+    console.warn("[webResearch] collection fixture dump failed (ignored):", (err as Error).message);
+  }
 }
 
 function isQuotaErrMsg(err: unknown): boolean {
@@ -637,8 +683,10 @@ function isQuotaErrMsg(err: unknown): boolean {
   return msg.includes("usage exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests");
 }
 
-/** Stage 1 — PRIMARY SOURCE: TikTok API (get_user_post_list). */
-async function collectPoolFromApi(
+/** Stage 1 — PRIMARY SOURCE: TikTok API (get_user_post_list). Exported for the
+ *  collection harness, which replays it from a fixture prefetchedProfile (with
+ *  a prefetched profile this stage touches no network). */
+export async function collectPoolFromApi(
   handle: string,
   prefetchedProfile: Awaited<ReturnType<typeof scrapeTikTokProfile>> | undefined,
   acc: PoolAccumulator,
@@ -661,8 +709,10 @@ async function collectPoolFromApi(
   console.log(`[webResearch] @${handle}: API fetch yielded ${apiVideos.length} videos`);
 }
 
-/** Stage 2 — SUPPLEMENTAL SOURCE: multi-query TikTok search (the `augment` phase). */
-async function collectPoolFromSupplementalSearch(
+/** Stage 2 — SUPPLEMENTAL SOURCE: multi-query TikTok search (the `augment`
+ *  phase). Exported for the collection harness, which replays it with the
+ *  search leaf mocked to return recorded raw payloads. */
+export async function collectPoolFromSupplementalSearch(
   handle: string,
   normalizedHandle: string,
   acc: PoolAccumulator,
@@ -709,6 +759,14 @@ async function collectPoolFromSupplementalSearch(
   // The shared search context is done — close it once (never per-query).
   if (searchCtx) {
     try { await retireContext(searchCtx.context); } catch { /* ignore */ }
+  }
+
+  // Opt-in raw capture for the collection harness — records exactly what the
+  // platform returned, before any processing, so the harness can replay it.
+  if (acc.rawCapture) {
+    for (const { q, items } of rawSearchResults) {
+      acc.rawCapture.searchResponses.push({ query: q, items });
+    }
   }
 
   // Sequential merge in query order — identical processing to the old loop.
@@ -948,14 +1006,18 @@ async function fetchTikTokTranscripts(
 
   // S2 decomposition: the collection stages share these accumulators explicitly
   // instead of closing over them. Same array objects, same mutation order.
+  const collectionFixturePath = process.env.WOMO_COLLECTION_FIXTURE;
   const acc: PoolAccumulator = {
     videoItems: [], seen, viewCounts, videoTitles, hashtags, musicTitles,
     foreignVideosRejected: 0, searchQuotaExhausted: false, apiVideoCount: 0,
+    ...(collectionFixturePath ? { rawCapture: { searchResponses: [] } } : {}),
   };
   const videoItems = acc.videoItems;
 
   // ─── Stage 1: PRIMARY SOURCE — TikTok API (get_user_post_list) ─────────────
   await collectPoolFromApi(handle, prefetchedProfile, acc);
+  // Boundary snapshot for the collection harness (opt-in only).
+  const poolAfterApi = collectionFixturePath ? snapshotPool(acc) : null;
 
   // ─── Stage 2: SUPPLEMENTAL SOURCE — multi-query search (the `augment` phase) ─
   await collectPoolFromSupplementalSearch(handle, normalizedHandle, acc);
@@ -974,7 +1036,28 @@ async function fetchTikTokTranscripts(
   console.log(`[webResearch] @${handle}: ${videoItems.length} total videos collected — applying 6-3-3 stratified sampling`);
 
   // ─── Stage 3: 6-3-3 stratified sampling (FROZEN selection logic) ──────────
-  const { sampledVideos } = selectLongitudinalSample(handle, videoItems);
+  // The clock is injected at this orchestration boundary rather than read
+  // inside the sampler. Identical value (the sampler computed exactly this when
+  // the argument was absent), but now it is explicit and RECORDABLE — which is
+  // what lets the collection harness reproduce a sample exactly instead of
+  // merely checking it is stable.
+  const samplingNowSec = Math.floor(Date.now() / 1000);
+  const { sampledVideos } = selectLongitudinalSample(handle, videoItems, samplingNowSec);
+  if (collectionFixturePath) {
+    dumpCollectionFixture(collectionFixturePath, {
+      handle,
+      samplingNowSec,
+      raw: {
+        prefetchedProfile: prefetchedProfile ?? null,
+        searchResponses: acc.rawCapture?.searchResponses ?? [],
+      },
+      expected: {
+        poolAfterApi,
+        poolAfterAugment: snapshotPool(acc),
+        sample: sampledVideos.map(s => ({ id: s.item.id, bucket: s.bucket })),
+      },
+    });
+  }
 
   // Fetch transcripts for the 12 sampled videos using p-limit concurrency
   const transcriptLimit = pLimit(3);

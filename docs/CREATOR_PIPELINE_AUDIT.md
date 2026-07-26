@@ -931,6 +931,44 @@ delete the profile."
   webcache in 2024.
 - Path A desktop-HTTP profile fetch — dead code since FIX 3.4 skipped it.
 
+### OPEN FINDING (for the next reliability session — NOT addressed in S2)
+
+**Author-stripped payloads silently empty the pool.**
+
+Observed live on 2026-07-26 while capturing a collection fixture: TikTok
+returned an `item_list` whose entries had **no author fields**. The Session-10
+fail-closed author guard correctly rejected every one — an **83-video capture
+became a 0-video pool with 45 rejections**. The run survived only on 30
+search-derived titles and produced 0 transcripts.
+
+Why the existing defences miss it:
+
+- **The empty-capture retry does not fire.** Capture *succeeded* — 83 items
+  arrived, `videoCount` was readable, `classifyEmptyCapture` saw a healthy
+  capture. The guard empties the pool **downstream of the retry's decision
+  point**, so the retry never gets a chance.
+- **No signal distinguishes this from a genuinely thin creator.** Downstream,
+  a guard-emptied pool and a creator with almost no public posts look
+  identical: few videos, few transcripts, min-data messaging.
+
+**The guard must stay fail-closed.** The alternative is the Session-10
+contamination class (foreign / author-less videos entering the corpus), which
+is strictly worse than a failed run.
+
+What a future session should build:
+
+1. **Detection** — flag when the guard rejects a high proportion of a
+   *non-empty* capture (here: 45 rejected, 0 kept). That ratio is the tell.
+2. **A distinct failure class** — "author-stripped capture", separate from
+   empty-capture and from genuine-empty, with its own honest message.
+3. **A retry policy** — author-stripping appears transient (a re-run minutes
+   later returned full author data and an 83-video pool), so this belongs in
+   the transient class.
+
+The raw signal already exists: `authorRejected` is counted and surfaced in the
+run diagnostics ("N videos excluded — author mismatch"). **Nothing currently
+acts on it.**
+
 **Instagram/YouTube caveat (read this before the next taxonomy):** those paths
 show **zero observed failures** in telemetry (instagram_oembed 16/16,
 youtube_html 18/18) — but that reflects **near-zero exercise** (almost no
