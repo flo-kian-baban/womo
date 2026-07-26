@@ -628,20 +628,55 @@ export function __rememberInstagramVideoUrls(handle: string, posts: InstagramPos
 
 /** Instagram's evidence gate — messages VERBATIM from the monolith. */
 const instagramGate: PlatformToolset["gate"] = (input) => {
-  const capture = input.capture as { stats?: { followerCount?: number; bio?: string }; pool?: { videoItems?: unknown[] } } | null;
+  const capture = input.capture as {
+    stats?: { followerCount?: number; bio?: string; videoCount?: number };
+    pool?: { videoItems?: unknown[] };
+  } | null;
   const handle = input.handle;
 
   const hasProfileData = Number(capture?.stats?.followerCount ?? 0) > 0
     || String(capture?.stats?.bio ?? "").length > 0;
-  const hasPostData = (capture?.pool?.videoItems?.length ?? 0) > 0;
+  const postsCaptured = capture?.pool?.videoItems?.length ?? 0;
 
-  if (!capture || (!hasProfileData && !hasPostData)) {
+  // ── Gate: nothing at all (VERBATIM from researchInstagramCreator) ──
+  if (!capture || (!hasProfileData && postsCaptured === 0)) {
     return {
       ok: false,
       code: "NOT_FOUND",
       message: `No public content found for @${handle} on Instagram. Please verify the handle is correct and that the account is public.`,
     };
   }
+
+  // ── Gate: ZERO POSTS (S4b) ──
+  // The floor this path never had. Instagram's only gate was
+  // `hasProfileData || hasPostData`, so a capture that returned the profile and
+  // NO posts passed, and the analysis was written from bio alone — the
+  // fabrication risk TikTok's min-data threshold exists to prevent. Observed
+  // live: after repeated requests from one IP, Instagram serves the profile with
+  // zero posts while still reporting success.
+  //
+  // The two cases are NOT the same and must not read the same. The profile's own
+  // media_count is the discriminator, exactly as TikTok's capture assessment
+  // distinguishes a blocked capture from a genuinely empty creator.
+  //
+  // Deliberately a FLOOR, not a threshold: zero posts only. What counts as
+  // "enough" Instagram evidence is a gate-policy question, and it is Jason's.
+  if (postsCaptured === 0) {
+    const stated = Number(capture.stats?.videoCount ?? 0);
+    if (stated > 0) {
+      return {
+        ok: false,
+        code: "PRECONDITION_FAILED",
+        message: `Instagram returned @${handle}'s profile but none of their posts (the profile reports ${stated} posts). This is usually transient rate-limiting — wait a few minutes and retry. Nothing was saved, and the account should not be deleted.`,
+      };
+    }
+    return {
+      ok: false,
+      code: "NOT_FOUND",
+      message: `@${handle}'s Instagram profile reports 0 posts — there is no content to analyze. (Confirmed by the profile's own stats; this is not a scraping failure.)`,
+    };
+  }
+
   return { ok: true };
 };
 

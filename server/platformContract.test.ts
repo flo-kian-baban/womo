@@ -231,3 +231,56 @@ describe("engagementRate — platform-specific by design, NOT normalised", () =>
     }
   });
 });
+
+describe("Instagram zero-post floor (S4b)", () => {
+  const gate = (over: Record<string, unknown>) =>
+    toolsetFor("Instagram").gate({
+      handle: "creator", augment: null, transcribe: null,
+      capture: { stats: { followerCount: 500, bio: "a real bio", videoCount: 0 }, pool: { videoItems: [] }, ...over },
+    });
+
+  it("REFUSES a capture with zero posts — no profile from bio alone", () => {
+    // The floor this path never had. Instagram's only gate was
+    // `hasProfileData || hasPostData`, so a profile-only capture produced an
+    // analysis written from the bio — the fabrication risk TikTok's min-data
+    // threshold prevents. Observed live under rate-limiting.
+    expect(gate({}).ok).toBe(false);
+  });
+
+  it("says TRANSIENT when the profile itself reports posts we did not get", () => {
+    const v = gate({ stats: { followerCount: 500, bio: "b", videoCount: 42 } });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.code).toBe("PRECONDITION_FAILED");
+      expect(v.message).toContain("reports 42 posts");
+      expect(v.message).toContain("transient");
+      // The operational instruction matters: an analyst told "no content found"
+      // deletes a good profile.
+      expect(v.message).toContain("should not be deleted");
+    }
+  });
+
+  it("says GENUINELY EMPTY when the profile's own stats report 0 posts", () => {
+    const v = gate({ stats: { followerCount: 500, bio: "b", videoCount: 0 } });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.code).toBe("NOT_FOUND");
+      expect(v.message).toContain("reports 0 posts");
+      expect(v.message).toContain("not a scraping failure");
+    }
+  });
+
+  it("the two zero-post messages are DIFFERENT — that is the whole point", () => {
+    const transient = gate({ stats: { followerCount: 5, bio: "b", videoCount: 9 } });
+    const empty = gate({ stats: { followerCount: 5, bio: "b", videoCount: 0 } });
+    expect(transient.ok).toBe(false);
+    expect(empty.ok).toBe(false);
+    if (!transient.ok && !empty.ok) expect(transient.message).not.toBe(empty.message);
+  });
+
+  it("PASSES as soon as there is at least one post — a floor, not a threshold", () => {
+    // What counts as "enough" Instagram evidence is a gate-policy question and
+    // is deliberately not decided here.
+    expect(gate({ pool: { videoItems: [{ id: "a" }] } }).ok).toBe(true);
+  });
+});
