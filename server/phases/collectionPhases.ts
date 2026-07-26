@@ -26,7 +26,10 @@ import type {
 } from "../_core/analysisPhase";
 import { NOT_READY } from "../_core/analysisPhase";
 import { isBrowserDeadError } from "../scraping/browserClient";
-import type { PoolVideoItem } from "../webResearch";
+import type {
+  CreatorResearchResult, EngagementSignals, LongitudinalSample,
+  PoolVideoItem, TranscriptEntry,
+} from "../webResearch";
 import { snapshotPool } from "../webResearch";
 import {
   toolsetFor,
@@ -235,4 +238,96 @@ export function selectSampleForPlatform(
   nowSec: number,
 ): Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }> {
   return toolsetFor(platform).transcribe.selectSample(handle, pool, nowSec);
+}
+
+/** P3's durable output — the corpus everything downstream reads. */
+export interface TranscribePhaseOutput {
+  transcripts: TranscriptEntry[];
+  musicTitles: string[];
+  engagementSignals: EngagementSignals;
+  longitudinalSample: LongitudinalSample;
+  discoveredVideoPool: NonNullable<CreatorResearchResult["discoveredVideoPool"]>;
+  foreignVideosRejected: number;
+  transcriptViewCounts: number[];
+  /** How many videos the sampler selected (>= transcripts.length). */
+  sampledCount: number;
+}
+
+export interface TranscribePhaseInput {
+  handle: string;
+  augment: AugmentPhaseOutput;
+  /** Injected so a replayed or resumed campaign resolves the same temporal
+   *  buckets the original run did. */
+  nowSec: number;
+}
+
+/**
+ * P3: transcribe — select, fetch, assemble. Now complete (it was
+ * selection-only): the phase owns the whole step through the TranscribeTool
+ * seam, so per-video fetching and the engagement/longitudinal/pool assembly
+ * live behind the same contract as everything else.
+ *
+ * Declares augment's banked pool as its input — the AUGMENTED pool, so
+ * search-discovered videos are sampled too.
+ *
+ * Outcome semantics: an empty transcript set is PARTIAL, not failed. A creator
+ * whose videos genuinely have no subtitles still produces a usable analysis
+ * from titles and metadata, and the min-data gate downstream is what decides
+ * whether that is enough — this phase does not pre-empt that frozen decision.
+ */
+export function makeTranscribePhase(platform: PlatformName): AnalysisPhase<
+  TranscribePhaseInput, TranscribePhaseOutput
+> {
+  const tools = toolsetFor(platform);
+  return {
+    name: "transcribe",
+    tool: tools.transcribe.name,
+    retry: { maxAttempts: 2, backoffMs: { transient: [60_000] } },
+    inputs: (state: CampaignState) => {
+      const augment = state.phases.augment?.output as AugmentPhaseOutput | undefined;
+      if (!augment) return NOT_READY;
+      return { handle: state.handle, augment, nowSec: Math.floor(Date.now() / 1000) };
+    },
+    async run(input, ctx: PhaseRunContext): Promise<PhaseResult<TranscribePhaseOutput>> {
+      const started = Date.now();
+      try {
+        const pool = input.augment.pool.videoItems;
+        const sampled = tools.transcribe.selectSample(input.handle, pool, input.nowSec);
+        const transcripts = await tools.transcribe.transcribe(input.handle, sampled);
+        const assembled = tools.transcribe.assemble(input.handle, pool, transcripts, sampled);
+
+        // The collection stage's view counts, taken VERBATIM from the banked
+        // pool rather than re-derived: the monolith returns exactly this array
+        // and merges it into the profile's list downstream, in order, with
+        // dedup. Re-deriving it from videoItems would be equivalent today but
+        // would silently diverge the moment either loop changed.
+        const transcriptViewCounts = input.augment.pool.viewCounts;
+
+        const outcome = transcripts.length > 0 ? "complete" as const : "partial" as const;
+        return {
+          outcome,
+          output: {
+            transcripts,
+            musicTitles: input.augment.pool.musicTitles,
+            engagementSignals: assembled.engagementSignals,
+            longitudinalSample: assembled.longitudinalSample,
+            discoveredVideoPool: assembled.discoveredVideoPool,
+            foreignVideosRejected: input.augment.pool.foreignVideosRejected,
+            transcriptViewCounts,
+            sampledCount: sampled.length,
+          },
+          attempts: [{ tool: tools.transcribe.name, outcome, durationMs: Date.now() - started }],
+        };
+      } catch (err) {
+        const failureClass = classifyPhaseError(err);
+        return {
+          outcome: "failed", failureClass, output: null,
+          attempts: [{
+            tool: tools.transcribe.name, outcome: "failed", failureClass,
+            durationMs: Date.now() - started, detail: (err as Error).message?.slice(0, 300),
+          }],
+        };
+      }
+    },
+  };
 }

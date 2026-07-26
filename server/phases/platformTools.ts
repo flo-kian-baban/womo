@@ -29,11 +29,16 @@
  * which is what makes a single contract honest here.
  */
 import type { PlatformName } from "../_core/analysisPhase";
-import type { PoolVideoItem } from "../webResearch";
+import type {
+  CreatorResearchResult, EngagementSignals, LongitudinalSample,
+  PoolVideoItem, TranscriptEntry,
+} from "../webResearch";
 import {
+  assembleTranscribeOutputs,
   collectPoolFromApi,
   collectPoolFromSupplementalSearch,
   selectLongitudinalSample,
+  transcribeSampledVideos,
 } from "../webResearch";
 import { scrapeTikTokProfile } from "../scraping/tiktok/profileScraper";
 
@@ -91,16 +96,31 @@ export interface AugmentTool {
   augment(handle: string, pool: ToolPoolState): Promise<void>;
 }
 
+export type SampledVideo = { item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" };
+
 export interface TranscribeTool {
   platform: PlatformName;
   name: string;
   /** Choose which items to transcribe. TikTok uses the frozen 6-3-3 sampler;
    *  another platform may sample differently without touching the phase. */
-  selectSample(
+  selectSample(handle: string, pool: PoolVideoItem[], nowSec: number): SampledVideo[];
+  /** Fetch transcripts for the selected items. TikTok delegates to the
+   *  transcriptStrategies chain with its budgets and early-bail — called, never
+   *  modified. Instagram's reel-Whisper path and YouTube's caption-XML fetch
+   *  slot in here in S4 without the phase changing. */
+  transcribe(handle: string, sampled: SampledVideo[]): Promise<TranscriptEntry[]>;
+  /** Derive the engagement / longitudinal / pool artifacts from the collected
+   *  pool and the fetched transcripts. FROZEN interpretation on TikTok. */
+  assemble(
     handle: string,
     pool: PoolVideoItem[],
-    nowSec: number,
-  ): Array<{ item: PoolVideoItem; bucket: "recent" | "mid" | "anchor" }>;
+    transcripts: TranscriptEntry[],
+    sampled: SampledVideo[],
+  ): {
+    engagementSignals: EngagementSignals;
+    longitudinalSample: LongitudinalSample;
+    discoveredVideoPool: NonNullable<CreatorResearchResult["discoveredVideoPool"]>;
+  };
 }
 
 export interface PlatformToolset {
@@ -176,6 +196,16 @@ const tiktokTranscribe: TranscribeTool = {
   selectSample(handle, pool, nowSec) {
     // The FROZEN 6-3-3 sampler, called not reimplemented.
     return selectLongitudinalSample(handle, pool, nowSec).sampledVideos;
+  },
+  transcribe(handle, sampled) {
+    // The pLimit(3) loop over the transcriptStrategies chain, with the shared
+    // batch phase (budgets + early-bail). Harness boundary 4 pins its output.
+    return transcribeSampledVideos(handle, sampled);
+  },
+  assemble(handle, pool, transcripts, sampled) {
+    // Engagement signals, LongitudinalSample (incl. the frozen cultural-velocity
+    // heuristic) and discoveredVideoPool with 6-3-3 membership stamping.
+    return assembleTranscribeOutputs(handle, pool, transcripts, sampled);
   },
 };
 

@@ -33,19 +33,10 @@ import {
   type ResumableBankedPhases,
 } from "../webResearch";
 import { classifyPhaseError } from "./collectionPhases";
-import type { CapturePhaseOutput, AugmentPhaseOutput } from "./collectionPhases";
+import type { CapturePhaseOutput, AugmentPhaseOutput, TranscribePhaseOutput } from "./collectionPhases";
+export type { TranscribePhaseOutput };
 
 // ─── P4: derive ──────────────────────────────────────────────────────────────
-
-export interface TranscribePhaseOutput {
-  transcripts: ResumableBankedPhases["transcribe"]["transcripts"];
-  musicTitles: string[];
-  engagementSignals: ResumableBankedPhases["transcribe"]["engagementSignals"];
-  longitudinalSample: ResumableBankedPhases["transcribe"]["longitudinalSample"];
-  discoveredVideoPool: ResumableBankedPhases["transcribe"]["discoveredVideoPool"];
-  foreignVideosRejected: number;
-  transcriptViewCounts: number[];
-}
 
 export interface DerivePhaseInput {
   handle: string;
