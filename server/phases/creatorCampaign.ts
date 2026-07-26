@@ -1,0 +1,201 @@
+/**
+ * The creator campaign — phased architecture S3b, Part 1.
+ *
+ * ─── What changed ───────────────────────────────────────────────────────────
+ * `extract_commit` used to run INLINE in routers.ts, after the endpoint had
+ * already received the assembled evidence. The ledger therefore showed four
+ * runner rows plus a shadow row written by hand, and a campaign could not
+ * complete without an HTTP request driving it. It now runs through the same
+ * runner, scheduler and ledger as the other four: five runner rows, and a
+ * campaign that completes with nobody watching.
+ *
+ * That is what makes the queue possible — and it closes the lost-work class
+ * properly. The old defence was in-race salvage: `Promise.race` does not cancel
+ * the loser, so a timed-out run's extraction kept going and persisted
+ * out-of-band. It worked, but only while the PROCESS survived. A crash between
+ * extraction and commit lost the work outright. Now extract_commit is a ledger
+ * phase like any other: a campaign killed after collection but before commit
+ * comes back with capture/augment/transcribe/derive banked and re-runs ONLY
+ * phase 5, from banked evidence, with no re-scraping.
+ *
+ * ─── Why the evidence gates still run between phase 4 and phase 5 ───────────
+ * The quota gate, the no-data gate and the minimum-data threshold are FROZEN
+ * interpretation. They decide whether the evidence is fit to extract from at
+ * all, and they must run BEFORE extract_commit — a single five-phase pass would
+ * happily persist a profile that the min-data gate exists to refuse. They live
+ * where they always have (inside the collection half) and still throw; this
+ * module turns that throw into a terminal campaign outcome carrying the same
+ * message, because under a queue there is no caller to throw to.
+ *
+ * ─── Dependency injection, and why ──────────────────────────────────────────
+ * extract_commit needs extractCreatorProfile / persistCreatorToV2 /
+ * buildCreatorEvidenceSnapshotPayload, which live in routers.ts — and routers
+ * imports webResearch, which this module uses. Injection keeps the cycle out
+ * and makes a campaign runnable in tests without a database or an LLM.
+ */
+import { TRPCError } from "@trpc/server";
+import type { CampaignState, PhaseName, PhaseStateEntry } from "../_core/analysisPhase";
+import { runPhases, bankedOutput, type BankFn } from "./phaseRunner";
+import { makeSchedulerExecute } from "./phaseScheduler";
+import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
+import { runTikTokCollection } from "../webResearch";
+import type { CreatorResearchResult } from "../webResearch";
+
+/** Everything the campaign needs from routers.ts, injected. */
+export interface CreatorCampaignDeps {
+  /**
+   * Extraction WITH the one-retry policy the endpoint has always applied — a
+   * transient LLM hiccup should not kill an otherwise-good run. The phase never
+   * learns about the retry; it asks for an extraction and gets one.
+   */
+  extract: (handleOrUrl: string, platform: string, evidenceSummary: string) => Promise<Record<string, unknown>>;
+  buildSnapshot: (handleOrUrl: string, platform: string, evidenceSummary: string | undefined, structured: unknown) => unknown;
+  /** Maps a CreatorResearchResult into the researchData shape persistCreatorToV2 expects. */
+  persist: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  summarize: (result: unknown) => { saved: string };
+  /** Ledger writer. Injected so the campaign is testable without a database. */
+  bank: (entry: Parameters<BankFn>[0] & { subjectHint: string; runId: string }) => Promise<void> | void;
+  /** Marks a phase pending/running for the queue view. Best-effort. */
+  mark?: (entry: { runId: string; subjectHint: string; phase: PhaseName; tool: string; attempt: number; status: "pending" | "running" }) => void;
+}
+
+/**
+ * The persistence summary's shape, declared structurally here rather than
+ * imported: routers.ts owns `summarizePersistence`, and importing its type
+ * would reintroduce the cycle this module's dependency injection exists to
+ * avoid.
+ */
+export interface CampaignPersistenceSummary {
+  saved: "full" | "partial" | "none";
+  failedComponents: string[];
+  error: string | null;
+  components: Record<string, unknown> | null;
+}
+
+export interface CampaignOutcome {
+  runId: string;
+  handle: string;
+  platform: "TikTok";
+  /** Did the campaign reach a committed observation? */
+  committed: boolean;
+  subjectId: string | null;
+  observationId: string | null;
+  /** Terminal classification for pipeline_runs. */
+  status: "success" | "partial" | "saved_none" | "min_data_rejection" | "error";
+  /** The analyst-facing reason when the campaign did not commit. */
+  message: string | null;
+  /** Which phase stopped it, when it stopped early. */
+  stoppedAt: PhaseName | null;
+  research: CreatorResearchResult | null;
+  /** The persistence summary extract_commit produced, when it ran. */
+  persistence: CampaignPersistenceSummary | null;
+}
+
+/**
+ * Map a thrown evidence gate to a terminal campaign outcome.
+ *
+ * The gates are FROZEN and still throw TRPCErrors with their exact messages;
+ * this only decides how a queue reports them. PRECONDITION_FAILED is the
+ * min-data refusal — a deliberate, honest "we will not extract from this",
+ * distinct from a failure.
+ */
+function classifyCollectionFailure(err: unknown): { status: CampaignOutcome["status"]; message: string } {
+  if (err instanceof TRPCError) {
+    return {
+      status: err.code === "PRECONDITION_FAILED" ? "min_data_rejection" : "error",
+      message: err.message,
+    };
+  }
+  return { status: "error", message: err instanceof Error ? err.message : String(err) };
+}
+
+/**
+ * Run one creator campaign end to end. No HTTP request required, and no caller
+ * waiting: the queue worker calls this and the ledger records everything.
+ *
+ * @param initialPhases banked state from a previous attempt. A resumed campaign
+ *   passes what the ledger holds, and any phase already banked as usable is
+ *   skipped by the runner — which is how a crash between extraction and commit
+ *   costs one LLM call instead of a full re-scrape.
+ */
+export async function runCreatorCampaign(
+  args: {
+    runId: string;
+    handle: string;
+    platform: "TikTok";
+    deadlineAt?: number;
+    initialPhases?: CampaignState["phases"];
+  },
+  deps: CreatorCampaignDeps,
+): Promise<CampaignOutcome> {
+  const subjectHint = `${args.handle}@${args.platform}`;
+  const base = {
+    runId: args.runId, handle: args.handle, platform: args.platform,
+    committed: false, subjectId: null, observationId: null,
+    stoppedAt: null, research: null, persistence: null,
+  } as const;
+
+  // ── Phases 1-4 + the FROZEN gates + the pure assembly ──
+  let collected;
+  try {
+    collected = await runTikTokCollection(args.handle);
+  } catch (err) {
+    const { status, message } = classifyCollectionFailure(err);
+    return { ...base, status, message };
+  }
+
+  // ── Phase 5: extract_commit, through the same runner ──
+  const extractCommitPhase = makeExtractCommitPhase({
+    extract: deps.extract,
+    buildSnapshot: deps.buildSnapshot,
+    persist: deps.persist,
+    summarize: deps.summarize,
+  });
+
+  const summary = await runPhases({
+    runId: args.runId,
+    handle: args.handle,
+    platform: args.platform,
+    phases: [extractCommitPhase] as never,
+    // The collection phases' banked output is what extract_commit declares as
+    // its input; a resumed campaign's ledger state takes precedence.
+    initialPhases: { ...collected.phases, ...(args.initialPhases ?? {}) },
+    execute: makeSchedulerExecute({
+      deadlineAt: args.deadlineAt,
+      onAttemptStart: (phase, attempt, status) =>
+        deps.mark?.({ runId: args.runId, subjectHint, phase: phase.name, tool: phase.tool, attempt, status }),
+    }),
+    bank: (entry) => deps.bank({ ...entry, runId: args.runId, subjectHint }),
+  });
+
+  const out = bankedOutput<ExtractCommitOutput>(summary, "extract_commit");
+  const entry = summary.state.phases.extract_commit as PhaseStateEntry | undefined;
+  const persistence = (out?.persistence ?? null) as CampaignPersistenceSummary | null;
+
+  if (!out || entry?.status === "failed") {
+    return {
+      ...base,
+      research: collected.research,
+      persistence,
+      status: "error",
+      stoppedAt: "extract_commit",
+      message: persistence?.error
+        ?? `Extraction or persistence failed for @${args.handle}. Nothing was saved.`,
+    };
+  }
+
+  const saved = persistence?.saved;
+  if (saved !== "full") {
+    console.warn(`[campaign] @${args.handle}: persistence outcome ${saved}`, persistence?.error ?? "");
+  }
+  return {
+    ...base,
+    research: collected.research,
+    persistence,
+    committed: saved === "full" || saved === "partial",
+    subjectId: out.subjectId,
+    observationId: out.observationId,
+    status: saved === "full" ? "success" : saved === "partial" ? "partial" : "saved_none",
+    message: saved === "full" ? null : (persistence?.error ?? `Persistence outcome: ${saved ?? "unknown"}`),
+  };
+}

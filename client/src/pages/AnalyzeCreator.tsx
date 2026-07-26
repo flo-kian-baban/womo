@@ -161,8 +161,10 @@ export default function AnalyzeCreator() {
       }
       // Persistence outcome is reported explicitly by the API — never show
       // plain success (or silently show nothing) when the save failed.
-      if (data.persistence.saved === "none") {
-        toast.error(`Analysis completed but could NOT be saved: ${data.persistence.error ?? "database error"}`);
+      // A campaign that never reached extract_commit reports no summary at all;
+      // that is a failure to save, not a silent success.
+      if (!data.persistence || data.persistence.saved === "none") {
+        toast.error(`Analysis completed but could NOT be saved: ${data.persistence?.error ?? "database error"}`);
         return;
       }
       if (data.profile) {

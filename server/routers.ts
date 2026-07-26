@@ -34,12 +34,15 @@ import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand, resumeResearchFromBanked, type ResumableBankedPhases } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
+import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
+import type { CreatorResearchResult } from "./webResearch";
+import type { PhaseStateWrite } from "./db";
 import type { RunOutcomeStatus } from "./db";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { createBulkCreatorJob, createBulkBrandJob, getJob, markJobProcessing, markJobCompleted, recordJobError, updateJobResult, updateJobProgress } from "./bulkAnalysisJobs";
-import { newRunId, withAnalysisRun } from "./_core/runContext";
+import { newRunId, withAnalysisRun, currentDeadlineAt } from "./_core/runContext";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
 // Run machinery (concurrency limiter, failure classification, timeout race,
@@ -88,6 +91,122 @@ function recordOutcome(
 ): void {
   map[component] = { status, reason, at: new Date().toISOString() };
 }
+
+// ─── Creator campaign dependencies (S3b) ─────────────────────────────────────
+//
+// extract_commit runs inside the phase runner now, but the three things it needs
+// — the LLM extraction, the evidence-snapshot builder, and persistCreatorToV2 —
+// live here. Injecting them keeps `phases/` free of the routers↔webResearch
+// cycle and lets a campaign run in tests without a database or an LLM.
+//
+// The fabrication guard, the extraction retry and the researchData mapping all
+// moved into these deps VERBATIM. The `withResourceSlot("llm", …)` wrap that
+// used to sit around the extraction is GONE — not moved: the scheduler already
+// admits extract_commit against the llm bound (classForPhase), and wrapping it
+// again would trip the nesting guard.
+
+/** Extraction with the one-retry policy analyze has always applied. */
+async function extractCreatorWithRetry(
+  handleOrUrl: string, platform: string, evidenceSummary: string,
+): Promise<Record<string, unknown>> {
+  // Session 8: never extract on empty evidence. A collection failure already
+  // rejects before this runs; this guard also closes the theoretical "succeeded
+  // but empty evidence" case so the "use your own knowledge" prompt branch can
+  // never fabricate a profile.
+  if (!evidenceSummary) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `No usable evidence was collected for @${handleOrUrl}. Analysis was not saved.`,
+    });
+  }
+  try {
+    return await extractCreatorProfile(handleOrUrl, platform as never, evidenceSummary) as unknown as Record<string, unknown>;
+  } catch (firstErr) {
+    console.warn("[campaign] First extraction attempt failed, retrying:", firstErr);
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      return await extractCreatorProfile(handleOrUrl, platform as never, evidenceSummary) as unknown as Record<string, unknown>;
+    } catch {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Creator extraction failed after retry. Please try again.",
+      });
+    }
+  }
+}
+
+/** The CreatorResearchResult → researchData mapping, moved verbatim from analyze. */
+export function researchDataFromResult(research: CreatorResearchResult): Record<string, unknown> {
+  return {
+    followerCount: research.followerCount || undefined,
+    // I1: thread followingCount from scraper data.
+    followingCount: research.followingCount || undefined,
+    totalLikes: research.totalLikes || undefined,
+    videoCount: research.videoCount || undefined,
+    totalViews: research.totalViews || undefined,
+    avgViews: research.avgViews || undefined,
+    engagementRate: research.engagementRate || undefined,
+    location: research.location || undefined,
+    bio: research.bio || undefined,
+    rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+    contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+    topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+    recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+    transcriptCount: research.transcriptCount ?? 0,
+    transcriptExcerpts: research.transcriptExcerpts || undefined,
+    decodedSymbols: research.decodedSymbols ?? undefined,
+    culturalVelocity: research.culturalVelocity ?? undefined,
+    dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+    sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+    foreignVideosRejected: research.foreignVideosRejected,
+    longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+    discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+    transcripts: research.transcripts?.length ? research.transcripts : undefined,
+  };
+}
+
+/** The dependency set every creator campaign runs with. */
+export const creatorCampaignDeps: CreatorCampaignDeps = {
+  extract: extractCreatorWithRetry,
+  buildSnapshot: (handleOrUrl, platform, evidenceSummary, structured) =>
+    buildCreatorEvidenceSnapshotPayload(handleOrUrl, platform, evidenceSummary, structured),
+  persist: async (params) => {
+    const research = params.research as CreatorResearchResult;
+    const extracted = params.extracted as Record<string, unknown>;
+    return persistCreatorToV2({
+      handle: extracted.handle as string,
+      platform: extracted.platform as string,
+      profileUrl: (params.profileUrl as string | undefined) ?? undefined,
+      displayName: extracted.displayName as string,
+      pronouns: extracted.pronouns as string | undefined,
+      extracted,
+      researchData: researchDataFromResult(research),
+      evidenceSnapshot: params.evidenceSnapshot as CreatorEvidenceSnapshotPayload,
+    }) as unknown as Record<string, unknown>;
+  },
+  summarize: (result) => summarizePersistence(result as PersistResult),
+  bank: (entry) => recordPhaseState({
+    runId: entry.runId,
+    subjectHint: entry.subjectHint,
+    phase: entry.phase as PhaseStateWrite["phase"],
+    tool: entry.tool,
+    status: entry.status as PhaseStateWrite["status"],
+    failureClass: entry.failureClass as PhaseStateWrite["failureClass"],
+    attemptCount: entry.attemptCount,
+    nextEarliestAt: entry.nextEarliestAt,
+    output: entry.output,
+  }),
+  mark: (entry) => {
+    void recordPhaseState({
+      runId: entry.runId,
+      subjectHint: entry.subjectHint,
+      phase: entry.phase as PhaseStateWrite["phase"],
+      tool: entry.tool,
+      status: entry.status,
+      attemptCount: entry.attempt,
+    });
+  },
+};
 
 /**
  * Turn a content_items write into an honest outcome for persistence_status.
@@ -896,176 +1015,55 @@ export const appRouter = router({
           timeoutMs: ENV.analysisTimeoutMs,
           timeoutMessage: `Analysis timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). The creator's page may be slow or unavailable. Please try again.`,
           work: async ({ pipelineStart, stepTimings }) => {
-            // Step 1: Research
+            // S3b: the campaign runs all FIVE phases through the runner —
+            // extract_commit included. What used to be inline here (the
+            // fabrication guard, the extraction retry, the researchData mapping)
+            // now lives in creatorCampaignDeps and runs inside the phase, so a
+            // campaign completes with nobody watching. This endpoint keeps its
+            // synchronous shape for one more commit; the queue replaces it next.
             const t1 = Date.now();
-            const research = await researchCreator(input.handleOrUrl, input.platform);
-            stepTimings.push({ step: "Web Research & Scraping", durationMs: Date.now() - t1 });
+            const outcome = await runCreatorCampaign(
+              { runId, handle: input.handleOrUrl, platform: "TikTok", deadlineAt: currentDeadlineAt() },
+              creatorCampaignDeps,
+            );
+            stepTimings.push({ step: "Campaign (5 phases)", durationMs: Date.now() - t1 });
 
-            // Session 8: never extract on empty evidence. A researchCreator failure
-            // already rejects before extraction runs; this guard also closes the
-            // theoretical "succeeded but empty evidence" case so the "use your own
-            // knowledge" prompt branch can never fabricate a profile.
-            if (!research.evidenceSummary) {
+            // The FROZEN evidence gates still throw from the collection half;
+            // the campaign classifies them and this re-raises so the endpoint's
+            // error contract is unchanged for now.
+            if (!outcome.committed) {
               throw new TRPCError({
-                code: "PRECONDITION_FAILED",
-                message: `No usable evidence was collected for @${input.handleOrUrl}. Analysis was not saved.`,
+                code: outcome.status === "min_data_rejection" ? "PRECONDITION_FAILED" : "INTERNAL_SERVER_ERROR",
+                message: outcome.message ?? `Analysis failed for @${input.handleOrUrl}. Nothing was saved.`,
               });
             }
 
-            // Step 2: AI Extraction (with retry)
-            // S3a: admitted against the `llm` bound. This is the LLM-bound half
-            // of extract_commit, which still runs inline here rather than in the
-            // phase runner (moving it would reshape the endpoint's return path —
-            // S3b). The slot boundary is the extraction, not the extraction plus
-            // the persist below, because the bound exists to cap Gemini quota
-            // contention: persistence contends for Postgres, and holding an LLM
-            // permit across a DB write would shrink effective LLM concurrency for
-            // nothing. Retry logic below is UNCHANGED.
-            const t2 = Date.now();
-            const extracted = await withResourceSlot("llm", async () => {
-              try {
-                return await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-              } catch (firstErr) {
-                console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
-                await new Promise(r => setTimeout(r, 1000));
-                try {
-                  return await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-                } catch (secondErr) {
-                  throw new TRPCError({
-                    code: "INTERNAL_SERVER_ERROR",
-                    message: "Creator extraction failed after retry. Please try again.",
-                  });
-                }
-              }
-            });
-            stepTimings.push({ step: "AI Profile Extraction", durationMs: Date.now() - t2 });
-
-            // ── Step 3: DB Persistence ──
-            // Session 11 (Commit 7): persistence now lives INSIDE the raced work.
-            // It used to run AFTER Promise.race — but Promise.race does not cancel
-            // the loser, so when the 5-min timeout won, this extraction kept running
-            // to completion and its result was thrown away UNPERSISTED (Part 0.3:
-            // runs 69c13004 / 1944190b reached extraction at 430s / 348s, both past
-            // the 300s timeout). Persisting here means a finished extraction is
-            // ALWAYS saved — even if the client already received a timeout, the
-            // observation still lands is_latest and recordRunOutcome upserts the
-            // true result over the provisional "timeout" the outer handler wrote.
-            const researchData: {
-              followerCount?: number; followingCount?: number; totalLikes?: number; videoCount?: number;
-              totalViews?: number; avgViews?: number; engagementRate?: number;
-              location?: string; bio?: string; rawKeywords?: string[]; contentThemeLabels?: string[];
-              topHashtags?: string[]; recentVideoTitles?: string[];
-              transcriptCount?: number; transcriptExcerpts?: string;
-              decodedSymbols?: Record<string, unknown>;
-              culturalVelocity?: string;
-              dataConfidenceLevel?: string;
-              sociologicalFieldsComputed?: boolean;
-              foreignVideosRejected?: number;
-              longitudinalSampleJson?: Record<string, unknown>;
-              discoveredVideoPoolJson?: Array<{ id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; temporalBucket?: "recent" | "mid" | "anchor" }>;
-              transcripts?: Array<{ videoId: string; transcript: string; wordCount: number; transcriptSource?: string }>;
-            } = {
-              followerCount: research.followerCount || undefined,
-              // I1: Thread followingCount from scraper data
-              followingCount: research.followingCount || undefined,
-              totalLikes: research.totalLikes || undefined,
-              videoCount: research.videoCount || undefined,
-              totalViews: research.totalViews || undefined,
-              avgViews: research.avgViews || undefined,
-              engagementRate: research.engagementRate || undefined,
-              location: research.location || undefined,
-              bio: research.bio || undefined,
-              rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
-              contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
-              topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
-              recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
-              transcriptCount: research.transcriptCount ?? 0,
-              transcriptExcerpts: research.transcriptExcerpts || undefined,
-              decodedSymbols: research.decodedSymbols ?? undefined,
-              culturalVelocity: research.culturalVelocity ?? undefined,
-              dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
-              sociologicalFieldsComputed: research.sociologicalFieldsComputed,
-              foreignVideosRejected: research.foreignVideosRejected,
-              longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
-              discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
-              transcripts: research.transcripts?.length ? research.transcripts : undefined,
-            };
-
-            const t3 = Date.now();
-            const persistResult = await persistCreatorToV2({
-              handle: extracted.handle,
-              platform: extracted.platform,
-              profileUrl: research.profileUrl ?? (input.handleOrUrl.startsWith("http") ? input.handleOrUrl : undefined),
-              displayName: extracted.displayName,
-              pronouns: extracted.pronouns,
-              extracted,
-              researchData,
-              // womo_0007: same (handleOrUrl, platform, evidenceSummary) triple the
-              // extraction call above received → byte-identical prompt snapshot
-              evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
-                input.handleOrUrl, input.platform, research.evidenceSummary, research,
-              ),
-            });
-            stepTimings.push({ step: "Database Persistence", durationMs: Date.now() - t3 });
+            const research = outcome.research!;
+            const researchData = researchDataFromResult(research);
+            const persistence = outcome.persistence;
 
             // Collect token metrics — exact per-run lookup via run_id (womo_0006).
             const tokenMetrics = await getLlmTokenUsageByRunId(runId)
               .catch(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0, model: "unknown" }));
 
-            const totalDurationMs = Date.now() - pipelineStart;
-
-            // Honest persistence outcome — never report plain success when
-            // persistence partially or wholly failed.
-            const persistence = summarizePersistence(persistResult);
-            if (persistence.saved !== "full") {
-              console.warn(`[V2 Pipeline] ⚠️ Creator persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
-            }
-            const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
-
-            // Shadow banking (S1): P5 extract_commit. Write-only observation —
-            // nothing reads it, nothing resumes from it, no execution branch.
-            void recordPhaseState({
-              runId,
-              subjectHint: `${extracted.handle}@${extracted.platform}`,
-              phase: "extract_commit",
-              tool: "gemini:extractCreatorProfile+persistCreatorToV2",
-              status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
-              output: {
-                subjectId: actualSubjectId,
-                observationId: "observationId" in persistResult ? persistResult.observationId : null,
-                persistence,
-                evidenceSummaryBytes: research.evidenceSummary?.length ?? 0,
-                transcriptCount: researchData.transcriptCount ?? 0,
-              },
-            });
-
-            // Terminal telemetry (status/detail) is written by the wrapper on
-            // return; the payload below is identical to the old inline
-            // recordRunOutcome, plus Part 3's captureEvidence for the
-            // capture-health thin tier (reporting only).
-            const saved = actualSubjectId ? await getCreatorProfileById(actualSubjectId) : null;
+            const saved = outcome.subjectId ? await getCreatorProfileById(outcome.subjectId) : null;
             return {
-              status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
-              detail: persistence.saved === "full" ? {} : {
-                saved: persistence.saved,
-                error: persistence.error ?? null,
-                failedComponents: persistence.failedComponents ?? [],
-              },
+              status: outcome.status as RunOutcomeStatus,
+              detail: outcome.status === "success" ? {} : { saved: outcome.status, error: outcome.message },
               captureEvidence: {
-                transcripts: researchData.transcriptCount ?? 0,
-                titles: researchData.recentVideoTitles?.length ?? 0,
+                transcripts: (researchData.transcriptCount as number) ?? 0,
+                titles: (researchData.recentVideoTitles as string[] | undefined)?.length ?? 0,
               },
               value: {
                 profile: saved,
                 persistence,
-                extracted,
                 runId,
                 pipelineMetrics: {
-                  totalDurationMs,
+                  totalDurationMs: Date.now() - pipelineStart,
                   steps: stepTimings,
                   tokens: tokenMetrics,
-                  transcriptCount: researchData.transcriptCount ?? 0,
-                  videosScraped: researchData.discoveredVideoPoolJson?.length ?? 0,
+                  transcriptCount: (researchData.transcriptCount as number) ?? 0,
+                  videosScraped: (researchData.discoveredVideoPoolJson as unknown[] | undefined)?.length ?? 0,
                 },
               },
             };

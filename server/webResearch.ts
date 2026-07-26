@@ -55,6 +55,7 @@ import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db"
 import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
+import type { CampaignState } from "./_core/analysisPhase";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
   makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
@@ -2118,7 +2119,33 @@ function emptyCaptureMessage(
  * This is now the ONLY path: the previous inline orchestration was deleted in
  * the S2 cutover.
  */
-async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
+/** Collection result plus the banked phase state that produced it (S3b). */
+export interface TikTokCollectionCampaign {
+  research: CreatorResearchResult;
+  /** Every phase's banked output, ready to seed the extract_commit phase. */
+  phases: CampaignState["phases"];
+}
+
+/**
+ * Phases 1-4 plus the FROZEN evidence gates and the pure assembly, returning
+ * the banked state alongside the result (S3b).
+ *
+ * ─── Why this exists ────────────────────────────────────────────────────────
+ * extract_commit is the fifth phase and reads its inputs from banked output.
+ * Running it through the runner therefore needs the state phases 1-4 produced —
+ * which `researchTikTokCreator` used to discard. This is that function, verbatim,
+ * with the state returned instead of thrown away; `researchTikTokCreator` is now
+ * a thin wrapper over it, so every existing caller behaves identically.
+ *
+ * ─── Why the gates still live here, between phase 4 and phase 5 ─────────────
+ * The quota gate, the no-data gate and the minimum-data threshold are FROZEN
+ * interpretation, and they decide whether evidence is sufficient to extract from
+ * at all. They must run BEFORE extract_commit — a campaign that runs all five
+ * phases in one pass would persist a profile the min-data gate exists to refuse.
+ * They throw, exactly as before; the campaign turns that throw into a terminal
+ * campaign outcome carrying the same honest message.
+ */
+export async function runTikTokCollection(handleOrUrl: string): Promise<TikTokCollectionCampaign> {
   const handle = extractHandle(handleOrUrl);
   const subjectHint = `${handle}@TikTok`;
   const runId = currentRunId();
@@ -2284,7 +2311,15 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     derived: { contentThemeLabels: derived.contentThemeLabels, decodedSymbols: derived.decodedSymbols },
   });
 
-  return result;
+  return { research: result, phases: summary.state.phases };
+}
+
+/**
+ * TikTok creator research — the collection half, for callers that only want the
+ * assembled evidence. Unchanged behaviour; the banked state is simply dropped.
+ */
+async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
+  return (await runTikTokCollection(handleOrUrl)).research;
 }
 
 // ─── Instagram Creator Research ───────────────────────────────────────────────
