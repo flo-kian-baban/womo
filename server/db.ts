@@ -145,10 +145,44 @@ export interface PhaseStateWrite {
   output?: unknown;
 }
 
+/**
+ * Write a phase row. THROWS on failure.
+ *
+ * ─── Why this throws, and recordPhaseObservation does not (S3b) ─────────────
+ * Through S3a the ledger was observation: a lost write cost visibility, and the
+ * standing rule was that observation must never fail an analysis. S3b makes the
+ * ledger the QUEUE OF RECORD, and the two purposes now need opposite failure
+ * behaviour:
+ *
+ *   queue state (enqueue, terminal outcome) — a swallowed write here means a
+ *     campaign nobody will run and nobody can see. It must fail loudly, at the
+ *     caller, so submission can tell the analyst it did not happen.
+ *   observation (banked output, pending/running markers) — losing one costs a
+ *     re-run of a single phase at worst. Still best-effort, via the wrapper.
+ *
+ * The distinction is real and asymmetric: losing a banked OUTPUT costs one
+ * phase; losing the ENQUEUE row costs the whole campaign.
+ */
 export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available — cannot record phase state");
+  await writePhaseState(db, w);
+}
+
+/**
+ * Best-effort phase write: warns and continues. Use for observation only —
+ * never for queue state. See recordPhaseState for why the split exists.
+ */
+export async function recordPhaseObservation(w: PhaseStateWrite): Promise<void> {
   try {
-    const db = await getDb();
-    if (!db) return;
+    await recordPhaseState(w);
+  } catch (err) {
+    console.warn(`[db] recordPhaseObservation(${w.runId}, ${w.phase}) failed (ignored):`, (err as Error).message);
+  }
+}
+
+async function writePhaseState(db: DbHandle, w: PhaseStateWrite): Promise<void> {
+  {
     const now = new Date();
     await db.insert(analysisPhaseState).values({
       runId: w.runId,
@@ -180,9 +214,133 @@ export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
       // older than the row it would overwrite; a late marker is simply dropped.
       setWhere: sql`${analysisPhaseState.updatedAt} <= ${now}`,
     });
-  } catch (err) {
-    console.warn(`[db] recordPhaseState(${w.runId}, ${w.phase}) failed (ignored):`, (err as Error).message);
   }
+}
+
+// ─── Heartbeat + stale-running reclaim (S3b, Part 3) ─────────────────────────
+//
+// A crash or force-quit leaves rows stuck in `running` forever, and a `running`
+// row is invisible to scanReadyWork — so the campaign would never resume.
+//
+// THE TEMPTING FIX IS WRONG. "This process just booted, so every running row is
+// dead" holds for ONE machine, but this database is the shared cloud Supabase
+// and several analysts run locally against it. Boot-reclaiming indiscriminately
+// would let one analyst's restart steal a colleague's in-flight campaign
+// mid-scrape.
+//
+// So liveness is proven, not assumed: a phase touches `updated_at` while it
+// holds a permit, and only rows that have gone quiet for longer than any
+// legitimate phase could take are reclaimable. Dead-vs-live becomes a timestamp
+// comparison rather than an inference about who booted when.
+
+/**
+ * How long a `running` row may go without a heartbeat before it is presumed
+ * dead. The longest legitimate phase is transcribe, budgeted at 120s; ten
+ * minutes clears that by 5x, so a slow-but-alive phase is never stolen.
+ */
+export const STALE_RUNNING_MS = 10 * 60 * 1000;
+
+/** Heartbeat cadence — comfortably inside STALE_RUNNING_MS. */
+export const HEARTBEAT_MS = 30 * 1000;
+
+/**
+ * Is this `running` row abandoned? Pure, so the threshold is testable without a
+ * clock or a database.
+ */
+export function isStaleRunning(
+  row: { status: string; updatedAt: Date | null },
+  now: Date = new Date(),
+  thresholdMs: number = STALE_RUNNING_MS,
+): boolean {
+  if (row.status !== "running") return false;
+  if (!row.updatedAt) return true; // no heartbeat ever recorded — cannot be live
+  return now.getTime() - row.updatedAt.getTime() > thresholdMs;
+}
+
+/** Touch a running phase's heartbeat. Best-effort: a missed beat is harmless. */
+export async function heartbeatPhase(runId: string, phase: string): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.update(analysisPhaseState)
+      .set({ updatedAt: new Date() })
+      .where(and(
+        eq(analysisPhaseState.runId, runId),
+        eq(analysisPhaseState.phase, phase),
+        eq(analysisPhaseState.status, "running"),
+      ));
+  } catch (err) {
+    console.warn(`[db] heartbeatPhase(${runId}, ${phase}) failed (ignored):`, (err as Error).message);
+  }
+}
+
+/**
+ * Return abandoned `running` rows to `pending` so the scan can pick them up.
+ *
+ * Deliberately NOT scoped to this process: any row quiet for longer than the
+ * threshold is dead whoever started it, and a live campaign anywhere is
+ * self-evidently beating. Returns what it reclaimed so the boot log can say so
+ * rather than reclaiming silently.
+ */
+export async function reclaimStaleRunning(
+  now: Date = new Date(),
+  thresholdMs: number = STALE_RUNNING_MS,
+): Promise<Array<{ runId: string; phase: string; subjectHint: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const cutoff = new Date(now.getTime() - thresholdMs);
+  const reclaimed = await db.update(analysisPhaseState)
+    .set({ status: "pending", updatedAt: now })
+    .where(and(
+      eq(analysisPhaseState.status, "running"),
+      sql`${analysisPhaseState.updatedAt} < ${cutoff}`,
+    ))
+    .returning({
+      runId: analysisPhaseState.runId,
+      phase: analysisPhaseState.phase,
+      subjectHint: analysisPhaseState.subjectHint,
+    });
+  if (reclaimed.length > 0) {
+    console.warn(`[db] reclaimed ${reclaimed.length} stale running phase(s): ` +
+      reclaimed.map(r => `${r.subjectHint}/${r.phase}`).join(", "));
+  }
+  return reclaimed;
+}
+
+/**
+ * Campaigns that are not finished: at least one phase still pending/running/
+ * failed/blocked, or extract_commit never reached a usable outcome. This is the
+ * boot loop's "what did the last process leave behind?" query.
+ */
+export async function findIncompleteCampaigns(limit = 100): Promise<Array<{
+  runId: string; subjectHint: string; phases: Array<{ phase: string; status: string; nextEarliestAt: Date | null }>;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(analysisPhaseState).orderBy(analysisPhaseState.createdAt);
+  const byRun = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const list = byRun.get(r.runId) ?? [];
+    list.push(r);
+    byRun.set(r.runId, list);
+  }
+  const out: Array<{ runId: string; subjectHint: string; phases: Array<{ phase: string; status: string; nextEarliestAt: Date | null }> }> = [];
+  for (const [runId, list] of Array.from(byRun.entries())) {
+    const commit = list.find(r => r.phase === "extract_commit");
+    const committed = commit && (commit.status === "complete" || commit.status === "partial");
+    // A campaign the gates terminated is finished, not incomplete: genuine_empty
+    // is a confirmed fact and structural failures are parked for a human.
+    const terminated = list.some(r => r.status === "genuine_empty")
+      || list.some(r => r.failureClass === "structural");
+    if (committed || terminated) continue;
+    out.push({
+      runId,
+      subjectHint: list[0]!.subjectHint,
+      phases: list.map(r => ({ phase: r.phase, status: r.status, nextEarliestAt: r.nextEarliestAt })),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**

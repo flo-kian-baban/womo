@@ -51,7 +51,7 @@ import { fetchBrandReviews } from "./reviewResearch";
 import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
-import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db";
+import { insertScrapeEvent, recordPhaseObservation, type PhaseStateWrite } from "./db";
 import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
@@ -2171,12 +2171,12 @@ export async function runTikTokCollection(handleOrUrl: string): Promise<TikTokCo
       deadlineAt: currentDeadlineAt(),
       // Show the phase's live state, distinguishing WAITING from WORKING:
       // `pending` while it queues for a permit, `running` once admitted. Both
-      // fire-and-forget, like every other observation write — recordPhaseState
+      // fire-and-forget, like every other observation write — recordPhaseObservation
       // drops a write older than the row it would overwrite, so an out-of-order
       // marker can never clobber the terminal outcome.
       onAttemptStart: (phase, attempt, status) => {
         if (!runId) return;
-        void recordPhaseState({
+        void recordPhaseObservation({
           runId, subjectHint,
           phase: phase.name as PhaseStateWrite["phase"],
           tool: phase.tool,
@@ -2189,7 +2189,7 @@ export async function runTikTokCollection(handleOrUrl: string): Promise<TikTokCo
     // observation can never add latency to, or fail, an analysis.
     bank: (entry) => {
       if (!runId) return;
-      void recordPhaseState({
+      void recordPhaseObservation({
         runId, subjectHint,
         phase: entry.phase as PhaseStateWrite["phase"],
         tool: entry.tool,

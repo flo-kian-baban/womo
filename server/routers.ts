@@ -18,7 +18,7 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
-  recordPhaseState, loadResumableBankedPhases,
+  recordPhaseState, recordPhaseObservation, loadResumableBankedPhases,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -185,7 +185,7 @@ export const creatorCampaignDeps: CreatorCampaignDeps = {
     }) as unknown as Record<string, unknown>;
   },
   summarize: (result) => summarizePersistence(result as PersistResult),
-  bank: (entry) => recordPhaseState({
+  bank: (entry) => recordPhaseObservation({
     runId: entry.runId,
     subjectHint: entry.subjectHint,
     phase: entry.phase as PhaseStateWrite["phase"],
@@ -197,7 +197,7 @@ export const creatorCampaignDeps: CreatorCampaignDeps = {
     output: entry.output,
   }),
   mark: (entry) => {
-    void recordPhaseState({
+    void recordPhaseObservation({
       runId: entry.runId,
       subjectHint: entry.subjectHint,
       phase: entry.phase as PhaseStateWrite["phase"],
@@ -1307,7 +1307,7 @@ export const appRouter = router({
         // reanalyze/analyze parity is a standing rule (scraper-reliability
         // Part 4); a ledger that only covers analyze would make every rerun
         // look like a 4-phase campaign.
-        void recordPhaseState({
+        void recordPhaseObservation({
           runId,
           subjectHint: `${existing.handle}@${existing.platform}`,
           phase: "extract_commit",
@@ -1426,7 +1426,7 @@ export const appRouter = router({
             });
             const persistence = summarizePersistence(persistResult);
 
-            void recordPhaseState({
+            void recordPhaseObservation({
               runId,
               subjectHint: banked.subjectHint,
               phase: "extract_commit",
