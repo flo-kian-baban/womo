@@ -38,6 +38,33 @@ export class NoProxy implements ProxyProvider {
 
 // ─── User-Agent Pool ──────────────────────────────────────────────────────────
 
+/**
+ * DESKTOP ONLY, BY DESIGN. Do not add mobile agents here.
+ *
+ * This pool held four mobile agents in sixteen, so ~25% of EVERY fetch — every
+ * platform, every caller — presented as a phone. That is not a cosmetic detail:
+ * a site may answer a mobile agent with a completely different document, at
+ * HTTP 200, that parses cleanly and contains none of the data we came for.
+ *
+ * MEASURED, on TikTok video pages. A mobile agent gets a full ~360KB page whose
+ * `__UNIVERSAL_DATA_FOR_REHYDRATION__` parses fine but carries `webapp.reflow.*`
+ * instead of `webapp.video-detail`. `extractSubtitleInfos` therefore returns
+ * found=true with ZERO entries — structurally, not because the video lacks
+ * subtitles. Six videos the pipeline had recorded as "no subtitles" yielded
+ * subtitles on 4/6 with a desktop agent and 0/6 with a mobile one. Nothing
+ * catches it: the response is a valid 200 so `fetchHtml` never re-rolls the
+ * agent, and `detectSilentFailure` is not wired into the video-page paths (its
+ * TikTok branch keys on `webapp.user-detail`, which a video page never has).
+ *
+ * A caller that WANTS mobile must say so explicitly by pinning
+ * `randomMobileUserAgent()` (below) through `extraHeaders`, which is spread last
+ * in `fetchHtml` and therefore wins. `fetchViaMobileWeb` in
+ * tiktok/profileScraper.ts does exactly that, and genuinely needs it — TikTok
+ * serves desktop agents a block page on PROFILE urls, the inverse of the video
+ * case. Randomly getting mobile is never a substitute for asking for it.
+ *
+ * Guarded by server/userAgentPool.test.ts.
+ */
 const USER_AGENTS: string[] = [
   // Chrome on Windows
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -58,12 +85,7 @@ const USER_AGENTS: string[] = [
   // Safari on Mac
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-  // Chrome on Android
-  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
-  "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
-  // Safari on iOS
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+  // NOTE: mobile agents were removed here. See the header above before adding any.
 ];
 
 function randomUserAgent(): string {
