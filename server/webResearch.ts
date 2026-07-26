@@ -1517,8 +1517,17 @@ export interface BankedCreatorEvidence {
   collection: {
     transcripts: TranscriptEntry[];
     musicTitles: string[];
-    engagementSignals: EngagementSignals;
-    longitudinalSample: LongitudinalSample;
+    /**
+     * S4: OPTIONAL, because a platform may genuinely not compute them. TikTok
+     * derives engagement signals and a 6-3-3 longitudinal sample from a dated,
+     * metric-bearing pool; Instagram has neither and has never claimed to
+     * (`sociologicalFieldsComputed: false` on that path says so). The evidence
+     * builder already treats `engagementSignals` as optional and omits its block
+     * when absent, so making the banked field optional records the absence
+     * honestly instead of forcing a fabricated empty object.
+     */
+    engagementSignals?: EngagementSignals;
+    longitudinalSample?: LongitudinalSample;
     discoveredVideoPool: CreatorResearchResult["discoveredVideoPool"];
     foreignVideosRejected: number;
   };
@@ -1556,6 +1565,42 @@ function maybeDumpEvidenceFixture(banked: BankedCreatorEvidence): void {
     console.log(`[webResearch] evidence fixture written: ${target}`);
   } catch (err) {
     console.warn("[webResearch] evidence fixture dump failed (ignored):", (err as Error).message);
+  }
+}
+
+/** What a monolith baseline records — see maybeDumpMonolithBaseline. */
+export interface MonolithBaseline {
+  banked: BankedCreatorEvidence;
+  /** Platform-specific evidence the shared assembly appends via evidenceExtras. */
+  extras: string;
+  /** The exact evidenceSummary the monolith produced from `banked`. */
+  expectedEvidenceSummary: string;
+}
+
+/**
+ * Env-gated baseline dump (`WOMO_MONOLITH_BASELINE=<path>`), S4.
+ *
+ * TikTok's assembly is proven against `frozenPreSeamAssembly` — a verbatim copy
+ * of the pre-seam code kept as a museum piece. Instagram has no such copy: the
+ * monolith IS its reference, and porting it to the phase contract is exactly
+ * what removes that reference from the live path.
+ *
+ * So a real monolith run records its banked inputs AND the evidence text it
+ * produced from them. The harness then proves the phase assembly reproduces
+ * that text byte-for-byte from the same inputs — the same proof shape, with a
+ * recorded reference instead of a frozen function.
+ *
+ * Inert unless the env var is set; failures swallowed. A debug hook must never
+ * be able to fail an analysis.
+ */
+function maybeDumpMonolithBaseline(baseline: MonolithBaseline): void {
+  const target = process.env.WOMO_MONOLITH_BASELINE;
+  if (!target) return;
+  try {
+    writeFileSync(target, JSON.stringify(baseline, null, 2), "utf-8");
+    console.log(`[webResearch] monolith baseline written: ${target}`);
+  } catch (err) {
+    console.warn("[webResearch] monolith baseline dump failed (ignored):", (err as Error).message);
   }
 }
 
@@ -1852,8 +1897,11 @@ export function assembleCreatorResearchResult(b: BankedCreatorEvidence): Creator
     longitudinalSample: b.collection.longitudinalSample,
     culturalVelocity: b.collection.longitudinalSample?.culturalVelocity,
     dataConfidenceLevel,
-    // Session 8: computed iff the engagement-signals block was built (sampled videos).
-    sociologicalFieldsComputed: b.collection.engagementSignals.totalSampled > 0,
+    // Session 8: computed iff the engagement-signals block was built (sampled
+    // videos). S4: a platform that computes no engagement signals at all lands
+    // here as `false` — which is exactly what the Instagram monolith already
+    // reported, so the shared assembly reproduces it without a special case.
+    sociologicalFieldsComputed: (b.collection.engagementSignals?.totalSampled ?? 0) > 0,
     foreignVideosRejected: b.collection.foreignVideosRejected,
     discoveredVideoPool: b.collection.discoveredVideoPool,
   };
@@ -2603,6 +2651,51 @@ async function researchInstagramCreator(handleOrUrl: string): Promise<CreatorRes
 
   const poolWithTranscripts = discoveredVideoPool.filter(v => v.transcriptText);
   console.log(`[webResearch] Instagram @${handle}: built discoveredVideoPool with ${discoveredVideoPool.length} items (${mergedCount} merged, ${poolWithTranscripts.length} with transcriptText)`);
+
+  // S4 baseline capture. TikTok has a FROZEN pre-seam function to compare the
+  // phase assembly against; Instagram has no such museum piece — this monolith
+  // IS the reference, and it is about to be bypassed. So record both the banked
+  // inputs and the exact evidence this path produced, and let the harness prove
+  // the phase path reproduces it byte-for-byte. Inert unless the flag is set.
+  maybeDumpMonolithBaseline({
+    banked: {
+      schemaVersion: 1,
+      handle,
+      platform: "Instagram",
+      capture: {
+        displayName: profile.full_name || handle,
+        bio: profile.biography,
+        followerCount: profile.follower_count,
+        followingCount: 0,
+        videoCount: profile.media_count,
+        totalLikes,
+        location,
+        profileUrl: `https://www.instagram.com/${handle}/`,
+      },
+      collection: {
+        transcripts,
+        musicTitles: [],
+        // Instagram computes neither — see the optional fields on the type.
+        engagementSignals: undefined,
+        longitudinalSample: undefined,
+        discoveredVideoPool,
+        foreignVideosRejected: 0,
+      },
+      prepared: {
+        allTitles: videoTitles,
+        topHashtags: allHashtags,
+        rawKeywords,
+        contentThemes,
+        transcriptExcerpts,
+        totalViews,
+        avgViews,
+        engagementRate,
+      },
+      derived: { contentThemeLabels, decodedSymbols },
+    },
+    extras: businessSignal,
+    expectedEvidenceSummary: evidenceSummary,
+  });
 
   return {
     handle,

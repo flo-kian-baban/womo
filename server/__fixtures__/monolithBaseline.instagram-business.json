@@ -1,0 +1,436 @@
+{
+  "banked": {
+    "schemaVersion": 1,
+    "handle": "vnillalondon",
+    "platform": "Instagram",
+    "capture": {
+      "displayName": "vnilla",
+      "bio": "A taste of New York in the Heart of London!\n📍Covent Garden, Camden, Mayfair",
+      "followerCount": 25568,
+      "followingCount": 0,
+      "videoCount": 0,
+      "totalLikes": 100839,
+      "location": "New York",
+      "profileUrl": "https://www.instagram.com/vnillalondon/"
+    },
+    "collection": {
+      "transcripts": [
+        {
+          "videoId": "DbBlZo-uhxc",
+          "videoUrl": "https://www.instagram.com/p/DbBlZo-uhxc/",
+          "caption": "Like get out of my way?! 😭",
+          "transcript": "No, I'm not.",
+          "wordCount": 3,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "videoId": "Da5RoCRj9SD",
+          "videoUrl": "https://www.instagram.com/p/Da5RoCRj9SD/",
+          "caption": "The viral banana pudding from NYC, now in Camden 🍨 \n\n📍 Find it, Camden Market Hawley Wharf",
+          "transcript": "Guess what's just opened in Camden",
+          "wordCount": 6,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "videoId": "Davx3jsOwoa",
+          "videoUrl": "https://www.instagram.com/p/Davx3jsOwoa/",
+          "caption": "Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub for free, this Wednesday. ⁣\n⁣\nYou don’t say i",
+          "transcript": "I just got extra banana pudding for saying it's coming home. Yes, the is coming home. At the counter on Wednesday, you can get your second for free across all our stores. Come on England.",
+          "wordCount": 35,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "videoId": "DaoHu9aOzbo",
+          "videoUrl": "https://www.instagram.com/p/DaoHu9aOzbo/",
+          "caption": "Summer 🤝 Vnilla⁣ 🍌🥭🥥\n⁣\nIntroducing July’s special: Tropical Banana Pudding - available until the",
+          "transcript": "July's special just landed. Our tropical banana pudding. A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer. Available in all of our stores today.",
+          "wordCount": 44,
+          "transcriptSource": "speech_to_text"
+        }
+      ],
+      "musicTitles": [],
+      "discoveredVideoPool": [
+        {
+          "id": "DbBlZo-uhxc",
+          "url": "https://www.instagram.com/p/DbBlZo-uhxc/",
+          "caption": "Like get out of my way?! 😭",
+          "createTime": 1784572145,
+          "views": 17694,
+          "likes": 575,
+          "comments": 16,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 11,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQNHYMbKU0IQ8A3yUPwksCjZMtdzZI9j-OZAX-JyhvI3ARvngadgjzhFS8PyeiqQP6R_mIJXWqaI30Ujf_41KtqlH79mzT-3AiSrp08.mp4?_nc_cat=106&_nc_oc=AdoJcGhhJ5whNvIp2Gz0XM5jyFeVAKgfQowqQ0wHoXCkKAHD4hHSx8fLbOKbYh8ADkXJDRlvVX77H1o7uk5xINef&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=P_-183V4IuoQ7kNvwEmGGf0&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTM4NzkzOTY4NjU2MDk4MiwiYXNzZXRfYWdlX2RheXMiOjUsInZpX3VzZWNhc2VfaWQiOjEwMDk5LCJkdXJhdGlvbl9zIjoxMSwidXJsZ2VuX3NvdXJjZSI6Ind3dyJ9&ccb=17-1&vs=d02458f30a4fa541&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC8wNTQ0RTU4RTQ2MUQxN0VERDI1MDQwOTBGQjdBOEZBQ192aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyL0Y4NEVGOThEM0MzNTI0NTkxODhEOEIwNEVBMjY2Nzk1X2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACas0-W_3JT3BBUCKAJDMywXQCYQ5WBBiTcYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQA4edudG6eGZWcBKCreA1PmohN5ldkS4c1Q9oNUik5JzA&oe=6A67EC17",
+          "transcriptText": "No, I'm not.",
+          "transcriptWordCount": 3,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "id": "Da5RoCRj9SD",
+          "url": "https://www.instagram.com/p/Da5RoCRj9SD/",
+          "caption": "The viral banana pudding from NYC, now in Camden 🍨 \n\n📍 Find it, Camden Market Hawley Wharf",
+          "createTime": 1784293357,
+          "views": 131952,
+          "likes": 1525,
+          "comments": 20,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 20,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQP4fCp6PPnyiGrXwzeV963CcBXaQ2Q9uQULyxdx4CJF5RnpcLWT1v19Ug2Dmx8AA7F-1vD5fSp0EoX5_Y6PtHHRtPB4Ji-dOk9pORA.mp4?_nc_cat=105&_nc_oc=Adod9zf15Oedt5Foz0zJsyBPOwBraZyOenTOZKSVbzpR4lIsgqhD4ZFseRrSI_dIAunZRMXaC_FmtKvO0zMpMh67&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=p-YTtUXPpTEQ7kNvwFjcMBk&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTg2MDI0MTYxODkwMDQ3NTAsImFzc2V0X2FnZV9kYXlzIjo5LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MjAsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=b8958e8139387aee&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC8wMTRFRkRFNUNCNURFMjRFMThFMkEyRDIyMEQ5MERBMl92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzg3NDcxOTBEOEQ2NkRFQ0RCQ0NBNUE4QzY4RUU5RDlGX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACac78aOkbOLQhUCKAJDMywXQDQzMzMzMzMYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQB3RkIY29TkJkkJUtLiU8ZMm_ugg9OEOby1U5l5ioRGwA&oe=6A67E8A6",
+          "transcriptText": "Guess what's just opened in Camden",
+          "transcriptWordCount": 6,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "id": "Da3JIJDC9co",
+          "url": "https://www.instagram.com/p/Da3JIJDC9co/",
+          "caption": "Send this to them 🤭🤭",
+          "createTime": 1784221772,
+          "views": 21986,
+          "likes": 360,
+          "comments": 27,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 7,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQPAeLts2gA7fUCi34EZHkW38v2m7yT2bNb06JlLTa5IUtTvrlxk_Zp3n9EMyTFFzHewVzeOPZ2BFh5qejlpQTUqc6Yxh60f0-jxwbg.mp4?_nc_cat=105&_nc_oc=AdoEV59IhDMx6ucSYbSt7JhNPmi6Of8k3wCcdsV6649o5FX_CmSL-cXWZyB1hTvLRiwQLVf7xTNw_7RLTdgG8pew&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=AcTXusfv2FIQ7kNvwF0WOkD&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MjE2OTU0MDE2NzI5ODYwNiwiYXNzZXRfYWdlX2RheXMiOjksInZpX3VzZWNhc2VfaWQiOjEwMDk5LCJkdXJhdGlvbl9zIjo3LCJ1cmxnZW5fc291cmNlIjoid3d3In0%3D&ccb=17-1&vs=64e4caa91a2fa193&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC80NzRCRDE1RkEzNDU1REQ1QUEzN0M4NUUyODFFQkJCOF92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzMzNDVBNjgxM0VGNkZDMzZCRjJCM0EzNDQyMDIzQTkwX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbcuPvv7cvaBxUCKAJDMywXQByp--dsi0QYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_zt=28&_nc_ss=7a22e&oh=00_AQBtxoUTTBNRC7ybheURG-TKLGYaGBHZmDspHOl_DaFLDQ&oe=6A681792"
+        },
+        {
+          "id": "Dav4lhtirTc",
+          "url": "https://www.instagram.com/p/Dav4lhtirTc/",
+          "caption": "The best banana pudding in London 🔥\n@vnillalondon 🔥❤️",
+          "createTime": 1783979212,
+          "views": 919500,
+          "likes": 72187,
+          "comments": 1226,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 165,
+          "videoUrl": "https://instagram.fykz1-2.fna.fbcdn.net/o1/v/t2/f2/m86/AQPb4BJM97Gb10F8tyrhzC220FBvxA0FsvLZBCYTM5aiL9H8zolyh50QvWAJXbrZICqJh1uwa9_ZHgSWOenh_kot5rZ7RD9A4azXoZY.mp4?_nc_cat=110&_nc_oc=AdrzlcKu1rJhfNRpe07QpennKveO5nDv4wxudCvBJ9_KpiNOiKTOM6EM9AeGWc4vB2MbpCFyn-wix-skCLcuXf95&_nc_sid=5e9851&_nc_ht=instagram.fykz1-2.fna.fbcdn.net&_nc_ohc=sZwESJVEWSAQ7kNvwEIGBkU&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTg0NTUxNzQwOTc1OTYwMSwiYXNzZXRfYWdlX2RheXMiOjEyLCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MTY1LCJ1cmxnZW5fc291cmNlIjoid3d3In0%3D&ccb=17-1&vs=fd375b425b49122c&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC8zMzQyN0IyNzdGMjdBRjAwN0EzOUY2NzlFNTk5NjA5RV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzY3NDYyM0U3Mjk4MkM3QjcwOThFMTEzMjVFM0UyQjkxX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbixZWaoJ_HBhUCKAJDMywXQGSndLxqfvoYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQD4vYDoTVqLTcXJijmqxxxwNGEFE9qKo6bXfP6t62pngw&oe=6A67EC8B"
+        },
+        {
+          "id": "Davx3jsOwoa",
+          "url": "https://www.instagram.com/p/Davx3jsOwoa/",
+          "caption": "Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub for free, this Wednesday. ⁣\n⁣\nYou don’t say it, you don’t get it 🤝",
+          "createTime": 1783974701,
+          "views": 38331,
+          "likes": 565,
+          "comments": 37,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 10,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQMCxY8WEYG__kq_vF7d7gkVM3uBXDd-klO0kwQx_CITRDBlMVzA8RirrKQX7UY-X4LGBdCjWTBh9gHb2TEIrU_i7xE0DSX_C9BNUEI.mp4?_nc_cat=103&_nc_oc=AdrFJPtAyr_HwkUYPRna7RSUt5fsZUVtfwcRHkaO5DlbQXB0ALRp7ngmPwSeXsZESjiWKEPXZTv9xJ5IDtZFUGLD&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=iZFvgG-CgyQQ7kNvwFApHoA&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTgyMzE2OTYzMTk5NzgxMywiYXNzZXRfYWdlX2RheXMiOjEyLCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MTAsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=6df8b2e3971ceb44&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC81ODQ1REE0MkZCODEyMzVBNUFFMThCMDdGODQ3ODQ4NV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzAxNDlBNjA1ODkyM0REODJDMDdCMTRDOTg0RTMwREEzX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbqvb6kuIq9BhUCKAJDMywXQCSZmZmZmZoYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQC7TB8QjL-l9bSXnZUq7dQoUcnON2AJsixs7aSMFLxB2Q&oe=6A6801E4",
+          "transcriptText": "I just got extra banana pudding for saying it's coming home. Yes, the is coming home. At the counter on Wednesday, you can get your second for free across all our stores. Come on England.",
+          "transcriptWordCount": 35,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "id": "DaoHu9aOzbo",
+          "url": "https://www.instagram.com/p/DaoHu9aOzbo/",
+          "caption": "Summer 🤝 Vnilla⁣ 🍌🥭🥥\n⁣\nIntroducing July’s special: Tropical Banana Pudding - available until the end of the month at all three branches!",
+          "createTime": 1783717762,
+          "views": 27899,
+          "likes": 596,
+          "comments": 20,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 21,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQMHezY9zcGqxbLvDsaAZGfnuUmAsohNTkqz9Ha45Zp46S6T9vUMBtH60MPStkDZV_yE6WqZbfxoARSVmT1JM3xJK3abDXasfCkUkOQ.mp4?_nc_cat=106&_nc_oc=AdrMMJ8G2tpUN_gAT3okhpihzvROwzjb8pGAbxp5ZQj-PfrzmY8mDqMQ8bzPRfhpGTzwsOoasjhrvfDZn9Vd5DVP&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=RtRnwViO_v4Q7kNvwGTEVov&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTYyNzIyNDgxMjE2ODUzOCwiYXNzZXRfYWdlX2RheXMiOjE1LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MjEsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=698478c5b830a0b2&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC9CQzQxNEEzMzMyN0Q0NEY4MjA4QzBBRjA4QTNCMkZBQ192aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzM5NDM4Q0RGQUUxNzM1QkVGNTk0QjQwMEU3NUYyQThEX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACa0lbHO-fzjBRUCKAJDMywXQDUzMzMzMzMYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQAwDGk38OwH7MYYM8Qx1KejSz-hsQQ-J1M_WuSNT930Lw&oe=6A67F98F",
+          "transcriptText": "July's special just landed. Our tropical banana pudding. A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer. Available in all of our stores today.",
+          "transcriptWordCount": 44,
+          "transcriptSource": "speech_to_text"
+        },
+        {
+          "id": "Daiy4_1OGjI",
+          "url": "https://www.instagram.com/p/Daiy4_1OGjI/",
+          "caption": "🙅‍♀️🍌⁣ No Bananas this Saturday 11th July 12PM\n⁣\n📍Only at our new store in Camden Market Hawley Wharf",
+          "createTime": 1783539109,
+          "views": 34786,
+          "likes": 572,
+          "comments": 36,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 16,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQOTvZszZfjP66olPDWnPbMqg1bZxhBxOCQAvjmnTyScA5X611yPFwmE7QlM0HAqEvfY85lqUrcAStlQJIHaTK7kQy7nRPoy6wkCon4.mp4?_nc_cat=105&_nc_oc=Adq20D4BwfUbxub7oPQA2FHYyegM288O3AX-Umg6g3HF0UCV4ukngCsc9yuUIXsxC-OY87bwtX7SBg08bkuM2mEq&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=Xw60Pnd3jn0Q7kNvwHbIk4_&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTMwNDIzNTYyODE0NjI1NCwiYXNzZXRfYWdlX2RheXMiOjE3LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MTYsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=955c2563fcab3c7a&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC9DMTRCMDhBNkQyMjFERkIyQ0NGQzU5QkFBRTg0QTNCQV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyL0UxNEUwODU3ODk2QkRFMzc5Q0M3MUMxRDhCMkJFM0I1X2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACacuY3VwIzRBBUCKAJDMywXQDBu2RaHKwIYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQAwzeIpjUSyoAnV_69yBZlQDrg_rfBZa701auQP0hKOUA&oe=6A67F00E"
+        },
+        {
+          "id": "DaWAKBCOvWM",
+          "url": "https://www.instagram.com/p/DaWAKBCOvWM/",
+          "caption": "200 free tubs 🕛 12PM, Saturday 11th July 📍 Camden Market Hawley Wharf",
+          "createTime": 1783109796,
+          "views": 44007,
+          "likes": 590,
+          "comments": 35,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 12,
+          "videoUrl": "https://instagram.fykz1-2.fna.fbcdn.net/o1/v/t2/f2/m86/AQM_Tk4NFd-STH7GBfAb9SHLqGw-Fc5__pGftxewAuxDPI9xZStR4QjG806wrgFWh3CAT20UklrVSf5A0hF-45PV_cN0Sn7RBOV39zo.mp4?_nc_cat=111&_nc_oc=Adqw_slrtKxfILCQbN9YImO_oYAQ_LgiMUjs67Ag5taQnyPodLED0toiu4zAlWBtwSS1TnE8V3DhQr4tt5WzVv5w&_nc_sid=5e9851&_nc_ht=instagram.fykz1-2.fna.fbcdn.net&_nc_ohc=ru5mT_Ncry8Q7kNvwHRIN-Q&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTk4ODM1ODc1NTEzMDA2NSwiYXNzZXRfYWdlX2RheXMiOjIyLCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MTIsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=2ff7ea6a5a487bf0&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC9ERTRGNTk2QTU3QjU1RTVEOEFBQkMzMzY4ODU2NUU5OF92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyL0VCNDc5N0YyNUFBQTVCMjVENjUxREJBNTA5NUMwRDlFX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACai68iU25mIBxUCKAJDMywXQCjMzMzMzM0YEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQDU32YrE23kuPzKQIttiHmN2Ckb_sXMLQlRd6SpJZ-Jpg&oe=6A681B40"
+        },
+        {
+          "id": "DaLrfTROWZV",
+          "url": "https://www.instagram.com/p/DaLrfTROWZV/",
+          "caption": "200 free tubs. Camden, sorry in advance 🍌",
+          "createTime": 1782763406,
+          "views": 112850,
+          "likes": 1529,
+          "comments": 62,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 15,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQPqGLac1lMewBltMd3dHfXpvPxgW859Gd3-VJalkx_e3dVbpbHDLcD2Jxkd8EeyL5H8rXjquxrXg91pS92inZWV4LgtH-cbmCucjPE.mp4?_nc_cat=105&_nc_oc=AdorQSkVT471hXbM23Yvf7rS2LIPw-W4k-jX6yr7Qf860zxcmEU7-oXHBeDVAZxtfZjsyzosSsHraLp5u2-OIayt&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=iQnYoyylOXMQ7kNvwHBDvCG&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MjIyODU4MTA5NDU3MDI4NiwiYXNzZXRfYWdlX2RheXMiOjI2LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6MTUsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=895358ead43ea9f0&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC83MTQ1QTZDOTA5RjRDNjVGQkFDMDEzMkEwNURFMDhBMl92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzY4NEIyMkM0RTlDNkM4NTYxOUZCNEQ2MENDQThDQTkwX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbc5PWHv7j1BxUCKAJDMywXQC5mZmZmZmYYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQCv5fyVNsdT3IEcOdc4hM6iOLd3tA_HYkbtgsYTa74BJA&oe=6A680402"
+        },
+        {
+          "id": "DZ3JthEuuxc",
+          "url": "https://www.instagram.com/p/DZ3JthEuuxc/",
+          "caption": "Just smile and wave girls, smile and wave 👋🏼",
+          "createTime": 1782074943,
+          "views": 65628,
+          "likes": 1393,
+          "comments": 49,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 10,
+          "videoUrl": "https://instagram.fykz1-1.fna.fbcdn.net/o1/v/t2/f2/m86/AQM3Fvg4VQSiKXj-YUAZHPfOF91x1UgdQ_e6o8KehPp2rWY3Ga-aKYliHq4FlMAKs7SkBb3B5DWbQ_sKp5LVMuHxivPSf4MpxJhNJHM.mp4?_nc_cat=100&_nc_oc=Adpx9NmYyd1ti8GMB64C4Nnp6FD9dELNtS77gF_1vgI5wMlXVAvhDkgJhP53y2s8suwhvNUI2YZUigNPfCHw79Fa&_nc_sid=5e9851&_nc_ht=instagram.fykz1-1.fna.fbcdn.net&_nc_ohc=zpK6FAmbjWoQ7kNvwGtp4Dp&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTM3ODkzNTE3NDA1Mzk3OSwiYXNzZXRfYWdlX2RheXMiOjM0LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6OSwidXJsZ2VuX3NvdXJjZSI6Ind3dyJ9&ccb=17-1&vs=382c908763f877c2&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC83ODQzMTgwNEY5MDYxMTRDN0ExQjI5RkU3NzRDNDdCMV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyL0MzNEI3MzY5MjdCODE0NkFDRjNBMkNFNUVENjdFRjhDX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACa2gb7Ty4jzBBUCKAJDMywXQCMAAAAAAAAYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQC6EW5AQQS-QVbRU0Cqt0YLfMBh05luSQqxdflZSSaBrw&oe=6A681D75"
+        },
+        {
+          "id": "DZyEd_qOFvJ",
+          "url": "https://www.instagram.com/p/DZyEd_qOFvJ/",
+          "caption": "It’s hard to resist our Banana Pudding 🤤",
+          "createTime": 1781904085,
+          "views": 857370,
+          "likes": 20538,
+          "comments": 208,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 9,
+          "videoUrl": "https://instagram.fykz1-2.fna.fbcdn.net/o1/v/t2/f2/m86/AQMic18bE4nyHGhRjAAkLXJuYzT165wD5Qk3ISKd5OS-IpUqXVhYH4qyiQ5AcQBeaSdU4evFrxmloNOegO-smIVdmF8La4VQSWviOHs.mp4?_nc_cat=111&_nc_oc=AdqlIh-JCdDc6Qkd3l3_rZA7EGsJkaHuL1HzLhlncAsfm7x59azjFx44eZzpJmt1msA2AJw-4rmcMGE-Kko-K1N-&_nc_sid=5e9851&_nc_ht=instagram.fykz1-2.fna.fbcdn.net&_nc_ohc=rWc9-Io4bkgQ7kNvwENbKUv&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MTcwODEyMTAwMzY3MTU4NSwiYXNzZXRfYWdlX2RheXMiOjM2LCJ2aV91c2VjYXNlX2lkIjoxMDA5OSwiZHVyYXRpb25fcyI6OCwidXJsZ2VuX3NvdXJjZSI6Ind3dyJ9&ccb=17-1&vs=5736abf3edc7f39a&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC80NDQ5REUyQ0FDNTVBN0M0QUNCN0I4RjgwMTVBNkM4MV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzVDNDYyNjU0NkY1ODRGM0ZEREIyNTQwRTA2RjczREFGX2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbCgMKa3eGIBhUCKAJDMywXQCEQ5WBBiTcYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQBrKH1Xy7Eb6r4lP6GOAcEDM91BcjvCmCQOCTREIxYllg&oe=6A67FF0C"
+        },
+        {
+          "id": "DZskdxXuDH0",
+          "url": "https://www.instagram.com/p/DZskdxXuDH0/",
+          "caption": "We still can’t believe they took it 🤦‍♂️",
+          "createTime": 1781719519,
+          "views": 27436,
+          "likes": 409,
+          "comments": 30,
+          "saves": 0,
+          "shares": 0,
+          "musicOriginal": false,
+          "durationSec": 25,
+          "videoUrl": "https://instagram.fykz1-2.fna.fbcdn.net/o1/v/t2/f2/m86/AQPGteAnG0BJl_QwO02MAFjgfC1EpA4eai5PJgO5jpG4GOtJg7z7sdcoOv9kgR0B8ZwCsyRYOkNQbcVEtcrmrGcjK3jRi1GOIZGw--M.mp4?_nc_cat=104&_nc_oc=AdoA9QH6XF6IKLa6ianE_lnsqXnrOM-qDnnGlr4PbdONXwqP6AoNVAoTXgDfWgSPNCD1aWfIbRlfLUYd3U1PP59B&_nc_sid=5e9851&_nc_ht=instagram.fykz1-2.fna.fbcdn.net&_nc_ohc=RHFM83szppIQ7kNvwHRf-LS&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0xJUFMuQzMuNzIwLmRhc2hfYmFzZWxpbmVfMV92MSIsInhwdl9hc3NldF9pZCI6MjczMTEyOTYwMDE4NTY1NjIsImFzc2V0X2FnZV9kYXlzIjozOCwidmlfdXNlY2FzZV9pZCI6MTAwOTksImR1cmF0aW9uX3MiOjI1LCJ1cmxnZW5fc291cmNlIjoid3d3In0%3D&ccb=17-1&vs=513a4cfb49267922&_nc_vs=HBksFQIYUmlnX3hwdl9yZWVsc19wZXJtYW5lbnRfc3JfcHJvZC83NTQ5NjdBQkZFNDkxNDZEREFCOUM4ODYzM0ZCNUNBQV92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyL0IzNDYzQjdFRkFDMTE0NjU2REUyMTkyNEYwOUVBRjg0X2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACbk0N6I1N6DYRUCKAJDMywXQDkzMzMzMzMYEmRhc2hfYmFzZWxpbmVfMV92MREAdf4HZeadAQA&_nc_gid=WaluGdSH4MYLGcSW5oNLgQ&_nc_ss=7a22e&_nc_zt=28&oh=00_AQBTZ4I0If6tH-GjhSKh0aDFjTQFmsq_zFpgTKFtR62BvA&oe=6A67F915"
+        }
+      ],
+      "foreignVideosRejected": 0
+    },
+    "prepared": {
+      "allTitles": [
+        "Like get out of my way?! 😭",
+        "The viral banana pudding from NYC, now in Camden 🍨 ",
+        "Send this to them 🤭🤭",
+        "The best banana pudding in London 🔥",
+        "Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub fo...",
+        "Summer 🤝 Vnilla⁣ 🍌🥭🥥",
+        "🙅‍♀️🍌⁣ No Bananas this Saturday 11th July 12PM",
+        "200 free tubs 🕛 12PM, Saturday 11th July 📍 Camden Marke...",
+        "200 free tubs. Camden, sorry in advance 🍌",
+        "Just smile and wave girls, smile and wave 👋🏼",
+        "It’s hard to resist our Banana Pudding 🤤",
+        "We still can’t believe they took it 🤦‍♂️"
+      ],
+      "topHashtags": [],
+      "rawKeywords": [
+        "banana",
+        "pudding",
+        "camden",
+        "london",
+        "home",
+        "july",
+        "second",
+        "summer",
+        "bananas",
+        "saturday",
+        "tubs",
+        "smile",
+        "wave",
+        "stores",
+        "tropical",
+        "viral",
+        "nyc",
+        "send",
+        "say",
+        "tub",
+        "vnilla",
+        "marke",
+        "sorry",
+        "advance",
+        "girls",
+        "hard",
+        "resist",
+        "believe",
+        "taste",
+        "york",
+        "heart",
+        "covent",
+        "garden",
+        "mayfair",
+        "guess",
+        "opened",
+        "extra",
+        "saying",
+        "yes",
+        "counter"
+      ],
+      "contentThemes": [
+        "Local City Culture"
+      ],
+      "transcriptExcerpts": "[Like get out of my way?! 😭]: No, I'm not.\n\n[The viral banana pudding from NYC, now in Camden 🍨 \n\n📍 Fin]: Guess what's just opened in Camden\n\n[Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub for f]: I just got extra banana pudding for saying it's coming home. Yes, the is coming home. At the counter on Wednesday, you can get your second for free across all our stores. Come on England.\n\n[Summer 🤝 Vnilla⁣ 🍌🥭🥥\n⁣\nIntroducing July’s special: Tropi]: July's special just landed. Our tropical banana pudding. A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer. Available in all of our stores today.",
+      "totalViews": 2299439,
+      "avgViews": 191620,
+      "engagementRate": 32.9
+    },
+    "derived": {
+      "contentThemeLabels": [
+        "Gourmet Banana Pudding",
+        "NYC London Dessert Culture",
+        "Food Brand Promotions",
+        "Seasonal Dessert Innovations"
+      ],
+      "decodedSymbols": {
+        "identityClaims": [
+          {
+            "phrase": "A taste of New York in the Heart of London!",
+            "meaning": "The creator positions the brand as a cultural intermediary, importing a specific culinary experience and aesthetic from New York City to London. This claims an identity as a purveyor of 'authentic' foreign trends localized for a British audience.",
+            "informs": [
+              "Archetype",
+              "NicheTopicNode"
+            ]
+          },
+          {
+            "phrase": "The viral banana pudding from NYC, now in Camden",
+            "meaning": "This asserts the creator's role as the official localizer and distributor of a widely recognized, trending food item originating from a major global cultural hub (NYC). It claims identity as a cultural importer and trend-setter within the London food scene.",
+            "informs": [
+              "NicheTopicNode",
+              "Archetype"
+            ]
+          }
+        ],
+        "statusSignals": [
+          {
+            "phrase": "The viral banana pudding from NYC",
+            "meaning": "This phrase leverages the pre-existing fame and widespread recognition of the product, positioning the creator as someone 'in the know' who brings a highly sought-after, trending item to the local market, signaling cultural capital through curation.",
+            "informs": [
+              "CulturalCapital",
+              "RogersAdoptionStage"
+            ]
+          },
+          {
+            "phrase": "The best banana pudding in London 🔥",
+            "meaning": "This is a bold claim of superior quality and taste authority. The creator positions themselves as the leading expert and premier provider of this specific dessert, asserting dominance within their niche in the London culinary landscape.",
+            "informs": [
+              "CulturalCapital",
+              "CreatorNichePosition"
+            ]
+          },
+          {
+            "phrase": "Guess what's just opened in Camden",
+            "meaning": "The creator uses an interrogative to create anticipation and positions themselves as an 'insider' or 'early source' of exciting local developments. This signals a role as a cultural informant, providing valuable, timely information to the audience.",
+            "informs": [
+              "RogersAdoptionStage",
+              "CreatorNichePosition"
+            ]
+          }
+        ],
+        "communityReferences": [
+          {
+            "phrase": "Like get out of my way?! 😭",
+            "meaning": "This colloquial, humorous expression assumes a shared understanding of intense demand or excitement for the product. It fosters an in-group dynamic where the audience relates to the playful exaggeration of desire, strengthening parasocial camaraderie.",
+            "informs": [
+              "ParasocialBondStrength",
+              "AudienceRelationshipType"
+            ]
+          },
+          {
+            "phrase": "Send this to them 🤭🤭",
+            "meaning": "This direct call to action encourages peer-to-peer sharing, activating existing social networks. The mischievous emojis suggest a shared 'secret' or understanding among the audience about the product's desirability, fostering a sense of shared connivance.",
+            "informs": [
+              "AudienceRelationshipType",
+              "ParasocialBondStrength"
+            ]
+          },
+          {
+            "phrase": "Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ... Come on England.",
+            "meaning": "By invoking a highly specific and emotionally resonant nationalistic football chant, the creator signals shared cultural identity and participation in a collective event. This creates a strong bond through mutual support and celebration of a national sentiment.",
+            "informs": [
+              "AudienceRelationshipType",
+              "StuartHallDecoding"
+            ]
+          },
+          {
+            "phrase": "Camden, sorry in advance 🍌",
+            "meaning": "Addressing a specific geographic community, this phrase playfully anticipates the overwhelming crowd or frenetic demand for their product. It establishes camaraderie by acknowledging shared local experiences and fostering a collective sense of excitement and potential chaos.",
+            "informs": [
+              "AudienceRelationshipType",
+              "ParasocialBondStrength"
+            ]
+          },
+          {
+            "phrase": "Just smile and wave girls, smile and wave 👋🏼",
+            "meaning": "This phrase uses a popular cultural reference to directly address a specific segment ('girls') of the audience in a knowing, humorous way. It creates an in-group by assuming shared pop culture literacy and fostering a sense of collective, playful poise.",
+            "informs": [
+              "AudienceRelationshipType",
+              "ParasocialBondStrength"
+            ]
+          },
+          {
+            "phrase": "We still can’t believe they took it 🤦‍♂️",
+            "meaning": "This creates an 'us vs. them' narrative, where the creator ('we') shares a mild grievance or surprise with the audience about an unnamed 'they.' This fosters solidarity and a sense of shared perspective or mild collective bewilderment.",
+            "informs": [
+              "AudienceRelationshipType",
+              "StuartHallDecoding"
+            ]
+          }
+        ],
+        "aspirationDrivers": [
+          {
+            "phrase": "Summer 🤝 Vnilla⁣ 🍌🥭🥥",
+            "meaning": "This phrase symbolically links the product to the aspirational ideal of 'summer,' promising the audience a feeling of seasonal joy, relaxation, and a perfect complement to their desired summer lifestyle. It suggests the product enhances a desired state of being.",
+            "informs": [
+              "BarthesMyth",
+              "StuartHallDecoding"
+            ]
+          },
+          {
+            "phrase": "It’s hard to resist our Banana Pudding 🤤",
+            "meaning": "This promises the audience the gratification of an irresistible indulgence. It offers the feeling of delightful surrender to a superior treat, implying that the product is so compelling it overrides self-control, offering a permissible and pleasurable escape.",
+            "informs": [
+              "BarthesMyth",
+              "StuartHallDecoding"
+            ]
+          },
+          {
+            "phrase": "A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer.",
+            "meaning": "Through vivid sensory description, this promises an elevated, luxurious, and perfectly timed culinary experience. It evokes the myth of a tropical paradise and delivers a feeling of exotic indulgence, transforming the ordinary 'London summer' into something more special and desired.",
+            "informs": [
+              "BarthesMyth",
+              "StuartHallDecoding"
+            ]
+          }
+        ],
+        "symbolicSummary": "The creator @vnillalondon embodies the symbolic position of a taste-making cultural hybrid, importing the urban cool of New York's viral dessert trends to London while simultaneously cultivating a localized, playful, and patriotic community around shared indulgences and experiences."
+      }
+    }
+  },
+  "extras": "",
+  "expectedEvidenceSummary": "CREATOR RESEARCH EVIDENCE — @vnillalondon (Instagram)\n=====================================================\nDisplay Name: vnilla\nPlatform: Instagram\nBio / Signature: \"A taste of New York in the Heart of London!\n📍Covent Garden, Camden, Mayfair\"\nLocation: New York\n\nSTATS:\n  Followers / Subscribers: 25.6K\n  Total Videos: 0\n  Total Likes / Hearts: 100.8K\n  Total Views: 2.3M\n  Avg Views per Video: 191.6K\n  Engagement Rate: 32.9%\n\nDETECTED CREATOR TYPE: GENERAL CONTENT CREATOR\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDECODED CULTURAL SIGNALS (pre-processed symbolic analysis)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSYMBOLIC SUMMARY: The creator @vnillalondon embodies the symbolic position of a taste-making cultural hybrid, importing the urban cool of New York's viral dessert trends to London while simultaneously cultivating a localized, playful, and patriotic community around shared indulgences and experiences.\n\nIDENTITY CLAIMS (→ Archetype, NicheTopicNode):\n  ▸ \"A taste of New York in the Heart of London!\"\n    → The creator positions the brand as a cultural intermediary, importing a specific culinary experience and aesthetic from New York City to London. This claims an identity as a purveyor of 'authentic' foreign trends localized for a British audience.\n    → Informs: Archetype, NicheTopicNode\n  ▸ \"The viral banana pudding from NYC, now in Camden\"\n    → This asserts the creator's role as the official localizer and distributor of a widely recognized, trending food item originating from a major global cultural hub (NYC). It claims identity as a cultural importer and trend-setter within the London food scene.\n    → Informs: NicheTopicNode, Archetype\n\nSTATUS SIGNALS (→ CulturalCapital, RogersAdoptionStage):\n  ▸ \"The viral banana pudding from NYC\"\n    → This phrase leverages the pre-existing fame and widespread recognition of the product, positioning the creator as someone 'in the know' who brings a highly sought-after, trending item to the local market, signaling cultural capital through curation.\n    → Informs: CulturalCapital, RogersAdoptionStage\n  ▸ \"The best banana pudding in London 🔥\"\n    → This is a bold claim of superior quality and taste authority. The creator positions themselves as the leading expert and premier provider of this specific dessert, asserting dominance within their niche in the London culinary landscape.\n    → Informs: CulturalCapital, CreatorNichePosition\n  ▸ \"Guess what's just opened in Camden\"\n    → The creator uses an interrogative to create anticipation and positions themselves as an 'insider' or 'early source' of exciting local developments. This signals a role as a cultural informant, providing valuable, timely information to the audience.\n    → Informs: RogersAdoptionStage, CreatorNichePosition\n\nCOMMUNITY REFERENCES (→ ParasocialBondStrength, AudienceRelationshipType):\n  ▸ \"Like get out of my way?! 😭\"\n    → This colloquial, humorous expression assumes a shared understanding of intense demand or excitement for the product. It fosters an in-group dynamic where the audience relates to the playful exaggeration of desire, strengthening parasocial camaraderie.\n    → Informs: ParasocialBondStrength, AudienceRelationshipType\n  ▸ \"Send this to them 🤭🤭\"\n    → This direct call to action encourages peer-to-peer sharing, activating existing social networks. The mischievous emojis suggest a shared 'secret' or understanding among the audience about the product's desirability, fostering a sense of shared connivance.\n    → Informs: AudienceRelationshipType, ParasocialBondStrength\n  ▸ \"Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ... Come on England.\"\n    → By invoking a highly specific and emotionally resonant nationalistic football chant, the creator signals shared cultural identity and participation in a collective event. This creates a strong bond through mutual support and celebration of a national sentiment.\n    → Informs: AudienceRelationshipType, StuartHallDecoding\n  ▸ \"Camden, sorry in advance 🍌\"\n    → Addressing a specific geographic community, this phrase playfully anticipates the overwhelming crowd or frenetic demand for their product. It establishes camaraderie by acknowledging shared local experiences and fostering a collective sense of excitement and potential chaos.\n    → Informs: AudienceRelationshipType, ParasocialBondStrength\n  ▸ \"Just smile and wave girls, smile and wave 👋🏼\"\n    → This phrase uses a popular cultural reference to directly address a specific segment ('girls') of the audience in a knowing, humorous way. It creates an in-group by assuming shared pop culture literacy and fostering a sense of collective, playful poise.\n    → Informs: AudienceRelationshipType, ParasocialBondStrength\n  ▸ \"We still can’t believe they took it 🤦‍♂️\"\n    → This creates an 'us vs. them' narrative, where the creator ('we') shares a mild grievance or surprise with the audience about an unnamed 'they.' This fosters solidarity and a sense of shared perspective or mild collective bewilderment.\n    → Informs: AudienceRelationshipType, StuartHallDecoding\n\nASPIRATION DRIVERS (→ BarthesMyth, StuartHallDecoding):\n  ▸ \"Summer 🤝 Vnilla⁣ 🍌🥭🥥\"\n    → This phrase symbolically links the product to the aspirational ideal of 'summer,' promising the audience a feeling of seasonal joy, relaxation, and a perfect complement to their desired summer lifestyle. It suggests the product enhances a desired state of being.\n    → Informs: BarthesMyth, StuartHallDecoding\n  ▸ \"It’s hard to resist our Banana Pudding 🤤\"\n    → This promises the audience the gratification of an irresistible indulgence. It offers the feeling of delightful surrender to a superior treat, implying that the product is so compelling it overrides self-control, offering a permissible and pleasurable escape.\n    → Informs: BarthesMyth, StuartHallDecoding\n  ▸ \"A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer.\"\n    → Through vivid sensory description, this promises an elevated, luxurious, and perfectly timed culinary experience. It evokes the myth of a tropical paradise and delivers a feeling of exotic indulgence, transforming the ordinary 'London summer' into something more special and desired.\n    → Informs: BarthesMyth, StuartHallDecoding\n\n⚠️  INSTRUCTION: The decoded signals above are pre-analyzed cultural evidence.\n    You MUST use them to inform the following fields:\n    - archetype: identity claims reveal the Jungian role the creator occupies\n    - barthesMyth: aspiration drivers reveal the naturalized belief their content sells\n    - audienceRelationshipType: community references reveal the bond type (Friend/Mentor/Authority)\n    - parasocialBondStrength: community references confirm or refine the computed rate signal\n    - nicheTopicNode: identity + status signals reveal the cultural function of the niche\n    - stuartHallDecoding: aspiration drivers reveal how the audience is primed to receive brand messages\n    - goffmanStageConsistency: compare identity claims in captions vs. transcripts for front/back stage gaps\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPRIMARY EVIDENCE — SPOKEN TRANSCRIPTS (4 videos)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ TRANSCRIPT DATA IS AVAILABLE. This is the HIGHEST CONFIDENCE evidence.\nAnalyze what the creator LITERALLY SAYS. Their spoken words reveal their true niche,\npersonality, values, and audience relationship more accurately than any other signal.\n\n  [Video 1] \"Like get out of my way?! 😭\" — 3 words spoken\n  TRANSCRIPT: No, I'm not.\n\n  [Video 2] \"The viral banana pudding from NYC, now in Camden 🍨 \n\n📍 Fin\" — 6 words spoken\n  TRANSCRIPT: Guess what's just opened in Camden\n\n  [Video 3] \"Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub for f\" — 35 words spoken\n  TRANSCRIPT: I just got extra banana pudding for saying it's coming home. Yes, the is coming home. At the counter on Wednesday, you can get your second for free across all our stores. Come on England.\n\n  [Video 4] \"Summer 🤝 Vnilla⁣ 🍌🥭🥥\n⁣\nIntroducing July’s special: Tropi\" — 44 words spoken\n  TRANSCRIPT: July's special just landed. Our tropical banana pudding. A luscious blend of coconut cream, ripe bananas, sweet mangoes and vanilla wafers, topped with sticky mango for the perfect tropical finish. Just in time for a London summer. Available in all of our stores today.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSECONDARY EVIDENCE — VIDEO TITLES & METADATA\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCONTENT THEMES (LLM-translated from actual content):\n  • Gourmet Banana Pudding\n  • NYC London Dessert Culture\n  • Food Brand Promotions\n  • Seasonal Dessert Innovations\n\nRULE-BASED THEMES (cross-reference):\n  • Local City Culture\n\nTOP KEYWORDS (from video titles/descriptions):\nbanana, pudding, camden, london, home, july, second, summer, bananas, saturday, tubs, smile, wave, stores, tropical, viral, nyc, send, say, tub\n\nTOP HASHTAGS:\n\n\nACTUAL VIDEO TITLES / DESCRIPTIONS (12 posts sampled):\n  1. Like get out of my way?! 😭\n  2. The viral banana pudding from NYC, now in Camden 🍨 \n  3. Send this to them 🤭🤭\n  4. The best banana pudding in London 🔥\n  5. Say “It’s Coming Home” 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Get a second tub fo...\n  6. Summer 🤝 Vnilla⁣ 🍌🥭🥥\n  7. 🙅‍♀️🍌⁣ No Bananas this Saturday 11th July 12PM\n  8. 200 free tubs 🕛 12PM, Saturday 11th July 📍 Camden Marke...\n  9. 200 free tubs. Camden, sorry in advance 🍌\n  10. Just smile and wave girls, smile and wave 👋🏼\n  11. It’s hard to resist our Banana Pudding 🤤\n  12. We still can’t believe they took it 🤦‍♂️\n\nMUSIC / AUDIO SIGNALS (0 tracks):\n  [No named audio tracks extracted]\n\nDATA CONFIDENCE LEVEL: HIGH ✅ (4 video transcripts available — spoken content analyzed)\n\nCRITICAL ANALYSIS INSTRUCTIONS:\n⚠️  TRANSCRIPT CONTENT IS THE HIGHEST PRIORITY SIGNAL.\n    If transcripts are available, derive archetype, niche, values, and tone FROM WHAT THEY SAY.\n    Bio/signature is a SELF-REPORTED label — challenge it with the transcript evidence.\n\nRULE 1: Transcripts reveal the creator's TRUE identity. If they talk about food in every video,\n         they are a food creator — regardless of what their bio says.\n\nRULE 2: If no transcripts are available, use video titles and hashtags as the primary signal.\n         Bio is only context, not identity.\n\nRULE 3: Archetype, niche, and values must be derived from actual content evidence.\n         DO NOT invent themes not supported by the evidence.\n\nRULE 4: If data confidence is LOW, set identityCoherenceScore to 40 or below and state\n         clearly in aiSummary that this analysis is based on limited data."
+}
