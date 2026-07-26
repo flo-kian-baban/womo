@@ -931,6 +931,25 @@ delete the profile."
   webcache in 2024.
 - Path A desktop-HTTP profile fetch — dead code since FIX 3.4 skipped it.
 
+### ⚠️ Sections §1–§9 describe the PRE-CUTOVER structure
+
+The S2 cutover deleted the inline orchestration. **`researchTikTokCreatorInline`
+and `fetchTikTokTranscripts` no longer exist**, so the function names and line
+numbers in the audit body above are historical. The behaviour they describe is
+preserved — the same code now runs as phase units:
+
+| Audit refers to | Now lives in |
+|---|---|
+| `fetchTikTokTranscripts` pool discovery | `collectPoolFromApi` + `collectPoolFromSupplementalSearch` (capture / augment phases) |
+| its 6-3-3 sampling | `selectLongitudinalSample` (transcribe phase) |
+| its transcript loop | `transcribeSampledVideos` (transcribe phase) |
+| its engagement / velocity / pool assembly | `assembleTranscribeOutputs` (transcribe phase) |
+| `researchTikTokCreatorInline` orchestration | `researchTikTokCreator` → `runPhases` |
+
+The audit remains valuable as a record of what the pipeline *does* and which
+findings are open; treat its citations as pointers to behaviour, not to
+current line numbers.
+
 ### Refreshing the collection-identity fixture (do this when TikTok drifts)
 
 The collection identity harness (`server/collectionIdentity.test.ts`) replays
