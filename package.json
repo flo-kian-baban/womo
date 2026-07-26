@@ -1,6 +1,6 @@
 {
   "name": "connex-fit-engine",
-  "version": "1.0.0",
+  "version": "0.10.0",
   "type": "module",
   "license": "MIT",
   "scripts": {

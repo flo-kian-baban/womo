@@ -47,10 +47,18 @@ docs/                    the real documentation (see pointers below)
 | `pnpm test` | unit tests (includes the frozen-scoring golden suite) |
 | `pnpm test:db:up` / `pnpm test:integration` / `pnpm test:db:down` | integration tests against a disposable Docker Postgres |
 
+## Versioning
+
+Womo is **pre-V1** (`0.x`). **V1.0.0 ships as the signed `.dmg`** at the end of
+the phased-architecture program — phased pipelines on all platforms, the phase
+queue, and the desktop UI. Each session in that program bumps the minor version
+and adds an entry to [CHANGELOG.md](CHANGELOG.md).
+
 ## Documentation map
 
 | Doc | What |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | version history; what shipped in each session |
 | [docs/LOCAL_RUNBOOK.md](docs/LOCAL_RUNBOOK.md) | zero-to-running local setup (start here) |
 | [docs/STORAGE_MODEL.md](docs/STORAGE_MODEL.md) | every table, writer/reader, migration policy |
 | [docs/CREATOR_PIPELINE_AUDIT.md](docs/CREATOR_PIPELINE_AUDIT.md) | the pipeline, stage by stage, plus every fix session |
