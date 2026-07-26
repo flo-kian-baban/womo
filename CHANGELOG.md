@@ -28,8 +28,11 @@ timing. This session adds structure, state visibility, and the proof harness.
   it runs. Write-only observation: nothing reads it, nothing resumes from it.
 - **Identity harness** (`server/evidenceIdentity.test.ts`) — the acceptance
   criterion for the whole program. Byte-equality proof between the frozen
-  pre-seam assembly and the banked-struct assembly, plus a committed
-  golden-master of the exact evidence bytes.
+  pre-seam assembly and the banked-struct assembly (evidenceSummary, the whole
+  research result, and the womo_0007 snapshot's inputsJson + promptText +
+  promptMeta), plus a committed golden-master of the exact evidence bytes. Runs
+  over two fixtures: a synthetic one covering every evidence branch, and one
+  captured from a real run as a degraded-capture specimen.
 
 ### Changed
 - **M1 seams** — `researchTikTokCreator` stages now populate an explicit
@@ -39,6 +42,11 @@ timing. This session adds structure, state visibility, and the proof harness.
   `detectCreatorType`, the 6-3-3 sampler) are untouched — only where their
   inputs come from changed.
 - Version reset from a placeholder `1.0.0` to the `0.x` pre-V1 line.
+
+### Fixed
+- `extract_commit` was banked on the analyze path only, so a reanalyze produced
+  a 4-phase ledger. Found by the S1 acceptance run; reanalyze/analyze parity is
+  a standing rule.
 
 ### Frozen (unchanged, program-wide constraint)
 `fitEngine`, scoring, weights, thresholds, confidence definitions,
