@@ -101,7 +101,22 @@ Retry/timeout behavior (all calls): 429 retried at 5s/15s/30s, per-attempt 60s a
 
 **Absence behavior:** no profile data AND no posts → `NOT_FOUND` (`:1871-1876`); otherwise degrade (no thin-data PRECONDITION gate exists on the Instagram path, unlike TikTok). [FACT]
 
-### 1.4 YouTube (creator path) — `researchYouTubeCreator` (`webResearch.ts:2140`)
+### 1.4 YouTube (creator path) — **DISABLED 2026-07-26**
+
+> **YouTube is no longer a supported platform.** It is absent from the toolset
+> `REGISTRY`, so `toolsetFor("YouTube")` throws, and `creator.submit`,
+> `creator.reanalyze` and the queue's `processCampaign` all refuse it. The
+> scrapers below are kept but unreachable.
+>
+> Four defects, all reproduced and root-caused, none repaired: a shared
+> user-agent pool that serves mobile HTML ~25% of the time (§1.11), the videos
+> tab moving to `lockupViewModel`, the channel header moving to
+> `pageHeaderRenderer` (plus a `videoCount` that was never assigned), and
+> `/api/timedtext` returning an empty body without a `pot` token. **The repair
+> is deferred, not unknown** — full diagnosis, evidence and re-enabling
+> conditions in **[`YOUTUBE_DISABLED.md`](./YOUTUBE_DISABLED.md)**.
+>
+> The description below records the path AS BUILT, for whoever repairs it.
 
 Channel search → channel details → video list, all via HTML scraping helpers (`scraping/youtube/searchScraper.ts:56`, `channelScraper.ts:62,193` — `fetchHtml` based). Variables: `channelId, title, descriptionSnippet/description` (bio ≤500 chars), `country` (location), `stats.subscribers/videos/views`, `keywords[]` (≤20), per-video `title, videoId, stats.views`. Transcripts: fetch each watch page, parse `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` (prefer `en`), download caption XML via axios, strip tags (`:1187-1260`). ≤10 videos in batches of 3. Degrades gracefully below 3 transcripts (comment `webResearch.ts:22-23`); quota-with-no-content → `TOO_MANY_REQUESTS`, nothing → `NOT_FOUND` (`:2154-2166`). `totalLikes` is always 0 for YouTube (`:2205,2212`). [FACT]
 
@@ -140,6 +155,17 @@ Profile + posts via the same Instagram scraper; engagement from likes+comments v
 4. **Run-id tagging is NOT the cause for new runs** — `insertScrapeEvent` stamps the ambient `currentRunId()` (`db.ts`, womo_0006), and AsyncLocalStorage reaches the `fetchHtml` fire-and-forget logging. The Instagram run above logged zero events because its path (Playwright profile scrape + `context.request` reel downloads + Gemini transcription) contains **no `fetchHtml` call that matches a loggable URL** — not because tagging failed. [INFERENCE, strongly supported: the same run did tag its 3 llm_invocations.] For **pre-womo_0006** observations there is an additional, separate gap: events were linked only by `observation_id`, which httpClient never sets, so old diagnostics found nothing even when events existed. [FACT]
 
 **Net:** the diagnostic panel's scrape section under-reports reality for any Playwright-heavy run — a TikTok run shows only its HTTP video-page fetches (Path A transcript attempts), and an Instagram run typically shows nothing. This is a coverage gap in telemetry, not evidence that no scraping occurred.
+
+### 1.11 The desktop user-agent pool contains mobile agents (OPEN FINDING — needs its own investigation, do not "fix" blind)
+
+**[FACT]** `USER_AGENTS` (`scraping/httpClient.ts:41-68`) has **16 entries, 4 of them mobile** — Chrome on Android (Pixel 8, SM-S928B) and Safari on iOS (2× iPhone). `randomUserAgent()` (`:69-71`) picks uniformly with no desktop/mobile distinction, so **roughly 25% of every `fetchHtml` call** — TikTok profile and video pages, Instagram oEmbed and profile, brand website crawl, Google/Bing search fallback, review research — presents as a phone and may receive a mobile document. `fetchHtml` retries only on transport failure, and a mobile page is a clean HTTP 200, so the agent is never re-rolled. [FACT]
+
+**A separate `randomMobileUserAgent()` already exists at `:588-598`** for the callers that genuinely want mobile, which is the strongest available evidence that the mobile entries in the *desktop* pool are an oversight rather than a deliberate mix. [INFERENCE]
+
+- **Proven fatal for YouTube.** Mobile YouTube (MWEB) serialises `ytInitialData` as a hex-escaped JS string and uses `singleColumnBrowseResultsRenderer`; every extractor pattern misses it and every navigation path diverges. Deterministic under a pinned UA — see [`YOUTUBE_DISABLED.md`](./YOUTUBE_DISABLED.md) defect 1. [FACT]
+- **UNMEASURED everywhere else.** No evidence has been gathered on whether TikTok, Instagram, brand crawl or review research degrade, tolerate, or in some paths *depend on* mobile responses. [FACT — absence of measurement]
+
+**Do not remove the mobile entries until the effect is measured per platform.** Deleting them is a one-line change with an unmeasured blast radius across every scraper. The investigation: for each `fetchHtml` caller, fetch the same URL with a pinned desktop agent and a pinned mobile agent, and record which parsers still produce their expected fields.
 
 ---
 

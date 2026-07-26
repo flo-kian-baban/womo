@@ -9,6 +9,63 @@ bumps the minor version and adds an entry below.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — YouTube disabled: TikTok and Instagram only
+
+YouTube is not a platform this product supports. S4b put it behind the contract
+and, in doing so, gave it telemetry for the first time — which immediately showed
+its channel parsers were returning nothing. Rather than repair it, the platform
+is switched off.
+
+### Removed
+- **YouTube is unregistered.** Deleting one line from `REGISTRY` is the entire
+  disable: `toolsetFor("YouTube")` now throws exactly as it does for an unknown
+  platform, and no phase, runner, scheduler, queue or harness changed. That is
+  the platform contract doing the job it was built for.
+- **YouTube rejected at three more edges**, each closing a different hole:
+  `creator.submit` (zod refuses before a ledger row exists), `creator.reanalyze`
+  (legacy YouTube profiles stay readable but cannot become new campaigns), and
+  `processCampaign` — the ledger outlives a release, so the boot loop can meet a
+  campaign enqueued while YouTube still worked. Without that last one,
+  resumption would quietly resurrect a disabled platform.
+- **"Multi" retired in practice.** It merged TikTok WITH YouTube, so with
+  YouTube gone it would return a TikTok result labelled `platform: "Multi"`. Its
+  only caller, `researchCreator`, has been dead since S3b made the queue the
+  single entry point. Marked, not deleted.
+
+### Kept, deliberately
+- **The YouTube toolset and scrapers stay in the source, unregistered and
+  unreachable.** Deleting them would discard a complete diagnosis; leaving them
+  registered would keep a broken path live. `PlatformName` still includes
+  `"YouTube"` — the union names what the system can *describe* (historical rows
+  carry it, and `toolsetFor` must typecheck in order to throw). Capability lives
+  only in the REGISTRY.
+- **Existing YouTube data untouched** — 2 observations, both `pending`, 0
+  content_items, 0 transcripts, **0 match_scores**. Neither of its two runs is
+  resumable; both reached `extract_commit: complete`.
+
+### Documented
+- **[`docs/YOUTUBE_DISABLED.md`](docs/YOUTUBE_DISABLED.md)** — the full
+  diagnosis, so the repair is *deferred, not unknown*: the shared user-agent
+  pool serving mobile HTML ~25% of the time, the videos tab moving to
+  `lockupViewModel`, the channel header moving to `pageHeaderRenderer` plus a
+  `videoCount` that was never assigned, and `/api/timedtext` answering HTTP 200
+  with an empty body without a `pot` token. Re-enabling needs the parser repair
+  **and** a decision on speech-to-text, since `transcriptSource` is frozen.
+- **`PIPELINE_REFERENCE.md` §1.11 — OPEN FINDING:** the desktop `USER_AGENTS`
+  pool holds 4 mobile agents in 16, so ~25% of *every* fetch — TikTok,
+  Instagram, brand, review research — may receive mobile HTML. Proven fatal for
+  YouTube, **unmeasured for the others**. Flagged for its own investigation and
+  explicitly not changed here: a one-line deletion with an unmeasured blast
+  radius across every scraper.
+
+### Testing
+- `server/youtubeDisabled.test.ts` (new, 7 tests) pins the disable at every
+  edge, including the resumption guard. 441 tests across 34 files pass. The
+  contract suite still iterates `registeredPlatforms()` and passes with two
+  platforms — its "unregistered platform throws" case now covers YouTube for
+  free. Golden 62 green and untouched; TikTok and Instagram collection
+  boundaries and both evidence harnesses green.
+
 ## [Unreleased] — Phased architecture S4b: YouTube behind the contract
 
 All three platforms now run through one contract. **No fifth extension was
