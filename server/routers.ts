@@ -32,6 +32,7 @@ import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
 import { researchCreator, researchBrand, resumeResearchFromBanked, type ResumableBankedPhases } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
+import { withResourceSlot } from "./_core/resourceSlots";
 import type { RunOutcomeStatus } from "./db";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
@@ -848,22 +849,31 @@ export const appRouter = router({
             }
 
             // Step 2: AI Extraction (with retry)
+            // S3a: admitted against the `llm` bound. This is the LLM-bound half
+            // of extract_commit, which still runs inline here rather than in the
+            // phase runner (moving it would reshape the endpoint's return path —
+            // S3b). The slot boundary is the extraction, not the extraction plus
+            // the persist below, because the bound exists to cap Gemini quota
+            // contention: persistence contends for Postgres, and holding an LLM
+            // permit across a DB write would shrink effective LLM concurrency for
+            // nothing. Retry logic below is UNCHANGED.
             const t2 = Date.now();
-            let extracted;
-            try {
-              extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-            } catch (firstErr) {
-              console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
-              await new Promise(r => setTimeout(r, 1000));
+            const extracted = await withResourceSlot("llm", async () => {
               try {
-                extracted = await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
-              } catch (secondErr) {
-                throw new TRPCError({
-                  code: "INTERNAL_SERVER_ERROR",
-                  message: "Creator extraction failed after retry. Please try again.",
-                });
+                return await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+              } catch (firstErr) {
+                console.warn("[creator.analyze] First extraction attempt failed, retrying:", firstErr);
+                await new Promise(r => setTimeout(r, 1000));
+                try {
+                  return await extractCreatorProfile(input.handleOrUrl, input.platform, research.evidenceSummary);
+                } catch (secondErr) {
+                  throw new TRPCError({
+                    code: "INTERNAL_SERVER_ERROR",
+                    message: "Creator extraction failed after retry. Please try again.",
+                  });
+                }
               }
-            }
+            });
             stepTimings.push({ step: "AI Profile Extraction", durationMs: Date.now() - t2 });
 
             // ── Step 3: DB Persistence ──
@@ -1193,21 +1203,24 @@ export const appRouter = router({
 
         // Part 4 parity: same one-retry extraction analyze has (transient LLM
         // hiccups should not kill an otherwise-good rerun).
-        let extracted;
-        try {
-          extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
-        } catch (firstErr) {
-          console.warn("[creator.reanalyze] First extraction attempt failed, retrying:", firstErr);
-          await new Promise(r => setTimeout(r, 1000));
+        // S3a: same `llm` admission as analyze — reanalyze/analyze parity is a
+        // standing rule, and a rerun contends for exactly the same quota.
+        const extracted = await withResourceSlot("llm", async () => {
           try {
-            extracted = await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
-          } catch (secondErr) {
-            throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Creator extraction failed after retry. Please try again.",
-            });
+            return await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+          } catch (firstErr) {
+            console.warn("[creator.reanalyze] First extraction attempt failed, retrying:", firstErr);
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              return await extractCreatorProfile(existing.profileUrl || existing.handle, existing.platform as any, evidenceSummary);
+            } catch (secondErr) {
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "Creator extraction failed after retry. Please try again.",
+              });
+            }
           }
-        }
+        });
 
         // V2: reanalyze creates a new observation (append-only)
         const reanalyzePersistResult = await persistCreatorToV2({
@@ -1307,7 +1320,11 @@ export const appRouter = router({
             );
 
             const existing = await findExistingCreatorByHandle(handle!, "TikTok");
-            const extracted = await extractCreatorProfile(handle!, "TikTok", research.evidenceSummary);
+            // S3a: same `llm` admission as analyze/reanalyze. A resume skips the
+            // scraping phases entirely, so this is the only slot it takes.
+            const extracted = await withResourceSlot("llm", () =>
+              extractCreatorProfile(handle!, "TikTok", research.evidenceSummary),
+            );
 
             const persistResult = await persistCreatorToV2({
               handle: handle!,

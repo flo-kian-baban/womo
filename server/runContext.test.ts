@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { newRunId, withAnalysisRun, currentRunId } from "./_core/runContext";
+import { newRunId, withAnalysisRun, currentRunId, currentDeadlineAt } from "./_core/runContext";
 
 describe("analysis run context (womo_0006)", () => {
   it("is null outside a run", () => {
@@ -48,6 +48,33 @@ describe("analysis run context (womo_0006)", () => {
       }),
     ]);
     expect(results).toEqual([a, b]);
+  });
+
+  // S3a: the race deadline rides the same context as the run id, for the same
+  // reason — the scheduler needs it deep inside the phase runner, which has no
+  // parameter to take it through and no business knowing about the endpoint.
+  it("carries the race deadline, and reports undefined when there is none", async () => {
+    expect(currentDeadlineAt()).toBeUndefined();
+    await withAnalysisRun(newRunId(), async () => {
+      expect(currentDeadlineAt()).toBeUndefined();
+    });
+    const deadline = Date.now() + 300_000;
+    await withAnalysisRun(newRunId(), async () => {
+      await new Promise(r => setTimeout(r, 5));
+      expect(currentDeadlineAt()).toBe(deadline);
+    }, { deadlineAt: deadline });
+    expect(currentDeadlineAt()).toBeUndefined();
+  });
+
+  it("keeps concurrent runs' deadlines separate", async () => {
+    const [a, b] = await Promise.all([
+      withAnalysisRun(newRunId(), async () => {
+        await new Promise(r => setTimeout(r, 10));
+        return currentDeadlineAt();
+      }, { deadlineAt: 1_000 }),
+      withAnalysisRun(newRunId(), async () => currentDeadlineAt(), { deadlineAt: 2_000 }),
+    ]);
+    expect([a, b]).toEqual([1_000, 2_000]);
   });
 
   it("generates unique UUIDs", () => {

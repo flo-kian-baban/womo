@@ -13,7 +13,17 @@
 import { AsyncLocalStorage } from "async_hooks";
 import { randomUUID } from "crypto";
 
-type AnalysisRunContext = { runId: string };
+type AnalysisRunContext = {
+  runId: string;
+  /**
+   * When this run's race deadline expires (epoch ms), when it has one. Carried
+   * here for the same reason as runId: the S3a scheduler needs it deep inside
+   * the phase runner, which has no parameter to take it through and no business
+   * knowing about the endpoint's timeout. A backoff that would land past this
+   * point is parked instead of slept (phaseScheduler.ts).
+   */
+  deadlineAt?: number;
+};
 
 const storage = new AsyncLocalStorage<AnalysisRunContext>();
 
@@ -23,11 +33,20 @@ export function newRunId(): string {
 }
 
 /** Run `fn` with the given runId as the ambient analysis-run context. */
-export function withAnalysisRun<T>(runId: string, fn: () => Promise<T>): Promise<T> {
-  return storage.run({ runId }, fn);
+export function withAnalysisRun<T>(
+  runId: string,
+  fn: () => Promise<T>,
+  opts?: { deadlineAt?: number },
+): Promise<T> {
+  return storage.run({ runId, deadlineAt: opts?.deadlineAt }, fn);
 }
 
 /** The ambient run id, or null when not inside an analysis run. */
 export function currentRunId(): string | null {
   return storage.getStore()?.runId ?? null;
+}
+
+/** The ambient race deadline (epoch ms), or undefined when there is none. */
+export function currentDeadlineAt(): number | undefined {
+  return storage.getStore()?.deadlineAt;
 }

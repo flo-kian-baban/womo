@@ -52,8 +52,9 @@ import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type Audienc
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db";
-import { currentRunId } from "./_core/runContext";
+import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
+import { makeSchedulerExecute } from "./phases/phaseScheduler";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
   makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
@@ -2135,6 +2136,25 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     handle,
     platform: "TikTok",
     phases: [capturePhase, augmentPhase, transcribePhase, derivePhase] as never,
+    // S3a: every phase now runs through the scheduler — admitted against its
+    // resource class's bound BEFORE any tool (and so any browser context) is
+    // touched, and retried per its declared policy. The runner still owns order
+    // and stop conditions; nothing about WHAT is gathered changes.
+    execute: makeSchedulerExecute({
+      deadlineAt: currentDeadlineAt(),
+      // Mark the phase in-flight so the ledger shows work in progress, not just
+      // finished work. Fire-and-forget, like every other observation write.
+      onAttemptStart: (phase, attempt) => {
+        if (!runId) return;
+        void recordPhaseState({
+          runId, subjectHint,
+          phase: phase.name as PhaseStateWrite["phase"],
+          tool: phase.tool,
+          status: "running",
+          attemptCount: attempt,
+        });
+      },
+    }),
     // Each phase's output is banked as it completes. Fire-and-forget so
     // observation can never add latency to, or fail, an analysis.
     bank: (entry) => {
@@ -2145,6 +2165,8 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
         tool: entry.tool,
         status: entry.status as PhaseStateWrite["status"],
         failureClass: entry.failureClass as PhaseStateWrite["failureClass"],
+        attemptCount: entry.attemptCount,
+        nextEarliestAt: entry.nextEarliestAt,
         output: entry.output,
       });
     },

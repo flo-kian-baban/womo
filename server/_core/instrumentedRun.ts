@@ -72,8 +72,14 @@ export async function runInstrumentedAnalysis<T>(args: {
   timeoutMessage: string;
   work: (ctx: InstrumentedRunContext) => Promise<InstrumentedOutcome<T>>;
 }): Promise<T> {
+  // Hoisted above withAnalysisRun so the deadline can be published on the run
+  // context: the S3a scheduler reads it deep inside the phase runner to decide
+  // whether a backoff can be slept or must be parked. Same value as before, read
+  // microseconds earlier.
+  const pipelineStart = Date.now();
+  const deadlineAt = pipelineStart + args.timeoutMs;
+
   return withAnalysisRun(args.runId, async () => {
-    const pipelineStart = Date.now();
     const stepTimings: Array<{ step: string; durationMs: number }> = [];
     // Part 1 (stability session): passive memory sampling for the whole run —
     // summary lands in pipeline_runs.error_log.memory on every terminal write.
@@ -143,5 +149,5 @@ export async function runInstrumentedAnalysis<T>(args: {
       void workPromise.catch(() => {});
       throw err;
     }
-  });
+  }, { deadlineAt });
 }
