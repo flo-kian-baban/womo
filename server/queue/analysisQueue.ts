@@ -37,6 +37,8 @@ import {
   recordRunOutcome,
   type RunOutcomeStatus,
   findIncompleteCampaigns,
+  listRecentCampaigns,
+  getPhaseStateForRuns,
   getPhaseState,
   heartbeatPhase,
   reclaimStaleRunning,
@@ -169,8 +171,27 @@ export function deriveCampaignState(phases: CampaignStatus["phases"]): CampaignR
   return "queued";
 }
 
-export async function getCampaignStatus(runId: string): Promise<CampaignStatus | null> {
-  const rows = await getPhaseState(runId);
+/**
+ * Ledger rows → one campaign. PURE, and the single place the shape is built:
+ * the by-runId read and the list read both go through here, so the list can be
+ * batched without the two drifting apart.
+ */
+function shapeCampaign(
+  runId: string,
+  // The fields this shape actually reads, declared structurally — so the full
+  // row read and the narrowed batch read (which omits `output` for every phase
+  // but extract_commit) both satisfy it.
+  rows: Array<{
+    subjectHint: string;
+    phase: string;
+    status: string;
+    attemptCount: number;
+    failureClass: string | null;
+    nextEarliestAt: Date | null;
+    updatedAt: Date | null;
+    output: unknown;
+  }>,
+): CampaignStatus | null {
   if (rows.length === 0) return null;
   const [handle, platform] = (rows[0]!.subjectHint ?? "@").split("@");
   const phases = rows.map(r => ({
@@ -182,7 +203,12 @@ export async function getCampaignStatus(runId: string): Promise<CampaignStatus |
     updatedAt: r.updatedAt,
   }));
   const commit = rows.find(r => r.phase === "extract_commit");
-  const out = commit?.output as { subjectId?: string; observationId?: string; persistence?: { error?: string | null } } | null;
+  const out = commit?.output as {
+    subjectId?: string; observationId?: string;
+    persistence?: { error?: string | null };
+    /** `recordTerminalFailure` banks the honest text here. */
+    message?: string | null;
+  } | null;
   const running = phases.find(p => p.status === "running");
   const stopped = phases.find(p => p.status === "failed" || p.status === "blocked");
 
@@ -195,16 +221,53 @@ export async function getCampaignStatus(runId: string): Promise<CampaignStatus |
     phases,
     subjectId: out?.subjectId ?? null,
     observationId: out?.observationId ?? null,
-    message: out?.persistence?.error ?? null,
+    // A partial-persistence error first (a campaign that committed but lost a
+    // component), then the terminal failure text. Before this fallback a
+    // terminally-failed campaign reported `null` while its own ledger row held
+    // the reason — the analyst saw "Failed" and nothing else.
+    message: out?.persistence?.error ?? out?.message ?? null,
   };
 }
 
-/** Every campaign the ledger knows about, newest first. */
-export async function listCampaigns(limit = 50): Promise<CampaignStatus[]> {
-  const incomplete = await findIncompleteCampaigns(limit);
+export async function getCampaignStatus(runId: string): Promise<CampaignStatus | null> {
+  return shapeCampaign(runId, await getPhaseState(runId));
+}
+
+/**
+ * The queue view's read. READ-PATH ONLY — nothing here enqueues, schedules or
+ * mutates.
+ *
+ * `includeTerminal` picks the underlying question:
+ *   false — "what is still in flight?" (`findIncompleteCampaigns`, the boot
+ *           loop's query: excludes committed/terminated, bounded to 24h)
+ *   true  — "what has this system done?" (`listRecentCampaigns`: every
+ *           campaign, terminal included, no age bound)
+ *
+ * The default stays false so existing callers are unchanged.
+ */
+export async function listCampaigns(
+  limit = 50,
+  opts: { includeTerminal?: boolean } = {},
+): Promise<CampaignStatus[]> {
+  const runs = opts.includeTerminal
+    ? await listRecentCampaigns(limit)
+    : await findIncompleteCampaigns(limit);
+  if (runs.length === 0) return [];
+
+  // ONE query for every run's rows, then shape in memory. Fetching per-campaign
+  // here was an N+1 that cost 11-17s for 43 campaigns on a 3s poll.
+  const all = await getPhaseStateForRuns(runs.map(r => r.runId));
+  const byRun = new Map<string, typeof all>();
+  for (const row of all) {
+    const list = byRun.get(row.runId) ?? [];
+    list.push(row);
+    byRun.set(row.runId, list);
+  }
+
+  // `runs` order is the display order (most recent activity first); preserve it.
   const out: CampaignStatus[] = [];
-  for (const c of incomplete) {
-    const status = await getCampaignStatus(c.runId);
+  for (const r of runs) {
+    const status = shapeCampaign(r.runId, byRun.get(r.runId) ?? []);
     if (status) out.push(status);
   }
   return out;

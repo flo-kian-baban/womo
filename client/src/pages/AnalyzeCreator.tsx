@@ -1,154 +1,67 @@
+/**
+ * SUBMIT AND WATCH. There is one way in — the queue.
+ *
+ * One handle is submitted at a time, but it goes through the SAME queue as
+ * everything else — a single creator is a queue of one, which is the
+ * architectural rule rather than a convenience. Nothing here blocks on a
+ * result: submission returns a run id, and everything after that is the
+ * ledger's account of what happened, polled.
+ *
+ * NOTHING ON THIS PAGE IS ESTIMATED. The progress animation that used to live
+ * here advanced phase labels on a setInterval against hardcoded elapsed-time
+ * marks — honest names, guessed positions, and it kept guessing while the run
+ * did something else. Every mark now comes from `analysis_phase_state`. If a
+ * value is not knowable, it says so rather than showing a plausible number.
+ */
 import { useState } from "react";
 import { toast } from "sonner";
-import {
-  Users, Loader2, Sparkles, CheckCircle2, ArrowRight, AlertTriangle, Clock, PauseCircle, XCircle,
-} from "lucide-react";
+import { Users, Loader2, Sparkles, AlertTriangle, Inbox, ClipboardPaste } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { Link } from "wouter";
+import { CampaignCard, type Campaign } from "@/components/CampaignCard";
+import { PlatformMark, SUPPORTED_PLATFORMS, type SupportedPlatform } from "@/components/PlatformMark";
 
-// ─── Platform icon ────────────────────────────────────────────────────────────
-
-function TikTokIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.98a8.18 8.18 0 0 0 3.76.92V6.69" />
-    </svg>
-  );
-}
+/** In flight = the queue still owes you something. */
+const ACTIVE_STATES = new Set(["queued", "running", "parked"]);
 
 /**
- * THE PHASES, AS THEY ACTUALLY ARE. Five, in pipeline order, matching the
- * ledger exactly — because that is where the status comes from.
+ * "@name", "name", or a pasted profile URL → "name".
  *
- * What used to be here was a list of phase labels advanced by a setInterval
- * against hardcoded elapsed-time marks. The names were honest; the POSITION was
- * a guess, and it kept guessing while the run did something else entirely. It
- * replaced an even worse indicator that listed 13 fabricated "LLM steps" for
- * what is a single extraction call. There is no estimator here now: every
- * highlight below is a row in analysis_phase_state.
+ * Platform-agnostic on purpose: it strips a leading @ and, for anything that
+ * looks like a URL, takes the last path segment. It does NOT know platform
+ * domains — the platform is chosen above the field, and encoding a domain list
+ * here would be the hardcoding this session exists to remove.
  */
-const PHASE_LABELS: Record<string, string> = {
-  capture: "Capture — profile and recent videos",
-  augment: "Augment — widening the sample by search",
-  transcribe: "Transcribe — spoken content across the sample",
-  derive: "Derive — themes and symbols",
-  extract_commit: "Extract & commit — cultural profile, saved",
-};
-const PHASE_ORDER = ["capture", "augment", "transcribe", "derive", "extract_commit"];
-
-type CampaignStatus = {
-  runId: string;
-  handle: string;
-  platform: string;
-  state: "queued" | "running" | "parked" | "complete" | "failed";
-  currentPhase: string | null;
-  phases: Array<{
-    phase: string; status: string; attemptCount: number;
-    failureClass: string | null; nextEarliestAt: Date | string | null;
-  }>;
-  subjectId: string | null;
-  message: string | null;
-};
-
-/** "in 4m 20s" — a park has a real time, so show it. */
-function untilLabel(at: Date | string | null): string | null {
-  if (!at) return null;
-  const ms = new Date(at).getTime() - Date.now();
-  if (ms <= 0) return "now";
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `in ${s}s` : `in ${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-const STATE_STYLE: Record<CampaignStatus["state"], { icon: typeof Clock; cls: string; label: string }> = {
-  queued:   { icon: Clock,        cls: "text-muted-foreground", label: "Queued" },
-  running:  { icon: Loader2,      cls: "text-foreground",       label: "Running" },
-  parked:   { icon: PauseCircle,  cls: "text-amber-400",        label: "Parked" },
-  complete: { icon: CheckCircle2, cls: "text-green-400",        label: "Complete" },
-  failed:   { icon: XCircle,      cls: "text-destructive",      label: "Failed" },
-};
-
-function CampaignRow({ c }: { c: CampaignStatus }) {
-  const style = STATE_STYLE[c.state];
-  const Icon = style.icon;
-  const byPhase = new Map(c.phases.map(p => [p.phase, p]));
-  const parked = c.phases.find(p => p.nextEarliestAt && new Date(p.nextEarliestAt).getTime() > Date.now());
-
-  return (
-    <div className="fit-card rounded-xl p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <TikTokIcon className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
-            <span className="font-medium truncate">@{c.handle}</span>
-          </div>
-          <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">{c.runId.slice(0, 8)}</div>
-        </div>
-        <div className={`flex items-center gap-1.5 text-xs whitespace-nowrap ${style.cls}`}>
-          <Icon className={`w-3.5 h-3.5 ${c.state === "running" ? "animate-spin" : ""}`} />
-          {style.label}
-          {parked && <span className="text-muted-foreground/70">{untilLabel(parked.nextEarliestAt)}</span>}
-        </div>
-      </div>
-
-      <div className="mt-3 space-y-1.5">
-        {PHASE_ORDER.map(name => {
-          const p = byPhase.get(name);
-          const done = p && (p.status === "complete" || p.status === "partial");
-          const running = p?.status === "running";
-          const bad = p && (p.status === "failed" || p.status === "blocked");
-          return (
-            <div key={name} className={`flex items-center gap-2 text-xs ${
-              done ? "text-green-400" : running ? "text-foreground"
-                : bad ? "text-destructive" : "text-muted-foreground/30"
-            }`}>
-              {done ? <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
-                : running ? <Loader2 className="w-3 h-3 flex-shrink-0 animate-spin" />
-                : bad ? <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                : <div className="w-3 h-3 rounded-full border border-current flex-shrink-0 opacity-30" />}
-              <span className="truncate">{PHASE_LABELS[name]}</span>
-              {p && p.attemptCount > 1 && (
-                <span className="text-[10px] text-amber-400/80 whitespace-nowrap">attempt {p.attemptCount}</span>
-              )}
-              {p?.status === "partial" && (
-                <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap">partial</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {c.message && (
-        <p className="mt-3 text-xs text-destructive/90 border-t border-border/50 pt-2">{c.message}</p>
-      )}
-      {c.state === "complete" && c.subjectId && (
-        <Link href={`/creator/${c.subjectId}`}>
-          <Button variant="ghost" size="sm" className="mt-3 h-7 text-xs px-2">
-            Open profile <ArrowRight className="w-3 h-3 ml-1" />
-          </Button>
-        </Link>
-      )}
-    </div>
-  );
+export function normalizeHandle(input: string): string {
+  const s = input.trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s) || s.includes("/")) {
+    const last = s.split(/[?#]/)[0].split("/").filter(Boolean).pop() ?? "";
+    return last.replace(/^@/, "");
+  }
+  return s.replace(/^@/, "");
 }
 
 export default function AnalyzeCreator() {
   const [raw, setRaw] = useState("");
+  const [platform, setPlatform] = useState<SupportedPlatform>("TikTok");
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
-  /** One per line or comma — a single creator is just a list of one. */
-  const handles = raw.split(/[\n,]/).map(h => h.trim()).filter(Boolean);
-
-  // The queue view. Polls the LEDGER; there is no local progress state to drift.
+  /**
+   * The queue view. Polls the LEDGER, so there is no local progress state that
+   * can drift from reality. `includeTerminal` is what makes completed and
+   * failed campaigns visible at all — the in-flight query excludes both by
+   * design, which meant the queue read as empty within seconds of finishing.
+   */
   const queue = trpc.creator.queueStatus.useQuery(
-    {},
+    { includeTerminal: true, limit: 50 },
     { refetchInterval: 3000, refetchOnWindowFocus: true },
   );
 
@@ -159,7 +72,7 @@ export default function AnalyzeCreator() {
       toast.success(
         data.campaigns.length === 1
           ? `Queued @${data.campaigns[0].handle}`
-          : `Queued ${data.campaigns.length} creators`,
+          : `Queued ${data.campaigns.length} analyses`,
       );
       void utils.creator.queueStatus.invalidate();
     },
@@ -174,8 +87,33 @@ export default function AnalyzeCreator() {
     },
   });
 
-  const campaigns = (queue.data?.campaigns ?? []) as unknown as CampaignStatus[];
-  const active = campaigns.filter(c => c.state !== "complete" && c.state !== "failed");
+  /**
+   * ONE handle at a time. The transport still takes an array — a single creator
+   * is a queue of one, which is the architectural rule, not a UI compromise —
+   * but the analyst submits one handle and sees it appear, rather than
+   * assembling a batch and losing track of which of twenty failed.
+   *
+   * A pasted profile URL is reduced to its handle, so the common gesture
+   * (copy the profile link, paste, Enter) just works.
+   */
+  const handle = normalizeHandle(raw);
+  const canSubmit = handle.length > 0 && !submit.isPending;
+
+  /** Paste without leaving the keyboard; clipboard access can legitimately be denied. */
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) setRaw(text.trim());
+      else toast.error("Clipboard is empty");
+    } catch {
+      toast.error("Clipboard access was blocked — paste with ⌘V instead");
+    }
+  };
+
+  const campaigns: Campaign[] = queue.data?.campaigns ?? [];
+  const active = campaigns.filter(c => ACTIVE_STATES.has(c.state));
+  const settled = campaigns.filter(c => !ACTIVE_STATES.has(c.state));
+  const failed = settled.filter(c => c.state === "failed");
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 space-y-6">
@@ -184,51 +122,129 @@ export default function AnalyzeCreator() {
           <Users className="w-3.5 h-3.5" /> Analyze creators
         </div>
         <p className="text-sm text-muted-foreground/70 mt-2">
-          Queue one creator or twenty. Analyses run in the background — you can close this page,
-          and a restart resumes anything still in flight.
+          Queue a creator and it runs in the background — you can close this page, and a
+          restart resumes anything still in flight. Queue as many as you like, one at a time.
         </p>
       </div>
 
       <div className="fit-card rounded-xl p-5 space-y-4">
         <div className="space-y-2">
           <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
-            TikTok handles — one per line
+            Platform
           </Label>
-          <Textarea
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            rows={4}
-            placeholder={"@username\ntiktok.com/@another"}
-            className="bg-secondary border-border placeholder:text-muted-foreground/40 font-mono text-sm"
-          />
-          {handles.length > 1 && (
-            <p className="text-xs text-muted-foreground/60">{handles.length} handles</p>
-          )}
+          <div className="flex gap-1.5">
+            {SUPPORTED_PLATFORMS.map(p => (
+              <button
+                key={p}
+                onClick={() => setPlatform(p)}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                  platform === p
+                    ? "border-indigo-400/40 bg-indigo-400/10 text-foreground"
+                    : "border-border text-muted-foreground/60 hover:text-foreground/80"
+                }`}
+              >
+                <PlatformMark platform={p} className="w-3.5 h-3.5" muted={platform !== p} />
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+            Handle
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter submits — the whole form is one field, so a trip to the
+                // button is pure friction.
+                if (e.key === "Enter" && canSubmit) {
+                  e.preventDefault();
+                  submit.mutate({ handles: [handle], platform });
+                }
+              }}
+              placeholder="@username"
+              spellCheck={false}
+              autoComplete="off"
+              className="bg-secondary border-border placeholder:text-muted-foreground/40 font-mono text-sm"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={pasteFromClipboard}
+              title="Paste from clipboard"
+              className="flex-shrink-0 px-3"
+            >
+              <ClipboardPaste className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         <Button
-          onClick={() => submit.mutate({ handles, platform: "TikTok" })}
-          disabled={handles.length === 0 || submit.isPending}
+          onClick={() => submit.mutate({ handles: [handle], platform })}
+          disabled={!canSubmit}
           className="w-full gold-gradient text-background font-semibold hover:opacity-90 transition-opacity"
         >
           {submit.isPending
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Queueing…</>
-            : <><Sparkles className="w-4 h-4 mr-2" /> Queue {handles.length > 1 ? `${handles.length} analyses` : "analysis"}</>}
+            : <><Sparkles className="w-4 h-4 mr-2" /> Queue analysis</>}
         </Button>
       </div>
 
-      {campaigns.length > 0 && (
-        <div className="space-y-3">
+      {/* ─── In flight ─────────────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+            In flight
+          </div>
+          {/*
+            NOT "idle". The old counter said idle whenever nothing was running,
+            which described the WORKER, not the system — "39 completed, nothing
+            running" is not an idle system. State what is actually true.
+          */}
+          <div className="text-xs text-muted-foreground/60">
+            {queue.isLoading
+              ? "loading…"
+              : active.length > 0
+                ? `${active.length} running or queued`
+                : "nothing running"}
+          </div>
+        </div>
+
+        {active.length > 0
+          ? active.map(c => <CampaignCard key={c.runId} campaign={c} />)
+          : (
+            <div className="fit-card rounded-xl p-8 text-center">
+              <Inbox className="w-5 h-5 mx-auto text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground/60 mt-2">
+                {queue.isLoading ? "Loading the queue…" : "No analyses in flight."}
+              </p>
+              {!queue.isLoading && settled.length > 0 && (
+                <p className="text-xs text-muted-foreground/40 mt-1">
+                  {settled.length} finished {settled.length === 1 ? "campaign" : "campaigns"} below.
+                </p>
+              )}
+            </div>
+          )}
+      </section>
+
+      {/* ─── Finished ──────────────────────────────────────────────────────── */}
+      {settled.length > 0 && (
+        <section className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-              Queue
+              Finished
             </div>
             <div className="text-xs text-muted-foreground/60">
-              {active.length > 0 ? `${active.length} in flight` : "idle"}
+              {settled.length - failed.length} complete
+              {failed.length > 0 && <span className="text-destructive/80"> · {failed.length} failed</span>}
             </div>
           </div>
-          {campaigns.map(c => <CampaignRow key={c.runId} c={c} />)}
-        </div>
+          {settled.map(c => <CampaignCard key={c.runId} campaign={c} />)}
+        </section>
       )}
 
       <AlertDialog open={duplicateWarning !== null} onOpenChange={(o) => !o && setDuplicateWarning(null)}>
@@ -242,7 +258,7 @@ export default function AnalyzeCreator() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => submit.mutate({ handles, platform: "TikTok", confirmDuplicate: true })}
+              onClick={() => submit.mutate({ handles: [handle], platform, confirmDuplicate: true })}
             >
               Queue anyway
             </AlertDialogAction>

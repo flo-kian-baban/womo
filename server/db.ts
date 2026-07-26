@@ -366,6 +366,40 @@ export async function findIncompleteCampaigns(
 }
 
 /**
+ * HISTORY read — every campaign, terminal ones included. READ-PATH ONLY.
+ *
+ * Deliberately NOT `findIncompleteCampaigns`. That query answers "what did the
+ * last process leave behind?", so it excludes anything committed or terminated
+ * and bounds itself to RESUMABLE_AGE_MS. Both are correct for RESUMPTION and
+ * wrong for a history view: measured against the live ledger, 39 of 40
+ * campaigns were committed and 1 was terminated, so the queue view could show
+ * NOTHING. A campaign vanished the instant it finished.
+ *
+ * NO AGE WINDOW HERE. The 24h bound exists because old phase outputs are not
+ * safely REPLAYABLE (they carry no schema version). Nothing is replayed by
+ * reading, so inheriting that bound would hide history for a reason that does
+ * not apply. The bound is `limit` campaigns by recency instead — a display
+ * concern, not a correctness one.
+ *
+ * Ordered by most recent ledger activity so in-flight work sorts to the top.
+ */
+export async function listRecentCampaigns(limit = 50): Promise<Array<{ runId: string; subjectHint: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      runId: analysisPhaseState.runId,
+      subjectHint: sql<string>`min(${analysisPhaseState.subjectHint})`,
+      lastActivity: sql<Date>`max(${analysisPhaseState.updatedAt})`,
+    })
+    .from(analysisPhaseState)
+    .groupBy(analysisPhaseState.runId)
+    .orderBy(sql`max(${analysisPhaseState.updatedAt}) DESC`)
+    .limit(limit);
+  return rows.map(r => ({ runId: r.runId, subjectHint: r.subjectHint }));
+}
+
+/**
  * Load a run's banked phases IF it is resumable (S2 Part 1 / M3).
  *
  * Resumable = capture + augment + transcribe all reached a usable outcome
@@ -391,6 +425,44 @@ export async function loadResumableBankedPhases(runId: string): Promise<{
     subjectHint: rows[0]!.subjectHint,
     phases: Object.fromEntries(usable),
   };
+}
+
+/**
+ * Ledger rows for MANY runs in one query. READ-PATH ONLY.
+ *
+ * The queue view shapes N campaigns; doing that with N calls to `getPhaseState`
+ * is an N+1 that was invisible while the list only ever held in-flight work
+ * (0-2 rows) and became acute once the history read started returning 43. Measured:
+ * 11-17s per poll on a 3s interval, i.e. requests piling up faster than they
+ * complete. One query instead.
+ */
+export async function getPhaseStateForRuns(runIds: string[]) {
+  const db = await getDb();
+  if (!db || runIds.length === 0) return [];
+  return db.select({
+    runId: analysisPhaseState.runId,
+    subjectHint: analysisPhaseState.subjectHint,
+    phase: analysisPhaseState.phase,
+    tool: analysisPhaseState.tool,
+    status: analysisPhaseState.status,
+    attemptCount: analysisPhaseState.attemptCount,
+    failureClass: analysisPhaseState.failureClass,
+    nextEarliestAt: analysisPhaseState.nextEarliestAt,
+    updatedAt: analysisPhaseState.updatedAt,
+    createdAt: analysisPhaseState.createdAt,
+    /**
+     * `output` holds each phase's ENTIRE banked evidence — the video pool, the
+     * transcripts. Selecting it for every phase shipped megabytes per poll and
+     * was the real cost (4.5s for 50 campaigns; 0.84s for 5). The campaign view
+     * reads output ONLY from extract_commit (subjectId / observationId /
+     * message), so the rest is nulled in SQL rather than fetched and discarded.
+     */
+    output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
+                     THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
+  })
+    .from(analysisPhaseState)
+    .where(inArray(analysisPhaseState.runId, runIds))
+    .orderBy(analysisPhaseState.createdAt);
 }
 
 /** Read a run's ledger rows (diagnostics / verification). */

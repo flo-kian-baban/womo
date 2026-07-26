@@ -1026,15 +1026,31 @@ export const appRouter = router({
         return { campaigns };
       }),
 
-    /** Queue view: one campaign, or everything in flight. Real ledger state. */
+    /**
+     * Queue view: one campaign, or a list. Real ledger state, READ ONLY.
+     *
+     * `includeTerminal` switches the underlying question from "what is still in
+     * flight?" to "what has this system done?". Without it the view is
+     * structurally incapable of showing a completed or failed campaign — the
+     * in-flight query excludes both by design — which measured as 0 of 40
+     * campaigns visible.
+     */
     queueStatus: publicProcedure
-      .input(z.object({ runId: z.string().uuid().optional() }))
+      .input(z.object({
+        runId: z.string().uuid().optional(),
+        includeTerminal: z.boolean().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }))
       .query(async ({ input }) => {
         if (input.runId) {
           const one = await getCampaignStatus(input.runId);
           return { campaigns: one ? [one] : [] };
         }
-        return { campaigns: await listCampaigns() };
+        return {
+          campaigns: await listCampaigns(input.limit ?? 50, {
+            includeTerminal: input.includeTerminal,
+          }),
+        };
       }),
 
     list: publicProcedure
