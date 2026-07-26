@@ -1234,9 +1234,39 @@ export async function insertDecodedSignals(
   await db.insert(decodedSignals).values(rows);
 }
 
+/** What a content_items write actually achieved for THIS observation. */
+export interface ContentItemsWriteResult {
+  /** Rows that now carry `observationId` — the evidence this observation owns. */
+  attributed: number;
+  /**
+   * Rows that already existed for this subject and stayed attached to an EARLIER
+   * observation. The write succeeded; the attribution did not.
+   */
+  collided: number;
+}
+
 /**
- * Bulk insert content_items rows.
- * Uses ON CONFLICT DO NOTHING on platform + platform_video_id + subject_id.
+ * Bulk upsert content_items rows, reporting how many landed on THIS observation.
+ *
+ * ─── Why the count is returned (and why it used to be void) ─────────────────
+ * The conflict target is `(platform, platform_video_id, subject_id)` — it does
+ * NOT include observation_id, and observation_id is deliberately absent from the
+ * DO UPDATE set (re-pointing a row would strip evidence from an older ACCEPTED
+ * observation, which is strictly worse). So on a RE-ANALYSIS every repeated
+ * video collides, its row is refreshed in place while still belonging to the
+ * first observation that stored it, and ZERO rows are attributed to the new one.
+ *
+ * Postgres raises nothing, so the old `Promise<void>` signature threw away the
+ * only evidence that anything was wrong: 15 observations reported transcripts
+ * and high confidence with no content rows of their own, and every one recorded
+ * `persistence_status.content_items = success`. Measured: 0 of 20 first
+ * analyses affected, 15 of 23 re-analyses (65%).
+ *
+ * Returning the split lets the caller tell the difference between "this subject
+ * has no videos" and "we wrote 83 rows and none of them belong to this
+ * observation". The structural fix is a unique-index change (see the migration
+ * that adds observation_id to ci_platform_video_idx); this is the honesty half,
+ * and it stays useful afterwards as the assertion that the fix holds.
  */
 export async function insertContentItems(
   subjectId: string,
@@ -1263,8 +1293,8 @@ export async function insertContentItems(
     isOriginalAudio?: boolean;
     status?: string;
   }>,
-): Promise<void> {
-  if (items.length === 0) return;
+): Promise<ContentItemsWriteResult> {
+  if (items.length === 0) return { attributed: 0, collided: 0 };
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -1294,8 +1324,14 @@ export async function insertContentItems(
   }));
 
   // Upsert: on conflict, update with latest data (especially transcript fields)
+  let attributed = 0;
+  let collided = 0;
   for (let i = 0; i < rows.length; i += 500) {
-    await db.insert(contentItems).values(rows.slice(i, i + 500)).onConflictDoUpdate({
+    // RETURNING reports the row as it stands AFTER the upsert. Because
+    // observation_id is not in the set clause, a conflicting row returns the
+    // observation that owns it — which is how a collision is detected without a
+    // second query.
+    const written = await db.insert(contentItems).values(rows.slice(i, i + 500)).onConflictDoUpdate({
       target: [contentItems.platform, contentItems.platformVideoId, contentItems.subjectId],
       set: {
         transcriptText: sql`COALESCE(excluded.transcript_text, ${contentItems.transcriptText})`,
@@ -1308,8 +1344,14 @@ export async function insertContentItems(
         commentCount: sql`COALESCE(excluded.comment_count, ${contentItems.commentCount})`,
         status: sql`CASE WHEN excluded.transcript_text IS NOT NULL THEN 'sampled' ELSE ${contentItems.status} END`,
       },
-    });
+    }).returning({ observationId: contentItems.observationId });
+
+    for (const w of written) {
+      if (w.observationId === observationId) attributed++;
+      else collided++;
+    }
   }
+  return { attributed, collided };
 }
 
 /**
@@ -2303,7 +2345,20 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   if (contentRows.length > 0) {
     summary.push(`${withTranscript} of ${contentRows.length} captured videos have transcripts`);
   } else {
-    summary.push("no videos captured");
+    // "no videos captured" is FALSE — and false in the dangerous direction —
+    // when the run captured a full pool whose rows all collided onto an earlier
+    // observation. persistence_status is the only place that knows the
+    // difference, so read it rather than inferring an absence from an absence.
+    const contentStatus = rawStatus?.content_items as { status?: string; reason?: string | null } | undefined;
+    if (contentStatus?.status === "failed" && contentStatus.reason) {
+      summary.push(`videos were captured but NOT attributed to this observation — ${contentStatus.reason}`);
+    } else if (contentStatus?.status === "skipped_no_data") {
+      summary.push("no videos captured");
+    } else if (contentStatus) {
+      summary.push(`no videos attributed to this observation (content_items: ${contentStatus.status})`);
+    } else {
+      summary.push("no videos captured");
+    }
   }
   if (llmRows.length > 0) {
     summary.push(`${llmRows.length} LLM calls${llmFailed > 0 ? `, ${llmFailed} failed` : ", all succeeded"}`);

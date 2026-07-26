@@ -25,6 +25,7 @@ import {
   getBrandProfileById, listBrandProfiles, deleteBrandProfile,
   listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
+  type ContentItemsWriteResult,
 } from "./db";
 import { extractCreatorProfile, extractBrandProfile, generateFITNarrative, buildCreatorExtractionPrompts } from "./aiExtraction";
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
@@ -67,6 +68,18 @@ export type PersistenceStatusMap = Record<string, {
 
 type EnrichmentSkip = { skip: "skipped_no_data" | "skipped_not_attempted"; reason: string };
 
+/**
+ * What an enrichment action may report about its OWN outcome when the write
+ * did not throw but also did not achieve what it claimed.
+ *
+ * The content_items attribution bug is the reason this exists: the upsert
+ * succeeded, Postgres raised nothing, and the component recorded `success`
+ * while every row it wrote stayed attached to an earlier observation. A
+ * component that can tell it failed must be able to say so without inventing
+ * an exception.
+ */
+type EnrichmentReport = { status: EnrichmentOutcomeStatus; reason: string };
+
 function recordOutcome(
   map: PersistenceStatusMap,
   component: string,
@@ -74,6 +87,38 @@ function recordOutcome(
   reason: string | null = null,
 ): void {
   map[component] = { status, reason, at: new Date().toISOString() };
+}
+
+/**
+ * Turn a content_items write into an honest outcome for persistence_status.
+ *
+ * "We wrote rows" and "this observation owns evidence" are different claims,
+ * and until the unique key includes observation_id they can diverge silently on
+ * any re-analysis. Shared by the creator path and all three brand paths, which
+ * call the same insertContentItems and therefore have the same failure mode.
+ */
+export function reportContentItemsWrite(
+  result: ContentItemsWriteResult,
+  requested: number,
+  label: string,
+): EnrichmentReport | void {
+  if (requested > 0 && result.attributed === 0) {
+    return {
+      status: "failed",
+      reason:
+        `${requested} ${label} written but ZERO attributed to this observation — ` +
+        `all ${result.collided} collided with rows owned by an earlier observation ` +
+        `(content_items' unique key omits observation_id). This observation has no content evidence of its own.`,
+    };
+  }
+  if (result.collided > 0) {
+    return {
+      status: "success",
+      reason:
+        `${result.attributed} of ${requested} ${label} attributed to this observation; ` +
+        `${result.collided} stayed attached to an earlier observation.`,
+    };
+  }
 }
 
 /**
@@ -93,19 +138,30 @@ function describeError(err: unknown): string {
 /**
  * Run one enrichment write. A thrown error is recorded as `failed` and does NOT
  * propagate — a broken enrichment must never prevent the others from saving.
+ *
+ * An action may also RETURN an `EnrichmentReport` to record a non-success
+ * outcome without throwing, for the case where the write completed but did not
+ * accomplish its purpose (see EnrichmentReport).
  */
 async function runEnrichment(
   map: PersistenceStatusMap,
   component: string,
-  action: EnrichmentSkip | (() => Promise<void>),
+  action: EnrichmentSkip | (() => Promise<void | EnrichmentReport>),
 ): Promise<void> {
   if (typeof action !== "function") {
     recordOutcome(map, component, action.skip, action.reason);
     return;
   }
   try {
-    await action();
-    recordOutcome(map, component, "success");
+    const report = await action();
+    if (report) {
+      if (report.status !== "success") {
+        console.warn(`[persist] Enrichment '${component}' → ${report.status}: ${report.reason}`);
+      }
+      recordOutcome(map, component, report.status, report.reason);
+    } else {
+      recordOutcome(map, component, "success");
+    }
   } catch (err) {
     console.error(`[persist] Enrichment '${component}' failed (continuing with others):`, err);
     recordOutcome(map, component, "failed", describeError(err));
@@ -347,8 +403,9 @@ export async function persistCreatorToV2(params: {
       contentRows.length === 0
         ? { skip: "skipped_no_data", reason: "no videos in discovered pool" }
         : async () => {
-            await insertContentItems(subjectId, observationId, contentRows);
-            console.log(`[persist] insertContentItems: ${contentRows.length} rows written for subject ${subjectId}`);
+            const written = await insertContentItems(subjectId, observationId, contentRows);
+            console.log(`[persist] insertContentItems: ${contentRows.length} rows written for subject ${subjectId} (${written.attributed} attributed to this observation, ${written.collided} collided)`);
+            return reportContentItemsWrite(written, contentRows.length, "videos");
           });
 
     // I2: Compute avgVideoDuration from actual content_items data
@@ -665,8 +722,9 @@ export async function persistBrandToV2(params: {
               createTime: v.postedDate ? Math.floor(new Date(v.postedDate).getTime() / 1000) : undefined,
               status: v.transcriptText ? "sampled" : "discovered",
             }));
-            await insertContentItems(subjectId, observationId, contentRows);
-            console.log(`[persist] Brand channel videos: ${contentRows.length} rows written`);
+            const written = await insertContentItems(subjectId, observationId, contentRows);
+            console.log(`[persist] Brand channel videos: ${contentRows.length} rows written (${written.attributed} attributed, ${written.collided} collided)`);
+            return reportContentItemsWrite(written, contentRows.length, "channel videos");
           }));
 
     // 8. insertContentItems (audience mention videos as 'mention' status)
@@ -688,8 +746,9 @@ export async function persistBrandToV2(params: {
               createTime: m.createdAt || undefined,
               status: "mention",
             }));
-            await insertContentItems(subjectId, observationId, mentionContentRows);
-            console.log(`[persist] Audience mention videos: ${mentionContentRows.length} rows written`);
+            const written = await insertContentItems(subjectId, observationId, mentionContentRows);
+            console.log(`[persist] Audience mention videos: ${mentionContentRows.length} rows written (${written.attributed} attributed, ${written.collided} collided)`);
+            return reportContentItemsWrite(written, mentionContentRows.length, "mention videos");
           });
 
     // 9. Instagram platform handle
@@ -717,8 +776,9 @@ export async function persistBrandToV2(params: {
               caption,
               status: "sampled",
             }));
-            await insertContentItems(subjectId, observationId, igContentRows);
-            console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written`);
+            const written = await insertContentItems(subjectId, observationId, igContentRows);
+            console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written (${written.attributed} attributed, ${written.collided} collided)`);
+            return reportContentItemsWrite(written, igContentRows.length, "Instagram posts");
           }));
 
     // 11. Instagram signal values (keywords, themes, vocab from LLM analysis)
