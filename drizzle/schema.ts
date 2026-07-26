@@ -20,7 +20,7 @@
 import { sql } from "drizzle-orm";
 import {
   pgTable, pgEnum, uuid, text, varchar, integer, bigint, real, boolean,
-  timestamp, jsonb, index, uniqueIndex, serial,
+  timestamp, jsonb, json, index, uniqueIndex, serial,
 } from "drizzle-orm/pg-core";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -847,9 +847,18 @@ export const analysisPhaseState = pgTable("analysis_phase_state", {
   attemptCount: integer("attempt_count").default(0).notNull(),
   failureClass: varchar("failure_class", { length: 24 }),
   nextEarliestAt: timestamp("next_earliest_at", { withTimezone: true }),
-  /** Durable banked output of this phase — what later phases read instead of
-   *  in-memory threading. */
-  output: jsonb("output"),
+  /**
+   * Durable banked output of this phase — what later phases read instead of
+   * in-memory threading.
+   *
+   * `json`, NOT `jsonb`, DELIBERATELY (womo_0010). jsonb normalizes key order
+   * (length-then-bytewise); these values are read back by later phases and land
+   * in the womo_0007 evidence snapshot, which the identity harness compares
+   * BYTE-for-byte. Flipping this to jsonb silently breaks that proof — the
+   * ledger round-trip test in evidenceIdentity.test.ts fails loudly if anyone
+   * tries.
+   */
+  output: json("output"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({

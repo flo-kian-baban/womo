@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Qc2dVTAc5u9eSiq2NbikkoWA9K6SpJB5gZmebsAr5MyL0AELBZ5LlaMfBCT4NHs
+\restrict CHOZ8WShTqx2OlXHafbwpcSpyfdMDUv2eiG3gKPtLqDtBpuWco0cXIJIKYI4X6P
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.10 (Homebrew)
@@ -363,7 +363,7 @@ CREATE TABLE public.analysis_phase_state (
     attempt_count integer DEFAULT 0 NOT NULL,
     failure_class character varying(24),
     next_earliest_at timestamp with time zone,
-    output jsonb,
+    output json,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -387,7 +387,7 @@ COMMENT ON COLUMN public.analysis_phase_state.subject_hint IS 'handle+platform, 
 -- Name: COLUMN analysis_phase_state.output; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.analysis_phase_state.output IS 'Durable banked output of this phase; the input later phases read instead of in-memory threading.';
+COMMENT ON COLUMN public.analysis_phase_state.output IS 'Durable banked output of this phase; the input later phases read instead of in-memory threading. Type is json (NOT jsonb) deliberately: jsonb normalizes key order, which would alter the byte-exact evidence snapshot the identity harness asserts.';
 
 
 --
@@ -2028,5 +2028,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Qc2dVTAc5u9eSiq2NbikkoWA9K6SpJB5gZmebsAr5MyL0AELBZ5LlaMfBCT4NHs
+\unrestrict CHOZ8WShTqx2OlXHafbwpcSpyfdMDUv2eiG3gKPtLqDtBpuWco0cXIJIKYI4X6P
 
