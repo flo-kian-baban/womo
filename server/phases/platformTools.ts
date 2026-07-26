@@ -40,6 +40,8 @@ import {
   selectLongitudinalSample,
   transcribeSampledVideos,
   transcribeInstagramReels,
+  captureYouTubeChannel,
+  transcribeYouTubeVideos,
   extractHashtags,
 } from "../webResearch";
 import { emptyCaptureMessage } from "../webResearch";
@@ -715,6 +717,197 @@ export const INSTAGRAM_TOOLSET: PlatformToolset = {
   evidenceExtras: instagramEvidenceExtras,
 };
 
+
+// ─── YouTube implementation (S4b) ────────────────────────────────────────────
+//
+// The third exercise the abstraction promised, and the one that tests it: on
+// YouTube capture and transcription were FUSED in a single call, there was no
+// augmentation step at all, and sampling is not temporal. All three are absorbed
+// by the contract as it stands — the split was a scraper refactor
+// (captureYouTubeChannel / transcribeYouTubeVideos, S4b Part 2), the null
+// augment tool is the contract's optional-phase semantics, and `unbucketed` is
+// the sample value added in S4.
+
+/** Capture output kept so the transcribe tool can read the channel's video ids. */
+interface YouTubeNative {
+  videoIds: Array<{ id: string; title: string }>;
+  channelId: string;
+  quotaExhausted: boolean;
+}
+
+/**
+ * YouTube video ids by handle, for the same reason as Instagram's CDN urls: the
+ * shared PoolVideoItem has no field for a platform-native id list, and the
+ * transcribe tool needs the channel's ordering. Per-campaign, never banked.
+ */
+const youtubeVideoIds = new Map<string, Array<{ id: string; title: string }>>();
+
+const youtubeCapture: CaptureTool = {
+  platform: "YouTube",
+  name: "youtube:channel_html",
+  async capture(handle) {
+    const c = await captureYouTubeChannel(handle);
+    youtubeVideoIds.set(handle, c.videoIds);
+
+    return {
+      stats: {
+        displayName: c.displayName,
+        bio: c.bio,
+        followerCount: c.followerCount,
+        // YouTube exposes no following count and no lifetime like total.
+        followingCount: 0,
+        videoCount: c.videoCount,
+        totalLikes: 0,
+        location: c.location,
+      },
+      profileTitles: c.videoTitles,
+      profileViewCounts: c.videoViewCounts,
+      assessment: {
+        channelId: c.channelId,
+        quotaExhausted: c.quotaExhausted,
+        videosCaptured: c.videoIds.length,
+        channelKeywords: c.channelKeywords,
+        totalViews: c.totalViews,
+      },
+      nativeProfile: { videoIds: c.videoIds, channelId: c.channelId, quotaExhausted: c.quotaExhausted } as YouTubeNative,
+    };
+  },
+  async seedPool(_handle, captured, pool) {
+    const native = captured.nativeProfile as YouTubeNative | undefined;
+    const views = captured.profileViewCounts;
+    (native?.videoIds ?? []).forEach((v, i) => {
+      if (!v.id || pool.seen.has(v.id)) return;
+      pool.seen.add(v.id);
+      pool.videoItems.push({
+        id: v.id,
+        caption: v.title,
+        // The channel-videos page yields a view count per video but no likes,
+        // comments, saves, shares, music or duration. Zero is the honest value.
+        views: views[i] ?? 0,
+        likes: 0, comments: 0, saves: 0, shares: 0,
+        createTime: 0,
+        musicOriginal: false, musicTitle: "", musicArtist: "",
+        duetEnabled: false, stitchEnabled: false, isAd: false, durationMs: 0,
+      });
+    });
+    // Titles come from the capture's own list, which includes the fallback
+    // search results — those have titles but no ids, so they are NOT in the pool.
+    pool.videoTitles.push(...captured.profileTitles);
+    pool.viewCounts.push(...views.filter(v => v > 0));
+    pool.apiVideoCount = pool.videoItems.length;
+    pool.hashtags.push(...extractHashtags([...captured.profileTitles, captured.stats.bio]));
+  },
+};
+
+const youtubeTranscribe: TranscribeTool = {
+  platform: "YouTube",
+  name: "youtube:caption_xml",
+  selectSample(handle, pool) {
+    // VERBATIM selection rule: the first 10 of the channel's videos, in channel
+    // order. NOT temporal — YouTube's video list carries no usable createTime
+    // here, so there is no recent/mid/anchor split to report and `unbucketed`
+    // states that rather than inventing one.
+    const ids = new Set((youtubeVideoIds.get(handle) ?? []).map(v => v.id));
+    return pool
+      .filter(v => ids.has(v.id))
+      .slice(0, 10)
+      .map(item => ({ item, bucket: "unbucketed" as const }));
+  },
+  transcribe(handle, sampled) {
+    const byId = new Map((youtubeVideoIds.get(handle) ?? []).map(v => [v.id, v.title]));
+    return transcribeYouTubeVideos(
+      sampled.map(s => ({ id: s.item.id, title: byId.get(s.item.id) ?? s.item.caption })),
+    );
+  },
+  assemble(_handle, pool, transcripts, sampled) {
+    // Like Instagram: NO engagement signals and NO longitudinal sample. The
+    // YouTube path has always reported sociologicalFieldsComputed: false.
+    const byId = new Map(transcripts.map(t => [t.videoId, t]));
+    const sampledBucketById = new Map(sampled.map(sv => [sv.item.id, sv.bucket]));
+    return {
+      engagementSignals: undefined,
+      longitudinalSample: undefined,
+      discoveredVideoPool: pool.map(v => {
+        const t = byId.get(v.id);
+        return {
+          id: v.id,
+          url: `https://www.youtube.com/watch?v=${v.id}`,
+          caption: v.caption,
+          createTime: v.createTime,
+          views: v.views,
+          likes: 0, comments: 0, saves: 0, shares: 0,
+          musicOriginal: false,
+          musicTitle: undefined,
+          musicArtist: undefined,
+          durationSec: 0,
+          temporalBucket: sampledBucketById.get(v.id),
+          transcriptText: t?.transcript,
+          transcriptWordCount: t?.wordCount,
+          transcriptSource: t?.transcriptSource,
+        };
+      }),
+    };
+  },
+};
+
+/** YouTube's evidence gates — messages VERBATIM from researchYouTubeCreator. */
+const youtubeGate: PlatformToolset["gate"] = (input) => {
+  const capture = input.capture as {
+    stats?: { followerCount?: number; bio?: string };
+    pool?: { videoTitles?: string[] };
+    assessment?: { quotaExhausted?: boolean };
+  } | null;
+  const transcribe = input.transcribe as { transcripts?: unknown[] } | null;
+  const handle = input.handle;
+
+  const transcripts = transcribe?.transcripts ?? [];
+  const videoTitles = capture?.pool?.videoTitles ?? [];
+  const hasContentData = transcripts.length > 0 || videoTitles.length > 0;
+  const hasAnyData = hasContentData
+    || Number(capture?.stats?.followerCount ?? 0) > 0
+    || String(capture?.stats?.bio ?? "").length > 0;
+
+  // ── Gate: quota exhausted with no content (FROZEN) ──
+  // "bio alone produces hallucinated profiles" — the original comment.
+  if (capture?.assessment?.quotaExhausted && !hasContentData) {
+    return {
+      ok: false,
+      code: "TOO_MANY_REQUESTS",
+      message: `The YouTube data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
+    };
+  }
+
+  // ── Gate: truly nothing available (FROZEN) ──
+  if (!capture || !hasAnyData) {
+    return {
+      ok: false,
+      code: "NOT_FOUND",
+      message: `No public content found for @${handle}. Please verify the YouTube handle or channel URL is correct and that the channel is public.`,
+    };
+  }
+
+  return { ok: true };
+};
+
+export const YOUTUBE_TOOLSET: PlatformToolset = {
+  capture: youtubeCapture,
+  // The contract's optional-phase semantics, used for the first time: YouTube
+  // has no augmentation step, so the augment phase completes as a no-op.
+  augment: null,
+  transcribe: youtubeTranscribe,
+  gate: youtubeGate,
+  profileUrl: (handle) => `https://www.youtube.com/@${handle}`,
+  // No platform-specific evidence block.
+  evidenceExtras: () => "",
+  // VERBATIM from researchYouTubeCreator: avgViews over followers. YouTube
+  // exposes no per-video likes or comments on this path, so there is no
+  // interaction rate to compute.
+  engagementRate: ({ followerCount, avgViews }) =>
+    followerCount > 0 && avgViews > 0
+      ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+      : 0,
+};
+
 /**
  * Tool registry. S4 adds Instagram and YouTube entries here — that is the
  * WHOLE change at the architecture level.
@@ -722,8 +915,7 @@ export const INSTAGRAM_TOOLSET: PlatformToolset = {
 const REGISTRY: Partial<Record<PlatformName, PlatformToolset>> = {
   TikTok: TIKTOK_TOOLSET,
   Instagram: INSTAGRAM_TOOLSET,
-  // YouTube: its own session — capture and transcribe are fused in one call,
-  // it emits no scrape_events at all, and it samples non-temporally.
+  YouTube: YOUTUBE_TOOLSET,
 };
 
 export function toolsetFor(platform: PlatformName): PlatformToolset {

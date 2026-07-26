@@ -62,7 +62,7 @@ export interface SubmitRequest {
  * platform is queueable only once it has a registered toolset, and toolsetFor
  * throws loudly for the rest rather than producing an empty analysis.
  */
-export type QueueablePlatform = "TikTok" | "Instagram";
+export type QueueablePlatform = "TikTok" | "Instagram" | "YouTube";
 
 export interface SubmittedCampaign {
   runId: string;
@@ -293,7 +293,7 @@ async function recordTerminalFailure(
  */
 async function processCampaign(runId: string, subjectHint: string, deps: CreatorCampaignDeps): Promise<CampaignOutcome | null> {
   const [handle, platform] = subjectHint.split("@");
-  if (platform !== "TikTok" && platform !== "Instagram") {
+  if (platform !== "TikTok" && platform !== "Instagram" && platform !== "YouTube") {
     console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
     return null;
   }

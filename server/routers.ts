@@ -990,9 +990,10 @@ export const appRouter = router({
     submit: publicProcedure
       .input(z.object({
         handles: z.array(z.string().min(1)).min(1).max(50),
-        // S4: Instagram is registered behind the same contract. YouTube stays
-        // out until its own session — toolsetFor throws for it, loudly.
-        platform: z.enum(["TikTok", "Instagram"]),
+        // S4/S4b: all three platforms behind the same contract. A platform is
+        // queueable only once it has a registered toolset; toolsetFor still
+        // throws loudly for anything else.
+        platform: z.enum(["TikTok", "Instagram", "YouTube"]),
         /** Session 7: required to proceed when a handle already exists. */
         confirmDuplicate: z.boolean().optional(),
       }))
@@ -1163,13 +1164,15 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Creator profile not found" });
-        const platform = String(existing.platform).toLowerCase() === "instagram" ? "Instagram" as const
-          : String(existing.platform).toLowerCase() === "tiktok" ? "TikTok" as const
+        const lower = String(existing.platform).toLowerCase();
+        const platform = lower === "instagram" ? "Instagram" as const
+          : lower === "tiktok" ? "TikTok" as const
+          : lower === "youtube" ? "YouTube" as const
           : null;
         if (!platform) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: `Re-analysis supports TikTok and Instagram (this profile is ${existing.platform}). YouTube lands in its own session.`,
+            message: `Re-analysis supports TikTok, Instagram and YouTube (this profile is ${existing.platform}).`,
           });
         }
         const campaigns = await submitCampaigns([{ handle: existing.handle ?? input.id, platform }]);

@@ -47,13 +47,21 @@ describe("platform tool seam", () => {
     expect(ts.transcribe.name).toBe("instagram:reel_speech_to_text");
   });
 
+  it("YouTube is registered, with a NULL augment tool (S4b)", () => {
+    expect(registeredPlatforms()).toContain("YouTube");
+    const ts = toolsetFor("YouTube");
+    expect(ts.capture.name).toBe("youtube:channel_html");
+    expect(ts.transcribe.name).toBe("youtube:caption_xml");
+    // The contract's optional-phase semantics, exercised for the first time:
+    // YouTube has no augmentation step and says so, rather than registering a
+    // tool that does nothing.
+    expect(ts.augment).toBeNull();
+  });
+
   it("an unregistered platform still fails LOUDLY", () => {
     // The alternative — silently doing nothing — is how a platform ends up
-    // producing empty analyses that look successful. YouTube is deliberately
-    // NOT registered: it carries the capture/transcribe split, telemetry from
-    // zero, and non-temporal sampling, and gets its own session.
-    expect(registeredPlatforms()).not.toContain("YouTube");
-    expect(() => toolsetFor("YouTube")).toThrow(/No phase toolset registered for YouTube/);
+    // producing empty analyses that look successful.
+    expect(() => toolsetFor("Twitter" as never)).toThrow(/No phase toolset registered/);
   });
 
   it("the transcribe tool delegates to the FROZEN 6-3-3 sampler", () => {

@@ -9,7 +9,7 @@
  * from the embedded ytInitialData JSON.
  */
 
-import { fetchHtml } from "../httpClient";
+import { fetchHtml, recordScrapeEvent } from "../httpClient";
 import { extractYtInitialData, navigatePath, extractTextRuns, extractSimpleText, parseViewCount } from "./searchScraper";
 
 // ─── Response Types (mirror Forge API shapes) ─────────────────────────────────
@@ -59,13 +59,31 @@ export async function scrapeYouTubeChannelDetails(
     ? `https://www.youtube.com/channel/${channelIdOrHandle}`
     : `https://www.youtube.com/@${channelIdOrHandle}`;
 
-  const html = await fetchHtml(url, {
-    extraHeaders: { Referer: "https://www.youtube.com/" },
-  });
+  // S4b instrumentation — see searchScraper. One event per attempt.
+  const started = Date.now();
+  let html: string;
+  try {
+    html = await fetchHtml(url, { extraHeaders: { Referer: "https://www.youtube.com/" } });
+  } catch (err) {
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#channel_details`,
+      failureReason: `channel channel_details: ${(err as Error).message}`.slice(0, 500),
+      durationMs: Date.now() - started,
+    });
+    throw err;
+  }
 
   const ytData = extractYtInitialData(html);
   if (!ytData) {
     console.warn("[channelScraper] No ytInitialData found for channel", channelIdOrHandle);
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#channel_details`,
+      responseSizeBytes: html.length,
+      failureReason: "channel channel_details: no ytInitialData on channel page",
+      durationMs: Date.now() - started,
+    });
     return {
       title: channelIdOrHandle,
       description: "",
@@ -163,6 +181,13 @@ export async function scrapeYouTubeChannelDetails(
     }
   }
 
+  recordScrapeEvent({
+    platform: "youtube", scrapeMethod: "youtube_html",
+    urlRequested: `${url}#channel_details:success`,
+    responseSizeBytes: html.length,
+    durationMs: Date.now() - started,
+  });
+
   return {
     title,
     description,
@@ -185,6 +210,7 @@ export async function scrapeYouTubeChannelDetails(
 export async function scrapeYouTubeChannelVideos(
   channelIdOrHandle: string,
 ): Promise<YouTubeChannelVideosResponse> {
+  const started = Date.now();
   const isChannelId = channelIdOrHandle.startsWith("UC");
   const url = isChannelId
     ? `https://www.youtube.com/channel/${channelIdOrHandle}/videos`
@@ -197,6 +223,13 @@ export async function scrapeYouTubeChannelVideos(
   const ytData = extractYtInitialData(html);
   if (!ytData) {
     console.warn("[channelScraper] No ytInitialData found for channel videos", channelIdOrHandle);
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#channel_videos`,
+      responseSizeBytes: html.length,
+      failureReason: "channel channel_videos: no ytInitialData on videos page",
+      durationMs: Date.now() - started,
+    });
     return { contents: [] };
   }
 
@@ -211,6 +244,13 @@ export async function scrapeYouTubeChannelVideos(
 
   if (!Array.isArray(tabs)) {
     console.warn("[channelScraper] No tabs found in ytInitialData");
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#channel_videos`,
+      responseSizeBytes: html.length,
+      failureReason: "channel channel_videos: no tabs in ytInitialData (shape drift)",
+      durationMs: Date.now() - started,
+    });
     return { contents };
   }
 
@@ -263,6 +303,13 @@ export async function scrapeYouTubeChannelVideos(
   }
 
   console.log(`[channelScraper] Found ${contents.length} videos for channel ${channelIdOrHandle}`);
+  recordScrapeEvent({
+    platform: "youtube", scrapeMethod: "youtube_html",
+    urlRequested: `${url}#channel_videos:${contents.length > 0 ? "success" : "empty"}`,
+    responseSizeBytes: html.length,
+    failureReason: contents.length > 0 ? undefined : "channel channel_videos: 0 videos parsed",
+    durationMs: Date.now() - started,
+  });
   return { contents };
 }
 

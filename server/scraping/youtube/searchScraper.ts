@@ -8,7 +8,7 @@
  * as the Forge API response.
  */
 
-import { fetchHtml } from "../httpClient";
+import { fetchHtml, recordScrapeEvent } from "../httpClient";
 
 // ─── Response Types (mirror Forge API shapes) ─────────────────────────────────
 
@@ -53,15 +53,40 @@ export async function searchYouTube(
 
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}${spParam}`;
 
-  const html = await fetchHtml(url, {
-    extraHeaders: {
-      Referer: "https://www.youtube.com/",
-    },
-  });
+  // S4b instrumentation: YouTube emitted NO scrape_events at all, so every
+  // YouTube call was invisible to capture health and the diagnostics panel. One
+  // event per ATTEMPT, matching TikTok's `#strategy=outcome` convention so the
+  // failure taxonomy can read all three platforms the same way. Run id is
+  // stamped automatically from the ambient analysis-run context.
+  const strategy = `search_${type ?? "any"}`;
+  const started = Date.now();
+  let html: string;
+  try {
+    html = await fetchHtml(url, {
+      extraHeaders: {
+        Referer: "https://www.youtube.com/",
+      },
+    });
+  } catch (err) {
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#${strategy}`,
+      failureReason: `search ${strategy}: ${(err as Error).message}`.slice(0, 500),
+      durationMs: Date.now() - started,
+    });
+    throw err;
+  }
 
   const ytData = extractYtInitialData(html);
   if (!ytData) {
     console.warn("[youtubeSearch] No ytInitialData found in search results page");
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#${strategy}`,
+      responseSizeBytes: html.length,
+      failureReason: `search ${strategy}: no ytInitialData in results page`,
+      durationMs: Date.now() - started,
+    });
     return { contents: [] };
   }
 
@@ -78,6 +103,13 @@ export async function searchYouTube(
 
   if (!Array.isArray(primaryContents)) {
     console.warn("[youtubeSearch] Could not find search results in ytInitialData");
+    recordScrapeEvent({
+      platform: "youtube", scrapeMethod: "youtube_html",
+      urlRequested: `${url}#${strategy}`,
+      responseSizeBytes: html.length,
+      failureReason: `search ${strategy}: results not found in ytInitialData (shape drift)`,
+      durationMs: Date.now() - started,
+    });
     return { contents };
   }
 
@@ -125,6 +157,13 @@ export async function searchYouTube(
   }
 
   console.log(`[youtubeSearch] Found ${contents.length} results for "${query}"`);
+  recordScrapeEvent({
+    platform: "youtube", scrapeMethod: "youtube_html",
+    urlRequested: `${url}#${strategy}:${contents.length > 0 ? "success" : "empty"}`,
+    responseSizeBytes: html.length,
+    failureReason: contents.length > 0 ? undefined : `search ${strategy}: 0 results parsed`,
+    durationMs: Date.now() - started,
+  });
   return { contents };
 }
 
