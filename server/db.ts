@@ -8,7 +8,7 @@ import {
   nicheTaxonomy, archetypeTransitions, audienceMentions,
   llmInvocations, scrapeEvents,
   matchScores, matchNarratives, matchWarnings, matchOverlaps, matchContentDirections,
-  semanticDocuments, pipelineRuns, platformHandles,
+  semanticDocuments, pipelineRuns, platformHandles, analysisPhaseState,
   type InsertSubject, type InsertObservation,
   type InsertCreatorObservation, type InsertBrandObservation,
   type InsertSignalValue, type InsertDecodedSignal, type InsertContentItem,
@@ -115,6 +115,72 @@ export type RunOutcomeStatus =
  *
  * Never throws — telemetry must not break a run.
  */
+// ─── Phase ledger — SHADOW BANKING (phased architecture S1) ──────────────────
+//
+// WRITE-ONLY OBSERVATION. The monolith records each stage's output here as it
+// runs so a campaign's phase-by-phase state is visible in the DB for the first
+// time. NOTHING reads this table to make a decision, nothing resumes from it,
+// and no execution path branches on it — S1 changes zero execution semantics.
+// Phase execution (S2) and the scheduler/resumption (S3) come later.
+//
+// Failures are swallowed by design: observation must never be able to fail an
+// analysis. A missing ledger row costs visibility, not data.
+
+export interface PhaseStateWrite {
+  runId: string;
+  /** handle+platform — findable before a subject row exists. */
+  subjectHint: string;
+  phase: "capture" | "augment" | "transcribe" | "derive" | "extract_commit";
+  tool?: string;
+  status: "pending" | "running" | "complete" | "partial" | "blocked" | "genuine_empty" | "failed";
+  attemptCount?: number;
+  failureClass?: "transient" | "structural" | "genuine_empty";
+  /** The phase's durable output — what a later phase would read instead of
+   *  receiving values through a caller's locals. */
+  output?: unknown;
+}
+
+export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const now = new Date();
+    await db.insert(analysisPhaseState).values({
+      runId: w.runId,
+      subjectHint: w.subjectHint.slice(0, 160),
+      phase: w.phase,
+      tool: w.tool?.slice(0, 64) ?? null,
+      status: w.status,
+      attemptCount: w.attemptCount ?? 1,
+      failureClass: w.failureClass ?? null,
+      output: (w.output ?? null) as Record<string, unknown> | null,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [analysisPhaseState.runId, analysisPhaseState.phase],
+      set: {
+        tool: w.tool?.slice(0, 64) ?? null,
+        status: w.status,
+        attemptCount: w.attemptCount ?? 1,
+        failureClass: w.failureClass ?? null,
+        output: (w.output ?? null) as Record<string, unknown> | null,
+        updatedAt: now,
+      },
+    });
+  } catch (err) {
+    console.warn(`[db] recordPhaseState(${w.runId}, ${w.phase}) failed (ignored):`, (err as Error).message);
+  }
+}
+
+/** Read a run's ledger rows (diagnostics / verification; no execution path
+ *  consumes this in S1). */
+export async function getPhaseState(runId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(analysisPhaseState)
+    .where(eq(analysisPhaseState.runId, runId))
+    .orderBy(analysisPhaseState.createdAt);
+}
+
 // ─── Capture health (scraper-reliability Part 3 — REPORTING ONLY) ────────────
 // One honest per-run assessment of how collection went, derived from what the
 // scrape_events actually record. It feeds pipeline_runs.error_log and the run

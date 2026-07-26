@@ -18,6 +18,7 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
+  recordPhaseState,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -946,6 +947,23 @@ export const appRouter = router({
               console.warn(`[V2 Pipeline] ⚠️ Creator persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
             }
             const actualSubjectId = "subjectId" in persistResult ? persistResult.subjectId : null;
+
+            // Shadow banking (S1): P5 extract_commit. Write-only observation —
+            // nothing reads it, nothing resumes from it, no execution branch.
+            void recordPhaseState({
+              runId,
+              subjectHint: `${extracted.handle}@${extracted.platform}`,
+              phase: "extract_commit",
+              tool: "gemini:extractCreatorProfile+persistCreatorToV2",
+              status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
+              output: {
+                subjectId: actualSubjectId,
+                observationId: "observationId" in persistResult ? persistResult.observationId : null,
+                persistence,
+                evidenceSummaryBytes: research.evidenceSummary?.length ?? 0,
+                transcriptCount: researchData.transcriptCount ?? 0,
+              },
+            });
 
             // Terminal telemetry (status/detail) is written by the wrapper on
             // return; the payload below is identical to the old inline

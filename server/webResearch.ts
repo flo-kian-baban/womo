@@ -51,7 +51,8 @@ import { fetchBrandReviews } from "./reviewResearch";
 import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
-import { insertScrapeEvent } from "./db";
+import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db";
+import { currentRunId } from "./_core/runContext";
 import { TRANSCRIPT_SOURCE, isSpeechTranscript } from "@shared/transcriptSource";
 import { isStopword } from "@shared/stopwords";
 import { isAuthorMatch } from "@shared/authorMatch";
@@ -1441,6 +1442,31 @@ export interface BankedCreatorEvidence {
 }
 
 /**
+ * Shadow banking helper (phased architecture S1) — WRITE-ONLY.
+ *
+ * Records a stage's output to analysis_phase_state as the monolith runs. The
+ * run id comes from the ambient analysis-run context (the same AsyncLocalStorage
+ * that stamps scrape_events / llm_invocations), so no signature changes and no
+ * value is threaded. Silent no-op outside an analysis run.
+ *
+ * Callers use `void bankPhase(...)` — never awaited: observation must not add
+ * latency to the pipeline, and recordPhaseState already swallows its own
+ * errors so nothing here can fail an analysis.
+ */
+function bankPhase(
+  subjectHint: string,
+  phase: PhaseStateWrite["phase"],
+  tool: string,
+  status: PhaseStateWrite["status"],
+  output: unknown,
+  failureClass?: PhaseStateWrite["failureClass"],
+): Promise<void> {
+  const runId = currentRunId();
+  if (!runId) return Promise.resolve();
+  return recordPhaseState({ runId, subjectHint, phase, tool, status, output, failureClass });
+}
+
+/**
  * Env-gated fixture dump (`WOMO_EVIDENCE_FIXTURE=<path>`): writes a REAL run's
  * banked struct to disk so the identity harness replays genuine stage outputs
  * rather than hand-made ones. Inert unless the env var is set — normal runs
@@ -1777,6 +1803,8 @@ function emptyCaptureMessage(
 
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
+  /** Label for this campaign's shadow-banking rows (S1). */
+  const subjectHint = `${handle}@TikTok`;
 
   let secUid = "";
   let displayName = handle;
@@ -1838,9 +1866,24 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     }
 
     console.log(`[webResearch] @${handle}: scrapeTikTokProfile returned followerCount=${followerCount}, videos=${itemList.length}`);
+
+    // Shadow banking (S1): record what P1 capture produced. Write-only — no
+    // execution path reads this. Not awaited: observation must never add
+    // latency to, or be able to fail, the analysis.
+    void bankPhase(subjectHint, "capture", "tiktok:profile_xhr_scroll",
+      captureAssessment?.genuineEmpty ? "genuine_empty" : itemList.length > 0 ? "complete" : "partial", {
+        stats: { displayName, bio, followerCount, followingCount, videoCount, totalLikes, secUid, location },
+        poolFromProfile: itemList.length,
+        profileTitles: htmlTitles,
+        profileViewCounts: viewCounts,
+        assessment: captureAssessment ?? null,
+      });
   } catch (err) {
     if (isQuotaError(err)) quotaExhausted = true;
     console.warn("[webResearch] TikTok profile scrape failed:", err);
+    void bankPhase(subjectHint, "capture", "tiktok:profile_xhr_scroll", "failed", {
+      error: (err as Error).message.slice(0, 300),
+    }, isQuotaError(err) ? "transient" : undefined);
   }
 
   // Step 2: Fetch transcripts (primary pipeline) + collect video titles/hashtags.
@@ -1852,6 +1895,19 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
   for (const vc of transcriptViewCounts) {
     if (vc > 0 && !viewCounts.includes(vc)) viewCounts.push(vc);
   }
+
+  // Shadow banking (S1): P2 augment and P3 transcribe are fused inside
+  // fetchTikTokTranscripts today; they are banked separately because they are
+  // separate phases in the target architecture (S2 splits the execution).
+  void bankPhase(subjectHint, "augment", "tiktok:search_xhr_scroll",
+    searchQuotaExhausted ? "blocked" : searchTitles.length > 0 ? "complete" : "partial", {
+      searchTitles, searchHashtags, quotaExhausted: searchQuotaExhausted,
+    }, searchQuotaExhausted ? "transient" : undefined);
+  void bankPhase(subjectHint, "transcribe", "tiktok:transcriptStrategies",
+    transcripts.length > 0 ? "complete" : "partial", {
+      transcripts, musicTitles, engagementSignals, longitudinalSample,
+      discoveredVideoPool, foreignVideosRejected,
+    });
 
   // NO YouTube fallback — removed entirely to prevent hallucination
 
@@ -1996,6 +2052,12 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     },
     derived: { contentThemeLabels, decodedSymbols: tikTokDecodedSymbols },
   };
+
+  // Shadow banking (S1): P4 derive — the two independent LLM outputs.
+  void bankPhase(subjectHint, "derive", "gemini:themes+symbols",
+    contentThemeLabels.length > 0 && tikTokDecodedSymbols ? "complete" : "partial", {
+      contentThemeLabels, decodedSymbols: tikTokDecodedSymbols,
+    });
 
   maybeDumpEvidenceFixture(banked);
 
