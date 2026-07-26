@@ -1559,6 +1559,147 @@ function maybeDumpEvidenceFixture(banked: BankedCreatorEvidence): void {
   }
 }
 
+// ─── M3: resume from banked ledger output (phased architecture S2, Part 1) ───
+//
+// The failure class this exists for: a campaign whose capture/augment/
+// transcribe all succeeded but which died at derive or extract_commit. Three
+// historical runs lost everything that way when the Gemini key went dead —
+// minutes of scraping discarded because the last two cheap steps failed.
+//
+// Resume re-runs ONLY phases 4-5 from banked output. It does NOT re-scrape.
+// The full monolith path is untouched and remains the default.
+//
+// Byte-identity is the requirement, not a nicety: a resumed run must produce
+// the same evidence as a straight-through run. That holds because (a) the
+// ledger column is `json`, so banked values round-trip byte-exactly
+// (womo_0010), and (b) resume reconstructs `allTitles` / `viewCounts` with the
+// SAME merge order the monolith uses and then calls the SAME pure functions.
+
+/** What the banked phases must contain for a resume to be possible. */
+export interface ResumableBankedPhases {
+  capture: {
+    stats: {
+      displayName: string; bio: string; followerCount: number; followingCount: number;
+      videoCount: number; totalLikes: number; secUid?: string; location: string;
+    };
+    profileTitles: string[];
+    profileViewCounts: number[];
+  };
+  augment: { searchTitles: string[]; searchHashtags: string[] };
+  transcribe: {
+    transcripts: TranscriptEntry[];
+    musicTitles: string[];
+    engagementSignals: EngagementSignals;
+    longitudinalSample: LongitudinalSample;
+    discoveredVideoPool: CreatorResearchResult["discoveredVideoPool"];
+    foreignVideosRejected: number;
+    transcriptViewCounts: number[];
+  };
+}
+
+/**
+ * Rebuild the merged title and view-count lists exactly as the monolith does.
+ * PURE and exported so the identity harness can pin the merge order — this is
+ * the one place a resumed run could silently diverge.
+ */
+export function reconstructMergedInputs(banked: ResumableBankedPhases): {
+  allTitles: string[]; viewCounts: number[];
+} {
+  // Monolith: Array.from(new Set([...searchTitles, ...htmlTitles, ...popularTitles])).slice(0, 30)
+  // popularTitles is always empty in the TikTok path.
+  const allTitles = Array.from(new Set([
+    ...banked.augment.searchTitles,
+    ...banked.capture.profileTitles,
+  ])).slice(0, 30);
+
+  // Monolith: profile view counts first, then transcript view counts merged
+  // in order, skipping zeros and duplicates.
+  const viewCounts = [...banked.capture.profileViewCounts];
+  for (const vc of banked.transcribe.transcriptViewCounts) {
+    if (vc > 0 && !viewCounts.includes(vc)) viewCounts.push(vc);
+  }
+
+  return { allTitles, viewCounts };
+}
+
+/**
+ * Re-run phases 4-5's research half from banked output: derive (the two LLM
+ * calls) then assembly. Returns the same CreatorResearchResult a
+ * straight-through run would produce, so the caller can extract + persist with
+ * the existing code path.
+ */
+export async function resumeResearchFromBanked(
+  handle: string,
+  banked: ResumableBankedPhases,
+): Promise<CreatorResearchResult> {
+  const { capture, augment, transcribe } = banked;
+  const { allTitles, viewCounts } = reconstructMergedInputs(banked);
+
+  // Identical pure derivations, identical inputs — see computeDeriveInputs.
+  const { totalViews, avgViews, engagementRate, topHashtags, rawKeywords, combinedTranscriptText } =
+    computeDeriveInputs({
+      searchHashtags: augment.searchHashtags,
+      allTitles,
+      bio: capture.stats.bio,
+      transcripts: transcribe.transcripts,
+      viewCounts,
+      followerCount: capture.stats.followerCount,
+      engagementSignals: transcribe.engagementSignals,
+    });
+
+  // Phase 4 — derive. Same two independent calls, launched together, with the
+  // local work running while they are in flight (as in the monolith).
+  const themesPromise = translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, capture.stats.bio, combinedTranscriptText);
+  const symbolsPromise = decodeCreatorSymbols({
+    handle,
+    bio: capture.stats.bio,
+    videoTitles: allTitles,
+    hashtags: topHashtags,
+    transcriptExcerpts: transcribe.transcripts.map(t => t.transcript),
+  });
+
+  const localPrepared = computeLocalPrepared({
+    allTitles, topHashtags, bio: capture.stats.bio,
+    location: capture.stats.location, combinedTranscriptText,
+    transcripts: transcribe.transcripts,
+  });
+
+  const [contentThemeLabels, decodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
+
+  const bankedEvidence: BankedCreatorEvidence = {
+    schemaVersion: 1,
+    handle,
+    platform: "TikTok",
+    capture: {
+      displayName: capture.stats.displayName,
+      bio: capture.stats.bio,
+      followerCount: capture.stats.followerCount,
+      followingCount: capture.stats.followingCount,
+      videoCount: capture.stats.videoCount,
+      totalLikes: capture.stats.totalLikes,
+      location: localPrepared.location,
+      profileUrl: `https://www.tiktok.com/@${handle}`,
+    },
+    collection: {
+      transcripts: transcribe.transcripts,
+      musicTitles: transcribe.musicTitles,
+      engagementSignals: transcribe.engagementSignals,
+      longitudinalSample: transcribe.longitudinalSample,
+      discoveredVideoPool: transcribe.discoveredVideoPool,
+      foreignVideosRejected: transcribe.foreignVideosRejected,
+    },
+    prepared: {
+      allTitles, topHashtags, rawKeywords,
+      contentThemes: localPrepared.contentThemes,
+      transcriptExcerpts: localPrepared.transcriptExcerpts,
+      totalViews, avgViews, engagementRate,
+    },
+    derived: { contentThemeLabels, decodedSymbols },
+  };
+
+  return assembleCreatorResearchResult(bankedEvidence);
+}
+
 /**
  * Prepared-evidence derivations, extracted as PURE functions (phased
  * architecture S2). Split in two to preserve the monolith's deliberate
@@ -2065,6 +2206,10 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     transcripts.length > 0 ? "complete" : "partial", {
       transcripts, musicTitles, engagementSignals, longitudinalSample,
       discoveredVideoPool, foreignVideosRejected,
+      // Resume needs the view counts this stage contributed, because the
+      // monolith merges them into the profile's list IN ORDER with dedup —
+      // reproducing that exactly is what makes a resumed run byte-identical.
+      transcriptViewCounts,
     });
 
   // NO YouTube fallback — removed entirely to prevent hallucination

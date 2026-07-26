@@ -18,7 +18,7 @@ import {
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getEvidenceSnapshotByObservation,
   getLatestObservationId,
-  recordPhaseState,
+  recordPhaseState, loadResumableBankedPhases,
   // V2 read functions
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
@@ -30,7 +30,7 @@ import { extractCreatorProfile, extractBrandProfile, generateFITNarrative, build
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
-import { researchCreator, researchBrand } from "./webResearch";
+import { researchCreator, researchBrand, resumeResearchFromBanked, type ResumableBankedPhases } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import type { RunOutcomeStatus } from "./db";
 import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
@@ -1263,6 +1263,121 @@ export const appRouter = router({
           },
           value: { profile: updated, persistence, extracted, runId },
         };
+          },
+        });
+      }),
+
+    // ─── M3: resume a run from banked ledger output (phased architecture S2) ──
+    // The dead-key class: capture/augment/transcribe all succeeded, then derive
+    // or extract_commit failed and minutes of scraping were discarded. This
+    // re-runs ONLY phases 4-5 from the ledger — no re-scraping.
+    //
+    // Minimal trigger by design: an explicit runId. The analyst-facing surface
+    // (a "resume" button on a failed run) is S6; the scheduler that requeues
+    // automatically is S3. Until then this is the manual escape hatch.
+    resumeRun: publicProcedure
+      .input(z.object({ runId: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        const banked = await loadResumableBankedPhases(input.runId);
+        if (!banked) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Run ${input.runId} is not resumable — capture, augment and transcribe must all have banked usable output. Re-run the analysis instead.`,
+          });
+        }
+        const [handle, platform] = banked.subjectHint.split("@");
+        if (platform !== "TikTok") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Resume currently supports TikTok campaigns only (this run is ${platform}). Instagram/YouTube land in S4.`,
+          });
+        }
+
+        // A resume is its own analysis run for telemetry, wrapped in the same
+        // instrumented machinery as analyze/reanalyze.
+        const runId = newRunId();
+        return runInstrumentedAnalysis({
+          runId,
+          runType: "creator_resume",
+          timeoutMs: ENV.analysisTimeoutMs,
+          timeoutMessage: `Resume timed out after ${Math.round(ENV.analysisTimeoutMs / 60000)} minute(s). Please try again.`,
+          work: async () => {
+            const research = await resumeResearchFromBanked(
+              handle!, banked.phases as unknown as ResumableBankedPhases,
+            );
+
+            const existing = await findExistingCreatorByHandle(handle!, "TikTok");
+            const extracted = await extractCreatorProfile(handle!, "TikTok", research.evidenceSummary);
+
+            const persistResult = await persistCreatorToV2({
+              handle: handle!,
+              platform: "TikTok",
+              profileUrl: research.profileUrl,
+              displayName: extracted.displayName,
+              pronouns: extracted.pronouns,
+              extracted,
+              researchData: {
+                followerCount: research.followerCount || undefined,
+                followingCount: research.followingCount || undefined,
+                totalLikes: research.totalLikes || undefined,
+                videoCount: research.videoCount || undefined,
+                totalViews: research.totalViews || undefined,
+                avgViews: research.avgViews || undefined,
+                engagementRate: research.engagementRate || undefined,
+                location: research.location || undefined,
+                bio: research.bio || undefined,
+                rawKeywords: research.rawKeywords?.length ? research.rawKeywords : undefined,
+                contentThemeLabels: research.contentThemeLabels?.length ? research.contentThemeLabels : undefined,
+                topHashtags: research.topHashtags?.length ? research.topHashtags : undefined,
+                recentVideoTitles: research.recentVideoTitles?.length ? research.recentVideoTitles : undefined,
+                transcriptCount: research.transcriptCount ?? 0,
+                transcriptExcerpts: research.transcriptExcerpts || undefined,
+                decodedSymbols: research.decodedSymbols ?? undefined,
+                culturalVelocity: research.culturalVelocity ?? undefined,
+                dataConfidenceLevel: research.dataConfidenceLevel ?? undefined,
+                sociologicalFieldsComputed: research.sociologicalFieldsComputed,
+                foreignVideosRejected: research.foreignVideosRejected,
+                longitudinalSampleJson: research.longitudinalSample as unknown as Record<string, unknown> ?? undefined,
+                discoveredVideoPoolJson: research.discoveredVideoPool?.length ? research.discoveredVideoPool : undefined,
+                transcripts: research.transcripts?.length ? research.transcripts : undefined,
+              },
+              evidenceSnapshot: buildCreatorEvidenceSnapshotPayload(
+                handle!, "TikTok", research.evidenceSummary, research,
+              ),
+            });
+            const persistence = summarizePersistence(persistResult);
+
+            void recordPhaseState({
+              runId,
+              subjectHint: banked.subjectHint,
+              phase: "extract_commit",
+              tool: "gemini:extractCreatorProfile+persistCreatorToV2 (resumed)",
+              status: persistence.saved === "full" ? "complete" : persistence.saved === "partial" ? "partial" : "failed",
+              output: {
+                resumedFromRunId: input.runId,
+                subjectId: "subjectId" in persistResult ? persistResult.subjectId : null,
+                observationId: "observationId" in persistResult ? persistResult.observationId : null,
+                persistence,
+                evidenceSummaryBytes: research.evidenceSummary?.length ?? 0,
+              },
+            });
+
+            const subjectId = "subjectId" in persistResult ? persistResult.subjectId : existing?.subjectId ?? null;
+            return {
+              status: (persistence.saved === "full" ? "success" : persistence.saved === "partial" ? "partial" : "saved_none") as RunOutcomeStatus,
+              detail: { resumedFromRunId: input.runId },
+              captureEvidence: {
+                transcripts: research.transcriptCount ?? 0,
+                titles: research.recentVideoTitles?.length ?? 0,
+              },
+              value: {
+                profile: subjectId ? await getCreatorProfileById(subjectId) : null,
+                persistence,
+                extracted,
+                runId,
+                resumedFromRunId: input.runId,
+              },
+            };
           },
         });
       }),

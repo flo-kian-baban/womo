@@ -171,8 +171,35 @@ export async function recordPhaseState(w: PhaseStateWrite): Promise<void> {
   }
 }
 
-/** Read a run's ledger rows (diagnostics / verification; no execution path
- *  consumes this in S1). */
+/**
+ * Load a run's banked phases IF it is resumable (S2 Part 1 / M3).
+ *
+ * Resumable = capture + augment + transcribe all reached a usable outcome
+ * (complete or partial) and banked output. Returns null otherwise, so the
+ * caller can refuse cleanly rather than resume from half a corpus.
+ */
+export async function loadResumableBankedPhases(runId: string): Promise<{
+  subjectHint: string;
+  phases: Record<string, unknown>;
+} | null> {
+  const rows = await getPhaseState(runId);
+  if (rows.length === 0) return null;
+  const usable = new Map<string, unknown>();
+  for (const r of rows) {
+    if ((r.status === "complete" || r.status === "partial") && r.output != null) {
+      usable.set(r.phase, r.output);
+    }
+  }
+  for (const required of ["capture", "augment", "transcribe"]) {
+    if (!usable.has(required)) return null;
+  }
+  return {
+    subjectHint: rows[0]!.subjectHint,
+    phases: Object.fromEntries(usable),
+  };
+}
+
+/** Read a run's ledger rows (diagnostics / verification). */
 export async function getPhaseState(runId: string) {
   const db = await getDb();
   if (!db) return [];

@@ -39,8 +39,10 @@ import { describe, expect, it } from "vitest";
 import {
   assembleCreatorResearchResult,
   buildCreatorEvidenceSummary,
+  reconstructMergedInputs,
   type BankedCreatorEvidence,
   type CreatorResearchResult,
+  type ResumableBankedPhases,
 } from "./webResearch";
 import { formatDecodedSymbolsBlock } from "./symbolDecoder";
 import { buildCreatorEvidenceSnapshotPayload } from "./routers";
@@ -159,6 +161,55 @@ describe("evidence identity harness", () => {
       const again = assembleCreatorResearchResult(banked);
       expect(JSON.stringify(again)).toBe(JSON.stringify(current));
       expect(JSON.stringify(banked)).toBe(before);
+    });
+
+    it("RESUME: banked phases reconstruct the SAME merged inputs the monolith produced", () => {
+      // M3 (S2 Part 1). A resumed run rebuilds allTitles / viewCounts from the
+      // ledger instead of from in-memory locals. If that merge order drifts by
+      // one entry, every downstream derivation shifts — so it is pinned here
+      // against the values the straight-through run banked.
+      //
+      // Split the fixture's prepared values back into the per-phase banked
+      // shape a resume would read, then prove the reconstruction matches.
+      const banked: ResumableBankedPhases = {
+        capture: {
+          stats: {
+            displayName: current.displayName, bio: current.bio,
+            followerCount: current.followerCount, followingCount: current.followingCount ?? 0,
+            videoCount: current.videoCount, totalLikes: current.totalLikes,
+            location: current.location,
+          },
+          // The monolith's search titles come first and already subsume the
+          // profile titles after dedup; an empty profile list is the strictest
+          // case for proving order is preserved.
+          profileTitles: [],
+          profileViewCounts: [],
+        },
+        augment: { searchTitles: current.recentVideoTitles ?? [], searchHashtags: [] },
+        transcribe: {
+          transcripts: current.transcripts ?? [],
+          musicTitles: [],
+          engagementSignals: { totalSampled: 0 } as never,
+          longitudinalSample: current.longitudinalSample as never,
+          discoveredVideoPool: current.discoveredVideoPool,
+          foreignVideosRejected: current.foreignVideosRejected ?? 0,
+          transcriptViewCounts: [],
+        },
+      };
+
+      const { allTitles } = reconstructMergedInputs(banked);
+      expect(allTitles).toEqual(current.recentVideoTitles);
+    });
+
+    it("RESUME: the view-count merge preserves profile-first order with dedup", () => {
+      const banked = {
+        capture: { stats: {} as never, profileTitles: [], profileViewCounts: [100, 200] },
+        augment: { searchTitles: [], searchHashtags: [] },
+        transcribe: { transcriptViewCounts: [200, 300, 0, 400] },
+      } as unknown as ResumableBankedPhases;
+      // Monolith order: profile counts first, then transcript counts appended
+      // in order, skipping zeros and values already present.
+      expect(reconstructMergedInputs(banked).viewCounts).toEqual([100, 200, 300, 400]);
     });
 
     it("exercises the evidence blocks that make this fixture meaningful", () => {
