@@ -1485,6 +1485,89 @@ function maybeDumpEvidenceFixture(banked: BankedCreatorEvidence): void {
 }
 
 /**
+ * Prepared-evidence derivations, extracted as PURE functions (phased
+ * architecture S2). Split in two to preserve the monolith's deliberate
+ * interleaving exactly (Session 11 Commit 3): everything the LLM calls need is
+ * computed FIRST, the calls are launched, and the remaining local work runs
+ * WHILE they are in flight. Collapsing these into one function would serialize
+ * that window and slow every run.
+ *
+ * Both are reused verbatim by the resume-from-banked path, which is the point:
+ * a resumed campaign must derive `prepared` byte-identically to a
+ * straight-through run, and the only way to guarantee that is to run the same
+ * code on the same inputs.
+ */
+export function computeDeriveInputs(input: {
+  searchHashtags: string[];
+  allTitles: string[];
+  bio: string;
+  transcripts: TranscriptEntry[];
+  viewCounts: number[];
+  followerCount: number;
+  engagementSignals: EngagementSignals;
+}): {
+  totalViews: number; avgViews: number; engagementRate: number;
+  topHashtags: string[]; rawKeywords: string[]; combinedTranscriptText: string;
+} {
+  const { searchHashtags, allTitles, bio, transcripts, viewCounts, followerCount, engagementSignals } = input;
+
+  // Compute stats
+  const totalViews = viewCounts.reduce((a, b) => a + b, 0);
+  const avgViews = viewCounts.length > 0
+    ? Math.round(viewCounts.reduce((a, b) => a + b, 0) / viewCounts.length)
+    : 0;
+  // FIXED engagement rate: use (likes + comments) / plays, not views/followers
+  // This is the true interaction rate and will never exceed 100%
+  const engagementRate = engagementSignals.avgLikeRate > 0
+    ? Math.round((engagementSignals.avgLikeRate + engagementSignals.avgCommentRate) * 100 * 100) / 100
+    : (followerCount > 0 && avgViews > 0
+      ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+      : 0);
+
+  const allHashtagSources = [...searchHashtags, ...allTitles, bio];
+  const topHashtags = extractHashtags(allHashtagSources);
+
+  // Include transcript text in keyword extraction for richer signal
+  const transcriptTexts = transcripts.map(t => t.transcript);
+  const rawKeywords = extractKeywords([...allTitles, bio, ...transcriptTexts]);
+
+  // Use full transcript text for richer AI analysis (up to 6000 chars combined)
+  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
+
+  return { totalViews, avgViews, engagementRate, topHashtags, rawKeywords, combinedTranscriptText };
+}
+
+/** The local work the monolith does WHILE the two LLM calls are in flight. */
+export function computeLocalPrepared(input: {
+  allTitles: string[];
+  topHashtags: string[];
+  bio: string;
+  /** Location so far (bio match from capture); refined here if still empty. */
+  location: string;
+  combinedTranscriptText: string;
+  transcripts: TranscriptEntry[];
+}): { contentThemes: string[]; location: string; transcriptExcerpts: string } {
+  const { allTitles, topHashtags, bio, combinedTranscriptText, transcripts } = input;
+  let location = input.location;
+
+  const contentThemes = inferContentThemes(allTitles, topHashtags, bio);
+
+  if (!location) {
+    const allText = [bio, ...allTitles, combinedTranscriptText].join(" ");
+    const cityMatch = matchKnownCity(allText);
+    if (cityMatch) location = cityMatch;
+  }
+
+  // Build transcript excerpts for DB storage — store ALL transcripts in full (no truncation)
+  // This maximises the language data available for scoring and cultural analysis
+  const transcriptExcerpts = transcripts
+    .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
+    .join("\n\n");
+
+  return { contentThemes, location, transcriptExcerpts };
+}
+
+/**
  * Stage E — assembly. PURE: no I/O, no clock, no randomness. Given the banked
  * struct it returns the CreatorResearchResult the extraction step consumes.
  *
@@ -1974,28 +2057,12 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     });
   }
 
-  // Compute stats
-  const totalViews = viewCounts.reduce((a, b) => a + b, 0);
-  const avgViews = viewCounts.length > 0
-    ? Math.round(viewCounts.reduce((a, b) => a + b, 0) / viewCounts.length)
-    : 0;
-  // FIXED engagement rate: use (likes + comments) / plays, not views/followers
-  // This is the true interaction rate and will never exceed 100%
-  const engagementRate = engagementSignals.avgLikeRate > 0
-    ? Math.round((engagementSignals.avgLikeRate + engagementSignals.avgCommentRate) * 100 * 100) / 100
-    : (followerCount > 0 && avgViews > 0
-      ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
-      : 0);
+  // S2 seam: the pre-LLM derivations, now a shared pure function so the
+  // resume-from-banked path computes them from identical inputs with identical
+  // code (the only way a resumed run can be byte-identical to a straight one).
+  const { totalViews, avgViews, engagementRate, topHashtags, rawKeywords, combinedTranscriptText } =
+    computeDeriveInputs({ searchHashtags, allTitles, bio, transcripts, viewCounts, followerCount, engagementSignals });
 
-  const allHashtagSources = [...searchHashtags, ...allTitles, bio];
-  const topHashtags = extractHashtags(allHashtagSources);
-
-  // Include transcript text in keyword extraction for richer signal
-  const transcriptTexts = transcripts.map(t => t.transcript);
-  const rawKeywords = extractKeywords([...allTitles, bio, ...transcriptTexts]);
-
-  // Use full transcript text for richer AI analysis (up to 6000 chars combined)
-  const combinedTranscriptText = transcriptTexts.join(" ").slice(0, 6000);
   // Session 11 (Commit 3): the theme-extraction and symbol-decoder LLM calls are
   // independent — neither reads the other's output — so launch both together and
   // do the local work (themes heuristic, location, excerpts) while they run,
@@ -2012,19 +2079,13 @@ async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResear
     transcriptExcerpts: transcripts.map(t => t.transcript),
   });
 
-  const contentThemes = inferContentThemes(allTitles, topHashtags, bio);
-
-  if (!location) {
-    const allText = [bio, ...allTitles, combinedTranscriptText].join(" ");
-    const cityMatch = matchKnownCity(allText);
-    if (cityMatch) location = cityMatch;
-  }
-
-  // Build transcript excerpts for DB storage — store ALL transcripts in full (no truncation)
-  // This maximises the language data available for scoring and cultural analysis
-  const transcriptExcerpts = transcripts
-    .map(t => `[${t.caption.slice(0, 60) || "video"}]: ${t.transcript}`)
-    .join("\n\n");
+  // The local work that runs WHILE the two LLM calls are in flight — same
+  // shared pure function the resume path uses.
+  const localPrepared = computeLocalPrepared({
+    allTitles, topHashtags, bio, location, combinedTranscriptText, transcripts,
+  });
+  const { contentThemes, transcriptExcerpts } = localPrepared;
+  location = localPrepared.location;
 
   // Await both LLM calls (kicked off above; ran concurrently with the work between).
   const [contentThemeLabels, tikTokDecodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
