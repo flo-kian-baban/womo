@@ -53,6 +53,14 @@ import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSy
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseState, type PhaseStateWrite } from "./db";
 import { currentRunId } from "./_core/runContext";
+import { runPhases, bankedOutput } from "./phases/phaseRunner";
+import {
+  makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
+  type CapturePhaseOutput, type AugmentPhaseOutput, type TranscribePhaseOutput,
+} from "./phases/collectionPhases";
+import {
+  makeDerivePhase, assembleFromPhases, type DerivePhaseOutput,
+} from "./phases/derivePhases";
 import { TRANSCRIPT_SOURCE, isSpeechTranscript } from "@shared/transcriptSource";
 import { isStopword } from "@shared/stopwords";
 import { isAuthorMatch } from "@shared/authorMatch";
@@ -2247,7 +2255,176 @@ function emptyCaptureMessage(
   return generic;
 }
 
+/**
+ * TikTok creator research — THE LIVE PATH (phased architecture S2, Part 3).
+ *
+ * Executes the five-phase runner instead of the inline orchestration. Each
+ * phase reads its declared inputs from the campaign's banked state and the
+ * runner writes every output to the ledger as it goes, so this run is a real
+ * campaign rather than a monolith that happens to log.
+ *
+ * The endpoint's shape is unchanged: still one synchronous call that returns
+ * the finished CreatorResearchResult. No scheduler, no enqueue/poll — S3.
+ *
+ * FROZEN and preserved verbatim below: the quota gate, the no-data gate and the
+ * minimum-data threshold, including their exact messages via
+ * emptyCaptureMessage. Those are interpretation, not gathering, and this
+ * session does not touch them.
+ *
+ * researchTikTokCreatorInline (further down) is the previous orchestration. It
+ * is intentionally RETAINED AND UNREFERENCED this session so the change is
+ * reversible; deleting it is the next session's work.
+ */
 async function researchTikTokCreator(handleOrUrl: string): Promise<CreatorResearchResult> {
+  const handle = extractHandle(handleOrUrl);
+  const subjectHint = `${handle}@TikTok`;
+  const runId = currentRunId();
+
+  const capturePhase = makeCapturePhase("TikTok");
+  const augmentPhase = makeAugmentPhase("TikTok");
+  const transcribePhase = makeTranscribePhase("TikTok");
+  const derivePhase = makeDerivePhase({
+    translateKeywordsToThemes,
+    decodeCreatorSymbols: (i) => decodeCreatorSymbols(i),
+  });
+
+  const summary = await runPhases({
+    runId: runId ?? "no-run-context",
+    handle,
+    platform: "TikTok",
+    phases: [capturePhase, augmentPhase, transcribePhase, derivePhase] as never,
+    // Each phase's output is banked as it completes. Fire-and-forget so
+    // observation can never add latency to, or fail, an analysis.
+    bank: (entry) => {
+      if (!runId) return;
+      void recordPhaseState({
+        runId, subjectHint,
+        phase: entry.phase as PhaseStateWrite["phase"],
+        tool: entry.tool,
+        status: entry.status as PhaseStateWrite["status"],
+        failureClass: entry.failureClass as PhaseStateWrite["failureClass"],
+        output: entry.output,
+      });
+    },
+  });
+
+  const capture = bankedOutput<CapturePhaseOutput>(summary, "capture");
+  const augment = bankedOutput<AugmentPhaseOutput>(summary, "augment");
+  const transcribe = bankedOutput<TranscribePhaseOutput>(summary, "transcribe");
+  const derived = bankedOutput<DerivePhaseOutput>(summary, "derive");
+
+  // ── Gate: the capture phase produced nothing usable ──
+  // Mirrors the inline path's !hasAnyData branch, including the honest
+  // transient-vs-genuine message (scraper-reliability Part 2).
+  const captureAssessment = capture?.assessment as Parameters<typeof emptyCaptureMessage>[1];
+  if (!capture) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: emptyCaptureMessage(handle, captureAssessment,
+        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
+    });
+  }
+
+  const transcripts = transcribe?.transcripts ?? [];
+  const banked: ResumableBankedPhases = {
+    capture: {
+      stats: capture.stats,
+      profileTitles: capture.profileTitles,
+      profileViewCounts: capture.profileViewCounts,
+    },
+    augment: {
+      searchTitles: augment?.pool.videoTitles ?? capture.pool.videoTitles,
+      searchHashtags: augment?.pool.hashtags ?? capture.pool.hashtags,
+    },
+    transcribe: (transcribe ?? {
+      transcripts: [], musicTitles: [], engagementSignals: { totalSampled: 0 } as never,
+      longitudinalSample: undefined as never, discoveredVideoPool: [],
+      foreignVideosRejected: 0, transcriptViewCounts: [],
+    }) as ResumableBankedPhases["transcribe"],
+  };
+  const { allTitles } = reconstructMergedInputs(banked);
+
+  const hasContentData = transcripts.length > 0 || allTitles.length > 0;
+  const hasAnyData = hasContentData || capture.stats.followerCount > 0 || capture.stats.bio.length > 0;
+
+  // ── Gate: quota exhausted with no content (FROZEN) ──
+  if (augment?.quotaExhausted && !hasContentData) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `The TikTok data API is temporarily rate-limited from recent activity. No video content could be retrieved for @${handle}. Please wait 2–5 minutes and try again.`,
+    });
+  }
+  if (augment?.quotaExhausted) {
+    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
+  }
+
+  // ── Gate: truly nothing available (FROZEN) ──
+  if (!hasAnyData) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: emptyCaptureMessage(handle, captureAssessment,
+        `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`),
+    });
+  }
+
+  // ── Gate: minimum data threshold (FROZEN — thresholds unchanged) ──
+  const realTranscripts = transcripts.filter(t => isSpeechTranscript(t.transcriptSource));
+  const totalVideoPool = transcribe?.discoveredVideoPool?.length ?? 0;
+  console.log(`[webResearch] @${handle}: data quality check — ${realTranscripts.length} real transcripts, ${transcripts.length} total transcripts, ${allTitles.length} titles, ${totalVideoPool} discovered videos`);
+
+  if (realTranscripts.length < 2 && allTitles.length < 4) {
+    const counts = `${totalVideoPool} videos discovered, ${realTranscripts.length} real transcripts, ${allTitles.length} video titles.`;
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, captureAssessment,
+        `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
+    });
+  }
+
+  if (!augment || !transcribe || !derived) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Analysis for @${handle} stopped at the ${summary.stoppedAt?.phase ?? "unknown"} phase (${summary.stoppedAt?.reason ?? "incomplete"}). Nothing was saved.`,
+    });
+  }
+
+  // Stage E — the SAME pure assembly the resume path uses.
+  const result = assembleFromPhases(handle, { handle, capture, augment, transcribe }, derived);
+  maybeDumpEvidenceFixture({
+    schemaVersion: 1, handle, platform: "TikTok",
+    capture: {
+      displayName: result.displayName, bio: result.bio,
+      followerCount: result.followerCount, followingCount: result.followingCount ?? 0,
+      videoCount: result.videoCount, totalLikes: result.totalLikes,
+      location: result.location, profileUrl: result.profileUrl ?? "",
+    },
+    collection: {
+      transcripts, musicTitles: transcribe.musicTitles,
+      engagementSignals: transcribe.engagementSignals,
+      longitudinalSample: transcribe.longitudinalSample,
+      discoveredVideoPool: transcribe.discoveredVideoPool,
+      foreignVideosRejected: transcribe.foreignVideosRejected,
+    },
+    prepared: {
+      allTitles: result.recentVideoTitles ?? [], topHashtags: result.topHashtags ?? [],
+      rawKeywords: result.rawKeywords ?? [], contentThemes: result.contentThemes ?? [],
+      transcriptExcerpts: result.transcriptExcerpts ?? "",
+      totalViews: result.totalViews, avgViews: result.avgViews, engagementRate: result.engagementRate,
+    },
+    derived: { contentThemeLabels: derived.contentThemeLabels, decodedSymbols: derived.decodedSymbols },
+  });
+
+  return result;
+}
+
+/**
+ * PREVIOUS inline orchestration — RETAINED AND UNREFERENCED (S2, Part 3).
+ *
+ * Kept deliberately so this session's change is reversible. It is dead code:
+ * nothing calls it. Deleting it, after the caller inventory, is the next
+ * session's work. Do not extend it.
+ */
+async function researchTikTokCreatorInline(handleOrUrl: string): Promise<CreatorResearchResult> {
   const handle = extractHandle(handleOrUrl);
   /** Label for this campaign's shadow-banking rows (S1). */
   const subjectHint = `${handle}@TikTok`;
