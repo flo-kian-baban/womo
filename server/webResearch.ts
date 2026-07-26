@@ -1816,82 +1816,19 @@ export function reconstructMergedInputs(banked: ResumableBankedPhases): {
 }
 
 /**
- * Re-run phases 4-5's research half from banked output: derive (the two LLM
- * calls) then assembly. Returns the same CreatorResearchResult a
- * straight-through run would produce, so the caller can extract + persist with
- * the existing code path.
+ * resumeResearchFromBanked REMOVED (S4).
+ *
+ * It re-ran phases 4-5 from banked output as a manual escape hatch. S3b made the
+ * queue's boot loop resume every incomplete campaign automatically — through the
+ * runner, which skips phases already banked as usable — so this second resume
+ * path had no caller left. Keeping it would have meant threading the platform
+ * and the collected pool through dead code to satisfy the S4 engagement-rate
+ * tool, i.e. maintaining a resume path nothing exercises.
+ *
+ * The capability is not lost; it is strictly better, because the queue's version
+ * survives a process restart and this one never did.
  */
-export async function resumeResearchFromBanked(
-  handle: string,
-  banked: ResumableBankedPhases,
-): Promise<CreatorResearchResult> {
-  const { capture, augment, transcribe } = banked;
-  const { allTitles, viewCounts } = reconstructMergedInputs(banked);
 
-  // Identical pure derivations, identical inputs — see computeDeriveInputs.
-  const { totalViews, avgViews, engagementRate, topHashtags, rawKeywords, combinedTranscriptText } =
-    computeDeriveInputs({
-      searchHashtags: augment.searchHashtags,
-      allTitles,
-      bio: capture.stats.bio,
-      transcripts: transcribe.transcripts,
-      viewCounts,
-      followerCount: capture.stats.followerCount,
-      engagementSignals: transcribe.engagementSignals,
-    });
-
-  // Phase 4 — derive. Same two independent calls, launched together, with the
-  // local work running while they are in flight (as in the monolith).
-  const themesPromise = translateKeywordsToThemes(rawKeywords, topHashtags, allTitles, capture.stats.bio, combinedTranscriptText);
-  const symbolsPromise = decodeCreatorSymbols({
-    handle,
-    bio: capture.stats.bio,
-    videoTitles: allTitles,
-    hashtags: topHashtags,
-    transcriptExcerpts: transcribe.transcripts.map(t => t.transcript),
-  });
-
-  const localPrepared = computeLocalPrepared({
-    allTitles, topHashtags, bio: capture.stats.bio,
-    location: capture.stats.location, combinedTranscriptText,
-    transcripts: transcribe.transcripts,
-  });
-
-  const [contentThemeLabels, decodedSymbols] = await Promise.all([themesPromise, symbolsPromise]);
-
-  const bankedEvidence: BankedCreatorEvidence = {
-    schemaVersion: 1,
-    handle,
-    platform: "TikTok",
-    capture: {
-      displayName: capture.stats.displayName,
-      bio: capture.stats.bio,
-      followerCount: capture.stats.followerCount,
-      followingCount: capture.stats.followingCount,
-      videoCount: capture.stats.videoCount,
-      totalLikes: capture.stats.totalLikes,
-      location: localPrepared.location,
-      profileUrl: `https://www.tiktok.com/@${handle}`,
-    },
-    collection: {
-      transcripts: transcribe.transcripts,
-      musicTitles: transcribe.musicTitles,
-      engagementSignals: transcribe.engagementSignals,
-      longitudinalSample: transcribe.longitudinalSample,
-      discoveredVideoPool: transcribe.discoveredVideoPool,
-      foreignVideosRejected: transcribe.foreignVideosRejected,
-    },
-    prepared: {
-      allTitles, topHashtags, rawKeywords,
-      contentThemes: localPrepared.contentThemes,
-      transcriptExcerpts: localPrepared.transcriptExcerpts,
-      totalViews, avgViews, engagementRate,
-    },
-    derived: { contentThemeLabels, decodedSymbols },
-  };
-
-  return assembleCreatorResearchResult(bankedEvidence);
-}
 
 /**
  * Prepared-evidence derivations, extracted as PURE functions (phased
@@ -1913,26 +1850,30 @@ export function computeDeriveInputs(input: {
   transcripts: TranscriptEntry[];
   viewCounts: number[];
   followerCount: number;
-  /** Absent when the platform computes none (S4); the rate falls back below. */
+  /** Absent when the platform computes none (S4). */
   engagementSignals?: EngagementSignals;
+  /** S4: whose engagement-rate formula to use. */
+  platform: PlatformName;
+  /** The collected pool — some platforms' rates are derived from it. */
+  pool: PoolVideoItem[];
 }): {
   totalViews: number; avgViews: number; engagementRate: number;
   topHashtags: string[]; rawKeywords: string[]; combinedTranscriptText: string;
 } {
-  const { searchHashtags, allTitles, bio, transcripts, viewCounts, followerCount, engagementSignals } = input;
+  const { searchHashtags, allTitles, bio, transcripts, viewCounts, followerCount, engagementSignals, platform, pool } = input;
 
   // Compute stats
   const totalViews = viewCounts.reduce((a, b) => a + b, 0);
   const avgViews = viewCounts.length > 0
     ? Math.round(viewCounts.reduce((a, b) => a + b, 0) / viewCounts.length)
     : 0;
-  // FIXED engagement rate: use (likes + comments) / plays, not views/followers
-  // This is the true interaction rate and will never exceed 100%
-  const engagementRate = (engagementSignals?.avgLikeRate ?? 0) > 0
-    ? Math.round((engagementSignals!.avgLikeRate + engagementSignals!.avgCommentRate) * 100 * 100) / 100
-    : (followerCount > 0 && avgViews > 0
-      ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
-      : 0);
+  // S4: the platform owns its engagement-rate formula. This function used to
+  // hardcode TikTok's as though it were universal, which turned Instagram's
+  // 32.9 into a clamped 100 on the phase path. The formulas are different by
+  // design — including their rounding — so they live with their platforms.
+  const engagementRate = toolsetFor(platform).engagementRate({
+    followerCount, avgViews, engagementSignals, pool,
+  });
 
   const allHashtagSources = [...searchHashtags, ...allTitles, bio];
   const topHashtags = extractHashtags(allHashtagSources);
@@ -2369,7 +2310,7 @@ export async function runCollection(
   const capturePhase = makeCapturePhase(platform);
   const augmentPhase = makeAugmentPhase(platform);
   const transcribePhase = makeTranscribePhase(platform);
-  const derivePhase = makeDerivePhase({
+  const derivePhase = makeDerivePhase(platform, {
     translateKeywordsToThemes,
     decodeCreatorSymbols: (i) => decodeCreatorSymbols(i),
   });

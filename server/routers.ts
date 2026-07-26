@@ -31,7 +31,7 @@ import { extractCreatorProfile, extractBrandProfile, generateFITNarrative, build
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
-import { researchCreator, researchBrand, resumeResearchFromBanked, type ResumableBankedPhases } from "./webResearch";
+import { researchBrand } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
@@ -990,7 +990,9 @@ export const appRouter = router({
     submit: publicProcedure
       .input(z.object({
         handles: z.array(z.string().min(1)).min(1).max(50),
-        platform: z.enum(["TikTok"]),
+        // S4: Instagram is registered behind the same contract. YouTube stays
+        // out until its own session — toolsetFor throws for it, loudly.
+        platform: z.enum(["TikTok", "Instagram"]),
         /** Session 7: required to proceed when a handle already exists. */
         confirmDuplicate: z.boolean().optional(),
       }))
@@ -1161,13 +1163,16 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const existing = await getCreatorProfileById(input.id);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Creator profile not found" });
-        if (String(existing.platform).toLowerCase() !== "tiktok") {
+        const platform = String(existing.platform).toLowerCase() === "instagram" ? "Instagram" as const
+          : String(existing.platform).toLowerCase() === "tiktok" ? "TikTok" as const
+          : null;
+        if (!platform) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: `Re-analysis currently supports TikTok only (this profile is ${existing.platform}). Instagram and YouTube land in S4.`,
+            message: `Re-analysis supports TikTok and Instagram (this profile is ${existing.platform}). YouTube lands in its own session.`,
           });
         }
-        const campaigns = await submitCampaigns([{ handle: existing.handle ?? input.id, platform: "TikTok" }]);
+        const campaigns = await submitCampaigns([{ handle: existing.handle ?? input.id, platform }]);
         return { campaigns };
       }),
 

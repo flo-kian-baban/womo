@@ -193,6 +193,22 @@ export interface PlatformToolset {
   profileUrl(handle: string): string;
 
   /**
+   * S4 CONTRACT EXTENSION — the engagement rate.
+   *
+   * WHY THIS IS A TOOL. `computeDeriveInputs` hardcoded ONE platform's formula
+   * as though it were universal: TikTok's interaction rate (likes+comments per
+   * play) with a views/followers fallback. Instagram has always used
+   * likes/followers, with its own rounding — measured on a real capture, the
+   * shared formula turns Instagram's 32.9 into a clamped 100. An engagement rate
+   * is platform-specific INTERPRETATION and it lands in the evidence summary the
+   * model reads, so it belongs with the platform's other interpretation.
+   *
+   * The two formulas are DIFFERENT BY DESIGN, including their rounding paths.
+   * Do not normalise them.
+   */
+  engagementRate(input: EngagementRateInput): number;
+
+  /**
    * S4 CONTRACT EXTENSION — platform-specific evidence.
    *
    * Appended verbatim to the assembled evidence summary. TikTok and YouTube
@@ -204,6 +220,17 @@ export interface PlatformToolset {
    * Must be a PURE function of banked evidence: the assembly is byte-compared.
    */
   evidenceExtras(banked: EvidenceExtrasInput): string;
+}
+
+/** Everything any platform's engagement-rate formula needs. */
+export interface EngagementRateInput {
+  followerCount: number;
+  /** Mean of the recorded view counts — TikTok's fallback input. */
+  avgViews: number;
+  /** Present only when the platform computes per-video signals. */
+  engagementSignals?: EngagementSignals;
+  /** The collected pool — Instagram derives mean likes per post from it. */
+  pool: PoolVideoItem[];
 }
 
 /** The banked capture stats an extras block may draw on. */
@@ -366,6 +393,16 @@ export const TIKTOK_TOOLSET: PlatformToolset = {
   transcribe: tiktokTranscribe,
   gate: tiktokGate,
   profileUrl: (handle) => `https://www.tiktok.com/@${handle}`,
+  // VERBATIM from computeDeriveInputs. "FIXED engagement rate: use
+  // (likes + comments) / plays, not views/followers — this is the true
+  // interaction rate and will never exceed 100%." The views/followers branch is
+  // the fallback for a pool with no per-video signals. Rounding path unchanged.
+  engagementRate: ({ followerCount, avgViews, engagementSignals }) =>
+    (engagementSignals?.avgLikeRate ?? 0) > 0
+      ? Math.round((engagementSignals!.avgLikeRate + engagementSignals!.avgCommentRate) * 100 * 100) / 100
+      : (followerCount > 0 && avgViews > 0
+        ? Math.min(100, Math.round((avgViews / followerCount) * 100 * 10) / 10)
+        : 0),
   // TikTok contributes no evidence beyond what the shared builder produces.
   // The evidence harness proves this keeps the assembly byte-identical.
   evidenceExtras: () => "",
@@ -624,6 +661,17 @@ export const INSTAGRAM_TOOLSET: PlatformToolset = {
   transcribe: instagramTranscribe,
   gate: instagramGate,
   profileUrl: (handle) => `https://www.instagram.com/${handle}/`,
+  // VERBATIM from researchInstagramCreator: mean LIKES per post over followers,
+  // rounded to one decimal. Deliberately not TikTok's formula — Instagram view
+  // counts are absent on many posts (5 of 12 read zero in the captured
+  // baselines), so a views-based rate would be both inflated and arbitrary.
+  engagementRate: ({ followerCount, pool }) => {
+    const totalLikes = pool.reduce((sum, v) => sum + (v.likes ?? 0), 0);
+    const avgLikes = pool.length > 0 ? Math.round(totalLikes / pool.length) : 0;
+    return followerCount > 0 && avgLikes > 0
+      ? Math.min(100, Math.round((avgLikes / followerCount) * 100 * 10) / 10)
+      : 0;
+  },
   evidenceExtras: instagramEvidenceExtras,
 };
 

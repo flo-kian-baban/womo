@@ -54,13 +54,20 @@ import { PHASE_NAMES } from "../_core/analysisPhase";
 
 export interface SubmitRequest {
   handle: string;
-  platform: "TikTok";
+  platform: QueueablePlatform;
 }
+
+/**
+ * Platforms the queue can actually run. NOT the full PlatformName union: a
+ * platform is queueable only once it has a registered toolset, and toolsetFor
+ * throws loudly for the rest rather than producing an empty analysis.
+ */
+export type QueueablePlatform = "TikTok" | "Instagram";
 
 export interface SubmittedCampaign {
   runId: string;
   handle: string;
-  platform: "TikTok";
+  platform: QueueablePlatform;
   state: "queued";
 }
 
@@ -286,8 +293,8 @@ async function recordTerminalFailure(
  */
 async function processCampaign(runId: string, subjectHint: string, deps: CreatorCampaignDeps): Promise<CampaignOutcome | null> {
   const [handle, platform] = subjectHint.split("@");
-  if (platform !== "TikTok") {
-    console.warn(`[queue] ${runId}: platform ${platform} has no phase toolset (S4) — skipping`);
+  if (platform !== "TikTok" && platform !== "Instagram") {
+    console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
     return null;
   }
   _inFlight.add(runId);
@@ -313,7 +320,7 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
   try {
     const banked = await loadBankedPhases(runId);
     const outcome = await withAnalysisRun(runId, () => runCreatorCampaign(
-      { runId, handle: handle!, platform: "TikTok", initialPhases: banked },
+      { runId, handle: handle!, platform, initialPhases: banked },
       deps,
     ));
     if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);

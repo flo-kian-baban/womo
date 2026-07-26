@@ -87,7 +87,7 @@ describe("bankedPhasesFor — which pool feeds the evidence", () => {
 });
 
 describe("declared inputs", () => {
-  const derive = makeDerivePhase({
+  const derive = makeDerivePhase("TikTok", {
     translateKeywordsToThemes: async () => [],
     decodeCreatorSymbols: async () => null,
   });
@@ -118,7 +118,7 @@ describe("derive phase execution", () => {
   it("launches both LLM calls and reports complete when both return", async () => {
     const themes = vi.fn(async () => ["A", "B"]);
     const symbols = vi.fn(async () => ({ symbolicSummary: "s" }) as never);
-    const derive = makeDerivePhase({ translateKeywordsToThemes: themes, decodeCreatorSymbols: symbols });
+    const derive = makeDerivePhase("TikTok", { translateKeywordsToThemes: themes, decodeCreatorSymbols: symbols });
 
     const res = await derive.run(input, { runId: "r", handle: "h", platform: "TikTok", attempt: 1 });
     expect(res.outcome).toBe("complete");
@@ -128,7 +128,7 @@ describe("derive phase execution", () => {
   });
 
   it("reports PARTIAL (not failed) when a helper degrades to an empty result", async () => {
-    const derive = makeDerivePhase({
+    const derive = makeDerivePhase("TikTok", {
       translateKeywordsToThemes: async () => [],
       decodeCreatorSymbols: async () => null,
     });
@@ -137,7 +137,7 @@ describe("derive phase execution", () => {
   });
 
   it("classifies a thrown quota error as transient so it requeues", async () => {
-    const derive = makeDerivePhase({
+    const derive = makeDerivePhase("TikTok", {
       translateKeywordsToThemes: async () => { throw new Error("HTTP 429 Too Many Requests"); },
       decodeCreatorSymbols: async () => null,
     });

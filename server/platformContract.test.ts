@@ -169,3 +169,65 @@ describe("the shared layers never learn a platform's name", () => {
     expect(PHASE_NAMES).toEqual(["capture", "augment", "transcribe", "derive", "extract_commit"]);
   });
 });
+
+describe("engagementRate — platform-specific by design, NOT normalised", () => {
+  const pool = (likes: number[]) => likes.map((l, i) => ({
+    id: `v${i}`, caption: "", views: 0, likes: l, comments: 0, saves: 0, shares: 0,
+    createTime: 0, musicOriginal: false, musicTitle: "", musicArtist: "",
+    duetEnabled: false, stitchEnabled: false, isAd: false, durationMs: 0,
+  }));
+
+  it("TikTok prefers its per-video interaction rate over any views fallback", () => {
+    // "(likes + comments) / plays, not views/followers — the true interaction
+    // rate, which will never exceed 100%." Rounding path: *100*100 / 100.
+    const rate = toolsetFor("TikTok").engagementRate({
+      followerCount: 1000, avgViews: 500,
+      engagementSignals: { avgLikeRate: 0.05, avgCommentRate: 0.01 } as never,
+      pool: pool([]),
+    });
+    expect(rate).toBe(6);
+  });
+
+  it("TikTok falls back to views/followers when there are no per-video signals", () => {
+    const rate = toolsetFor("TikTok").engagementRate({
+      followerCount: 1000, avgViews: 500, engagementSignals: undefined, pool: pool([]),
+    });
+    expect(rate).toBe(50); // 500/1000 → 50.0
+  });
+
+  it("Instagram uses mean LIKES over followers — the monolith's exact value", () => {
+    // Reproduces the real captured baseline: vnillalondon, 25,568 followers,
+    // 12 posts averaging 8,403 likes → 32.9. The shared TikTok formula would
+    // give 100 here (clamped from 749%), which is why this is a tool.
+    const likes = [8403 * 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const rate = toolsetFor("Instagram").engagementRate({
+      followerCount: 25568, avgViews: 191620, engagementSignals: undefined, pool: pool(likes),
+    });
+    expect(rate).toBe(32.9);
+  });
+
+  it("the two formulas genuinely DISAGREE on the same input — do not unify them", () => {
+    const likes = [8403 * 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const input = {
+      followerCount: 25568, avgViews: 191620,
+      engagementSignals: undefined, pool: pool(likes),
+    };
+    expect(toolsetFor("Instagram").engagementRate(input)).toBe(32.9);
+    expect(toolsetFor("TikTok").engagementRate(input)).toBe(100);
+  });
+
+  it("both return 0 rather than dividing by zero followers", () => {
+    for (const p of registeredPlatforms()) {
+      expect(toolsetFor(p).engagementRate({
+        followerCount: 0, avgViews: 100, engagementSignals: undefined, pool: pool([5, 5]),
+      })).toBe(0);
+    }
+  });
+
+  it("is pure — same input, same rate", () => {
+    for (const p of registeredPlatforms()) {
+      const input = { followerCount: 100, avgViews: 10, engagementSignals: undefined, pool: pool([1, 2]) };
+      expect(toolsetFor(p).engagementRate(input)).toBe(toolsetFor(p).engagementRate(input));
+    }
+  });
+});

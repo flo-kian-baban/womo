@@ -77,7 +77,7 @@ export function bankedPhasesFor(input: DerivePhaseInput): ResumableBankedPhases 
  * own phase — it is cheap to retry from banked evidence and it is what the
  * dead-key incident destroyed three runs on.
  */
-export function makeDerivePhase(deps: {
+export function makeDerivePhase(platform: PlatformName, deps: {
   translateKeywordsToThemes: (
     keywords: string[], hashtags: string[], titles: string[], bio: string, transcriptText: string,
   ) => Promise<string[]>;
@@ -111,6 +111,8 @@ export function makeDerivePhase(deps: {
           viewCounts,
           followerCount: input.capture.stats.followerCount,
           engagementSignals: input.transcribe.engagementSignals,
+          platform,
+          pool: input.augment.pool.videoItems,
         });
 
         const themesPromise = deps.translateKeywordsToThemes(
@@ -172,6 +174,8 @@ export function assembleFromPhases(
       viewCounts,
       followerCount: input.capture.stats.followerCount,
       engagementSignals: input.transcribe.engagementSignals,
+      platform,
+      pool: input.augment.pool.videoItems,
     });
   const localPrepared = computeLocalPrepared({
     allTitles, topHashtags, bio: input.capture.stats.bio,
