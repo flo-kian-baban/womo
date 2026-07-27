@@ -2343,6 +2343,96 @@ export interface TikTokCollectionCampaign {
  * They throw, exactly as before; the campaign turns that throw into a terminal
  * campaign outcome carrying the same honest message.
  */
+
+/**
+ * THE CREATOR-SHAPED TAIL OF A COLLECTION (extraction only — zero edits).
+ *
+ * Everything below is pool-shaped: it reads `augment.pool` / `capture.pool`,
+ * reconstructs the merged title and hashtag order, and assembles a
+ * `CreatorResearchResult`. None of it is the operating model — the operating
+ * model is "run the phases, read what they banked, ask the gate" — and a
+ * subject with no video pool (a brand) has no use for any of it.
+ *
+ * Lifted VERBATIM so the driver above can become generic without this moving
+ * and changing in the same step. The identity harnesses are the arbiters of
+ * that claim: a single reordered merge here silently repicks which videos
+ * become the evidence, and every downstream score moves while the run still
+ * looks successful.
+ */
+function assembleCreatorCollection(args: {
+  handle: string;
+  platform: PlatformName;
+  capture: CapturePhaseOutput;
+  augment: AugmentPhaseOutput | null;
+  transcribe: TranscribePhaseOutput | null;
+  derived: DerivePhaseOutput | null;
+  summary: Awaited<ReturnType<typeof runPhases>>;
+  /** `currentRunId()` returns null outside a run context. */
+  runId: string | null | undefined;
+}): TikTokCollectionCampaign {
+  const { handle, platform, capture, augment, transcribe, derived, summary, runId } = args;
+  const transcripts = transcribe?.transcripts ?? [];
+  const banked: ResumableBankedPhases = {
+    capture: {
+      stats: capture.stats,
+      profileTitles: capture.profileTitles,
+      profileViewCounts: capture.profileViewCounts,
+    },
+    augment: {
+      searchTitles: augment?.pool.videoTitles ?? capture.pool.videoTitles,
+      searchHashtags: augment?.pool.hashtags ?? capture.pool.hashtags,
+    },
+    transcribe: (transcribe ?? {
+      transcripts: [], musicTitles: [], engagementSignals: { totalSampled: 0 } as never,
+      longitudinalSample: undefined as never, discoveredVideoPool: [],
+      foreignVideosRejected: 0, transcriptViewCounts: [],
+    }) as ResumableBankedPhases["transcribe"],
+  };
+  const { allTitles } = reconstructMergedInputs(banked);
+
+  if (augment?.quotaExhausted) {
+    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
+  }
+
+  if (!augment || !transcribe || !derived) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Analysis for @${handle} stopped at the ${summary.stoppedAt?.phase ?? "unknown"} phase (${summary.stoppedAt?.reason ?? "incomplete"}). Nothing was saved.`,
+    });
+  }
+
+  // Flush the collection-fixture draft (inert unless WOMO_COLLECTION_FIXTURE).
+  if (runId) flushCollectionFixture(runId);
+
+  // Stage E — the SAME pure assembly the resume path uses.
+  const result = assembleFromPhases(handle, platform, { handle, capture, augment, transcribe }, derived);
+  maybeDumpEvidenceFixture({
+    schemaVersion: 1, handle, platform: "TikTok",
+    capture: {
+      displayName: result.displayName, bio: result.bio,
+      followerCount: result.followerCount, followingCount: result.followingCount ?? 0,
+      videoCount: result.videoCount, totalLikes: result.totalLikes,
+      location: result.location, profileUrl: result.profileUrl ?? "",
+    },
+    collection: {
+      transcripts, musicTitles: transcribe.musicTitles,
+      engagementSignals: transcribe.engagementSignals,
+      longitudinalSample: transcribe.longitudinalSample,
+      discoveredVideoPool: transcribe.discoveredVideoPool,
+      foreignVideosRejected: transcribe.foreignVideosRejected,
+    },
+    prepared: {
+      allTitles: result.recentVideoTitles ?? [], topHashtags: result.topHashtags ?? [],
+      rawKeywords: result.rawKeywords ?? [], contentThemes: result.contentThemes ?? [],
+      transcriptExcerpts: result.transcriptExcerpts ?? "",
+      totalViews: result.totalViews, avgViews: result.avgViews, engagementRate: result.engagementRate,
+    },
+    derived: { contentThemeLabels: derived.contentThemeLabels, decodedSymbols: derived.decodedSymbols },
+  });
+
+  return { research: result, phases: summary.state.phases };
+}
+
 export async function runCollection(
   handleOrUrl: string,
   platform: PlatformName,
@@ -2441,66 +2531,9 @@ export async function runCollection(
     });
   }
 
-  const transcripts = transcribe?.transcripts ?? [];
-  const banked: ResumableBankedPhases = {
-    capture: {
-      stats: capture.stats,
-      profileTitles: capture.profileTitles,
-      profileViewCounts: capture.profileViewCounts,
-    },
-    augment: {
-      searchTitles: augment?.pool.videoTitles ?? capture.pool.videoTitles,
-      searchHashtags: augment?.pool.hashtags ?? capture.pool.hashtags,
-    },
-    transcribe: (transcribe ?? {
-      transcripts: [], musicTitles: [], engagementSignals: { totalSampled: 0 } as never,
-      longitudinalSample: undefined as never, discoveredVideoPool: [],
-      foreignVideosRejected: 0, transcriptViewCounts: [],
-    }) as ResumableBankedPhases["transcribe"],
-  };
-  const { allTitles } = reconstructMergedInputs(banked);
-
-  if (augment?.quotaExhausted) {
-    console.warn(`[webResearch] @${handle}: quota exhausted but proceeding with content data (${allTitles.length} titles, ${transcripts.length} transcripts)`);
-  }
-
-  if (!augment || !transcribe || !derived) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: `Analysis for @${handle} stopped at the ${summary.stoppedAt?.phase ?? "unknown"} phase (${summary.stoppedAt?.reason ?? "incomplete"}). Nothing was saved.`,
-    });
-  }
-
-  // Flush the collection-fixture draft (inert unless WOMO_COLLECTION_FIXTURE).
-  if (runId) flushCollectionFixture(runId);
-
-  // Stage E — the SAME pure assembly the resume path uses.
-  const result = assembleFromPhases(handle, platform, { handle, capture, augment, transcribe }, derived);
-  maybeDumpEvidenceFixture({
-    schemaVersion: 1, handle, platform: "TikTok",
-    capture: {
-      displayName: result.displayName, bio: result.bio,
-      followerCount: result.followerCount, followingCount: result.followingCount ?? 0,
-      videoCount: result.videoCount, totalLikes: result.totalLikes,
-      location: result.location, profileUrl: result.profileUrl ?? "",
-    },
-    collection: {
-      transcripts, musicTitles: transcribe.musicTitles,
-      engagementSignals: transcribe.engagementSignals,
-      longitudinalSample: transcribe.longitudinalSample,
-      discoveredVideoPool: transcribe.discoveredVideoPool,
-      foreignVideosRejected: transcribe.foreignVideosRejected,
-    },
-    prepared: {
-      allTitles: result.recentVideoTitles ?? [], topHashtags: result.topHashtags ?? [],
-      rawKeywords: result.rawKeywords ?? [], contentThemes: result.contentThemes ?? [],
-      transcriptExcerpts: result.transcriptExcerpts ?? "",
-      totalViews: result.totalViews, avgViews: result.avgViews, engagementRate: result.engagementRate,
-    },
-    derived: { contentThemeLabels: derived.contentThemeLabels, decodedSymbols: derived.decodedSymbols },
+  return assembleCreatorCollection({
+    handle, platform, capture, augment, transcribe, derived, summary, runId,
   });
-
-  return { research: result, phases: summary.state.phases };
 }
 
 /**
