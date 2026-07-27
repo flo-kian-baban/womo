@@ -41,6 +41,16 @@ export interface BrandInstagramMetadata {
   audienceInteractionStyle?: string;
   videoAnalysisSummary?: string;
   postCaptions?: string[];
+  /**
+   * The SAME posts as `postCaptions`, in the same order, each with the platform
+   * id that `postCaptions` throws away (S5).
+   *
+   * `postCaptions` is deliberately left a bare string[] because it is fed
+   * verbatim into the LLM prompt below and into the brand evidence block —
+   * changing its shape would change what the model reads. This is a parallel
+   * field for PERSISTENCE, which needs a stable identity per post.
+   */
+  postRefs?: Array<{ id: string; caption: string }>;
   decodedSymbols?: BrandDecodedSymbol[];
   rawKeywords?: string[];
   themeLabels?: string[];
@@ -126,10 +136,19 @@ export async function analyzeBrandInstagramChannel(
     console.info(`[brandInstagram] @${handle}: ${followerCount?.toLocaleString() ?? "?"} followers, ${posts.length} posts scraped`);
 
     // Step 2: Extract post captions
-    const postCaptions: string[] = posts
+    // Filter FIRST, then derive both views from the same list, so postRefs and
+    // postCaptions cannot drift out of alignment.
+    const keptPosts = posts
       .slice(0, 12)
-      .map(p => p.caption)
-      .filter(c => c && c.length > 20);
+      .filter(p => p.caption && p.caption.length > 20);
+    const postCaptions: string[] = keptPosts.map(p => p.caption);
+    const postRefs = keptPosts.map(p => ({
+      // shortcode is Instagram's stable, shareable id; `id` is the numeric
+      // media id. Either identifies the post across re-analyses — the position
+      // in a feed does not.
+      id: String(p.shortcode ?? p.id ?? ""),
+      caption: p.caption,
+    })).filter(r => r.id !== "");
 
     console.info(`[brandInstagram] ${posts.length} posts collected, ${postCaptions.length} captions extracted`);
 
@@ -317,6 +336,7 @@ Return JSON:
       audienceInteractionStyle,
       videoAnalysisSummary,
       postCaptions,
+      postRefs,
       decodedSymbols,
       rawKeywords,
       themeLabels,

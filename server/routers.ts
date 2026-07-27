@@ -894,12 +894,36 @@ export async function persistBrandToV2(params: {
       instagramGate ?? (!instagramMetadata?.postCaptions?.length
         ? { skip: "skipped_no_data", reason: "Instagram analysis returned no post captions" }
         : async () => {
-            const igContentRows = instagramMetadata.postCaptions!.map((caption, i) => ({
-              platform: "instagram" as const,
-              platformVideoId: `ig-post-${instagramMetadata.channelHandle}-${i}`,
-              caption,
-              status: "sampled",
-            }));
+            /**
+             * STABLE IDS, NOT POSITIONS.
+             *
+             * This used to key each post by `ig-post-${handle}-${i}`. Position
+             * is not identity: a re-analysis whose feed moved by one writes
+             * post #3's caption over a DIFFERENT post #3. womo_0011's
+             * observation-scoped index contains the damage to a single
+             * observation, but the ids were still unsound.
+             *
+             * The identity was never missing — `analyzeBrandInstagramChannel`
+             * was discarding it when it mapped posts down to bare captions.
+             * `postRefs` carries it; `postCaptions` stays exactly as it was
+             * because it is fed verbatim to the model.
+             *
+             * Falls back to the positional form only for metadata recorded
+             * before postRefs existed, so an old in-flight result still writes.
+             */
+            const igContentRows = (instagramMetadata.postRefs?.length
+              ? instagramMetadata.postRefs.map(ref => ({
+                  platform: "instagram" as const,
+                  platformVideoId: ref.id,
+                  caption: ref.caption,
+                  status: "sampled",
+                }))
+              : instagramMetadata.postCaptions!.map((caption, i) => ({
+                  platform: "instagram" as const,
+                  platformVideoId: `ig-post-${instagramMetadata.channelHandle}-${i}`,
+                  caption,
+                  status: "sampled",
+                })));
             const written = await insertContentItems(subjectId, observationId, igContentRows);
             console.log(`[persist] Instagram post captions: ${igContentRows.length} rows written (${written.attributed} attributed, ${written.collided} collided)`);
             return reportContentItemsWrite(written, igContentRows.length, "Instagram posts");
