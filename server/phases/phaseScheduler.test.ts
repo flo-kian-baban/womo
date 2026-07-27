@@ -85,13 +85,15 @@ describe("decideRetry — by failure class", () => {
     expect(nextEarliestAtFor(d, NOW)).toBeNull(); // no gate — it will not come back on its own
   });
 
-  it("TRANSIENT walks the 30s / 2m / 5m ladder, then parks", () => {
+  it("TRANSIENT walks the 30s / 2m / 5m ladder, then commits with the gap", () => {
     const at = (attempt: number) =>
       decideRetry({ outcome: "failed", failureClass: "transient", attempt, now: NOW });
     expect(at(1)).toMatchObject({ action: "retry", delayMs: 30_000 });
     expect(at(2)).toMatchObject({ action: "retry", delayMs: 120_000 });
     expect(at(3)).toMatchObject({ action: "retry", delayMs: 300_000 });
-    expect(at(4)).toMatchObject({ action: "park" }); // DEFAULT_MAX_ATTEMPTS reached
+    // At the ceiling the campaign is NOT stranded: it commits what it has with
+    // the gap recorded, because a thin visible profile beats invisible limbo.
+    expect(at(4)).toMatchObject({ action: "exhausted" }); // DEFAULT_MAX_ATTEMPTS reached
     expect(DEFAULT_MAX_ATTEMPTS).toBe(4);
   });
 
@@ -116,13 +118,13 @@ describe("decideRetry — the phase's declared policy overrides the table", () =
     expect(at(1)).toMatchObject({ action: "retry", delayMs: 30_000 });
     expect(at(2)).toMatchObject({ action: "retry", delayMs: 120_000 });
     // The table would have offered a third 5m retry; the phase says stop at 3.
-    expect(at(3)).toMatchObject({ action: "park" });
+    expect(at(3)).toMatchObject({ action: "exhausted" });
   });
 
-  it("a phase declaring no transient backoff parks on the first failure", () => {
+  it("a phase declaring no transient backoff gives up on the first failure", () => {
     const policy = { maxAttempts: 4, backoffMs: {} };
     expect(decideRetry({ outcome: "failed", failureClass: "transient", attempt: 1, policy, now: NOW }))
-      .toMatchObject({ action: "park" });
+      .toMatchObject({ action: "exhausted" });
   });
 
   it("transcribe's expensive single retry (2 / [60s]) is respected", () => {
@@ -130,7 +132,7 @@ describe("decideRetry — the phase's declared policy overrides the table", () =
     expect(decideRetry({ outcome: "failed", failureClass: "transient", attempt: 1, policy, now: NOW }))
       .toMatchObject({ action: "retry", delayMs: 60_000 });
     expect(decideRetry({ outcome: "failed", failureClass: "transient", attempt: 2, policy, now: NOW }))
-      .toMatchObject({ action: "park" });
+      .toMatchObject({ action: "exhausted" });
   });
 });
 
@@ -212,6 +214,57 @@ describe("makeSchedulerExecute — attempts, admission and sleeps", () => {
     expect(inFlightDuringSleep).toEqual([0]); // the browser slot is free for others
   });
 
+  /**
+   * THE OPERATIONAL PROOF, at bound = 1.
+   *
+   * The previous test shows the waiting job holds nothing. This shows what that
+   * BUYS: with only one browser permit in existence, another creator acquires
+   * it and runs to completion WHILE the first is backing off. A parked campaign
+   * is a database row, not a held browser.
+   *
+   * If the permit were held across the wait this deadlocks outright at bound 1 —
+   * and at bound 2 it would silently halve throughput and re-open the
+   * TTL-reaper race (f04329b), where a context held across a wait is either
+   * reaped from under the resumed job or never reaped at all.
+   */
+  it("A PARKED CAMPAIGN FREES THE BROWSER: at bound 1, another campaign runs during the backoff", async () => {
+    __testSlots.setBounds({ browser: 1 });
+
+    const otherRan: string[] = [];
+    const otherPhase = scriptedPhase("capture", [{ outcome: "complete" }]);
+    const otherOriginal = otherPhase.run.bind(otherPhase);
+    otherPhase.run = async (i, c) => {
+      otherRan.push("ran-inside-permit");
+      expect(currentlyHeldClass()).toBe("browser");
+      return otherOriginal(i, c);
+    };
+
+    const blocked = scriptedPhase("capture", [
+      { outcome: "failed", failureClass: "transient" },
+      { outcome: "complete" },
+    ]);
+
+    const execute = makeSchedulerExecute({
+      now: () => NOW,
+      // "While the blocked campaign waits" — a second campaign takes the only
+      // permit there is. This AWAITS it, so if the permit were still held by the
+      // backing-off campaign this line would never resolve.
+      sleep: async () => {
+        await makeSchedulerExecute({ now: () => NOW })(otherPhase, {} as never, {
+          ...ctx, runId: "r2", handle: "other",
+        });
+      },
+    });
+
+    const result = await execute(blocked, {} as never, ctx);
+
+    expect(otherRan).toEqual(["ran-inside-permit"]); // it got the permit mid-backoff
+    expect(result.outcome).toBe("complete");         // and the parked one resumed
+    expect(result.attemptCount).toBe(2);
+    expect(slotSnapshot().browser.inFlight).toBe(0); // nothing leaked
+    expect(slotSnapshot().browser.peakInFlight).toBe(1); // never exceeded the bound
+  });
+
   it("runs the phase inside its resource class's bound", async () => {
     __testSlots.setBounds({ browser: 1 });
     const execute = makeSchedulerExecute({ now: () => NOW });
@@ -253,21 +306,57 @@ describe("makeSchedulerExecute — attempts, admission and sleeps", () => {
     expect(result.attemptCount).toBe(1);
   });
 
-  it("stops at the phase's attempt cap and returns the parked gate", async () => {
+  /**
+   * THE CEILING, AND WHAT HAPPENS AT IT.
+   *
+   * A block that outlasts the ladder must not strand the campaign. The phase is
+   * downgraded to `partial` so the pipeline continues and COMMITS what it has,
+   * with the gap recorded durably in the phase's own output. A visible thin
+   * profile that says why it is thin beats a campaign nobody can see.
+   */
+  it("at the attempt ceiling a still-blocked phase COMMITS with the gap recorded", async () => {
     const slept: number[] = [];
-    const phase = scriptedPhase("augment", [{ outcome: "failed", failureClass: "transient" }], {
-      retry: { maxAttempts: 2, backoffMs: { transient: [5_000] } },
-    });
+    const phase = scriptedPhase("capture", [
+      { outcome: "failed", failureClass: "transient", output: { stats: { followerCount: 42 } } },
+    ], { retry: { maxAttempts: 2, backoffMs: { transient: [5_000] } } });
 
     const result = await makeSchedulerExecute({
       now: () => NOW, sleep: async (ms) => { slept.push(ms); },
     })(phase, {} as never, ctx);
 
-    expect(phase.seenAttempts).toEqual([1, 2]);
-    expect(slept).toEqual([5_000]);
-    expect(result.outcome).toBe("failed");
+    expect(phase.seenAttempts).toEqual([1, 2]);   // the ceiling was respected
+    expect(slept).toEqual([5_000]);               // one backoff, per the ladder
     expect(result.attemptCount).toBe(2);
-    expect(result.nextEarliestAt).toBeNull(); // attempts exhausted: no gate
+    expect(result.nextEarliestAt).toBeNull();     // nothing is waiting for it now
+
+    // USABLE, so the runner continues and the campaign commits…
+    expect(result.outcome).toBe("partial");
+
+    // …and what it committed DESPITE is durable and specific.
+    const out = result.output as { stats?: unknown; blockedGap?: Record<string, unknown> };
+    expect(out.stats).toEqual({ followerCount: 42 }); // banked evidence survives
+    expect(out.blockedGap).toMatchObject({
+      phase: "capture",
+      attempts: 2,
+      failureClass: "transient",
+    });
+    expect(String(out.blockedGap!.reason)).toContain("2 of 2 attempts");
+  });
+
+  it("the ceiling and ladder are configurable, not hardcoded", async () => {
+    // They have never fired in production, so they are a considered guess that
+    // will need tuning from real data. A phase's declared policy still wins.
+    const phase = scriptedPhase("capture", [{ outcome: "failed", failureClass: "transient" }], {
+      retry: { maxAttempts: 3, backoffMs: { transient: [10, 20] } },
+    });
+    const slept: number[] = [];
+    const result = await makeSchedulerExecute({
+      now: () => NOW, sleep: async (ms) => { slept.push(ms); },
+    })(phase, {} as never, ctx);
+
+    expect(slept).toEqual([10, 20]);
+    expect(phase.seenAttempts).toEqual([1, 2, 3]);
+    expect(result.outcome).toBe("partial"); // exhausted → commit with the gap
   });
 
   it("a blocked phase parks with a future gate instead of retrying in-process", async () => {

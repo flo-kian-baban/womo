@@ -58,8 +58,25 @@ import { classForPhase, withResourceSlot } from "../_core/resourceSlots";
  *   structural    — the target shape changed. Retrying is futile; a human looks.
  *   genuine_empty — a confirmed fact about the subject. Never a retry.
  */
+/**
+ * CONFIGURABLE, because these numbers have never been exercised. Parking could
+ * not fire at all until now (nothing was ever classified transient), so the
+ * ladder below is a considered guess, not a measurement. It needs tuning once
+ * real blocks start parking — and tuning a constant means a release, whereas
+ * tuning an env var means a restart.
+ *
+ * `PHASE_TRANSIENT_BACKOFF_MS` — comma-separated ms, e.g. "30000,120000,300000".
+ * `PHASE_MAX_ATTEMPTS`         — total attempts including the first.
+ * Malformed values fall back to the defaults rather than disabling retries.
+ */
+function msLadderFromEnv(raw: string | undefined, fallback: readonly number[]): readonly number[] {
+  if (!raw) return fallback;
+  const parsed = raw.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n >= 0);
+  return parsed.length > 0 ? parsed : fallback;
+}
+
 export const DEFAULT_BACKOFF: Record<PhaseFailureClass, readonly number[]> = {
-  transient: [30_000, 120_000, 300_000],
+  transient: msLadderFromEnv(process.env.PHASE_TRANSIENT_BACKOFF_MS, [30_000, 120_000, 300_000]),
   structural: [],
   genuine_empty: [],
 };
@@ -69,10 +86,14 @@ export const DEFAULT_BACKOFF: Record<PhaseFailureClass, readonly number[]> = {
  * retry on purpose: hammering a rate limiter is how a soft block becomes a hard
  * one. Not our bug and not the subject's fault — wait it out.
  */
-export const BLOCKED_PARK_MS: readonly number[] = [300_000, 900_000];
+export const BLOCKED_PARK_MS: readonly number[] =
+  msLadderFromEnv(process.env.PHASE_BLOCKED_PARK_MS, [300_000, 900_000]);
 
 /** Initial attempt + 3 retries, when a phase declares no `maxAttempts`. */
-export const DEFAULT_MAX_ATTEMPTS = 4;
+export const DEFAULT_MAX_ATTEMPTS = (() => {
+  const n = Number(process.env.PHASE_MAX_ATTEMPTS);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 4;
+})();
 
 export type RetryAction =
   /** Outcome is usable (or terminal-good); move on. */
@@ -81,6 +102,13 @@ export type RetryAction =
   | "retry"
   /** Stop trying in this process; record `nextEarliestAt` for later attention. */
   | "park"
+  /**
+   * Retries are spent and the phase is STILL blocked. Commit what was gathered
+   * with the gap recorded, rather than leaving the campaign in limbo: a visible
+   * thin profile that says why it is thin beats a campaign nobody can see, and
+   * the review gate exists to catch it.
+   */
+  | "exhausted"
   /** Stop the campaign now — nothing more can be gathered. */
   | "terminate";
 
@@ -124,8 +152,21 @@ export function decideRetry(args: {
 
   // 3. The path is gone or its shape changed. Retrying a dead path burns
   //    minutes and teaches us nothing — park it where an analyst will see it.
+  /**
+   * DELIBERATELY INDEFINITE — no delayMs, so no `next_earliest_at` is written.
+   *
+   * A structural failure is a changed page shape or our own bug. A timer cannot
+   * fix either, so a retry-after time would be a lie: it would tell the analyst
+   * "this resumes at 14:32" when nothing will resume. `scanReadyWork` already
+   * excludes `structural` from requeue, so a gate here would also contradict
+   * the scan. This park means "a human looks", and that is the honest reading
+   * of a blank retry time.
+   *
+   * (Previously this was ALSO delay-less, but incidentally — the branch simply
+   * omitted delayMs. It is now the documented intent.)
+   */
   if (failureClass === "structural") {
-    return { action: "park", reason: "structural — retrying a changed/removed path is futile; parked for attention" };
+    return { action: "park", reason: "structural — retrying a changed/removed path is futile; parked for a human" };
   }
 
   const maxAttempts = policy?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -153,8 +194,8 @@ export function decideRetry(args: {
 
   if (attempt >= maxAttempts || delayMs === undefined) {
     return {
-      action: "park",
-      reason: `transient failure, attempts exhausted (${attempt}/${maxAttempts}) — parked`,
+      action: "exhausted",
+      reason: `blocked after ${attempt} of ${maxAttempts} attempts — committing with the gap recorded`,
     };
   }
 
@@ -202,6 +243,29 @@ export interface ScheduledPhaseResult extends PhaseResult<unknown> {
   attemptCount: number;
   /** Backoff gate the scheduler recorded, if it parked or requeued. */
   nextEarliestAt: Date | null;
+  /** Why this phase parked, in words. Null when it did not park. */
+  parkReason?: string | null;
+}
+
+/**
+ * What a campaign committed DESPITE, recorded durably in the phase's banked
+ * output under `blockedGap`.
+ *
+ * Written only when retries are spent and the phase is still blocked. It is a
+ * RECORD, never an input: nothing here feeds confidence, scoring, or
+ * transcript-source classification, all of which are frozen. It exists so that
+ * a thin profile can say why it is thin instead of looking like a creator with
+ * nothing to say.
+ */
+export interface BlockedGap {
+  phase: string;
+  /** How many attempts were made before giving up. */
+  attempts: number;
+  /** The class that kept failing — `transient` for a block. */
+  failureClass: string | null;
+  /** The phase's own last words on what went wrong. */
+  detail: string | null;
+  reason: string;
 }
 
 export interface SchedulerOptions {
@@ -267,7 +331,49 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
         if (decision.action !== "done") {
           console.warn(`[scheduler] ${phase.name} (${phase.tool}) → ${decision.action}: ${decision.reason}`);
         }
-        return { ...result, attemptCount: attempt, nextEarliestAt: nextEarliestAtFor(decision, now()) };
+
+        /**
+         * EXHAUSTED — the block outlasted the ladder. Downgrade to `partial` so
+         * the pipeline CONTINUES and commits what was gathered, and record the
+         * gap in the phase's own durable output. Leaving it `failed` would stop
+         * the campaign and leave nothing visible at all.
+         */
+        if (decision.action === "exhausted") {
+          const gap: BlockedGap = {
+            phase: phase.name,
+            attempts: attempt,
+            failureClass: result.failureClass ?? null,
+            detail: result.attempts?.[result.attempts.length - 1]?.detail ?? null,
+            reason: decision.reason,
+          };
+          return {
+            ...result,
+            outcome: "partial",
+            output: result.output && typeof result.output === "object"
+              ? { ...(result.output as Record<string, unknown>), blockedGap: gap }
+              : { blockedGap: gap },
+            attemptCount: attempt,
+            nextEarliestAt: null,
+            parkReason: decision.reason,
+          };
+        }
+
+        // A park's REASON is persisted the same way the gap is — merged into
+        // the phase's durable output. Without it the queue can only say
+        // "parked", never "parked because it was rate-limited", which is the
+        // one thing the analyst actually needs.
+        const parked = decision.action === "park";
+        return {
+          ...result,
+          output: parked
+            ? (result.output && typeof result.output === "object"
+              ? { ...(result.output as Record<string, unknown>), parkReason: decision.reason }
+              : { parkReason: decision.reason })
+            : result.output,
+          attemptCount: attempt,
+          nextEarliestAt: nextEarliestAtFor(decision, now()),
+          parkReason: parked ? decision.reason : null,
+        };
       }
 
       // The permit is already released — `withResourceSlot` returned above.

@@ -23,7 +23,7 @@
 import { useState } from "react";
 import {
   CheckCircle2, Loader2, AlertTriangle, Clock, PauseCircle, XCircle,
-  ChevronRight, ArrowRight, CircleDashed, Ban,
+  ChevronRight, ArrowRight, CircleDashed, Ban, MinusCircle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -69,7 +69,18 @@ function untilLabel(at: Date | string | null): string | null {
 function phaseTone(p: Phase | undefined, parked: boolean) {
   if (!p) return { cls: "text-muted-foreground/30", Icon: CircleDashed, spin: false };
   if (p.status === "complete") return { cls: "text-green-400", Icon: CheckCircle2, spin: false };
-  if (p.status === "partial") return { cls: "text-green-400/70", Icon: CheckCircle2, spin: false };
+  /**
+   * COMMITTED WITH A GAP gets its own mark, not a faded tick.
+   *
+   * `partial` is exactly where a blocked capture lands, and rendering it as a
+   * dimmer green check read as "basically fine" — the single most misleading
+   * thing on this card. A gap means evidence is MISSING for a known reason.
+   */
+  if (p.status === "partial") {
+    return p.blockedGap
+      ? { cls: "text-amber-400", Icon: AlertTriangle, spin: false }
+      : { cls: "text-green-400/60", Icon: MinusCircle, spin: false };
+  }
   if (p.status === "running") return { cls: "text-indigo-400", Icon: Loader2, spin: true };
   if (p.status === "genuine_empty") return { cls: "text-muted-foreground", Icon: Ban, spin: false };
   if (p.status === "failed" || p.status === "blocked") {
@@ -341,7 +352,22 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
                           retries {untilLabel(p!.nextEarliestAt)}
                         </span>
                       )}
+                      {p?.blockedGap && (
+                        <span className="text-[10px] text-amber-400">
+                          committed with a gap · {p.blockedGap.attempts} attempts
+                        </span>
+                      )}
                     </div>
+                    {/* WHY it parked. Without this the queue can only say
+                        "parked", never "parked because it was rate-limited". */}
+                    {p?.parkReason && (
+                      <p className="text-[10px] text-amber-400/70 mt-0.5 leading-snug">{p.parkReason}</p>
+                    )}
+                    {p?.blockedGap && (
+                      <p className="text-[10px] text-amber-400/70 mt-0.5 leading-snug">
+                        {p.blockedGap.detail ?? p.blockedGap.reason}
+                      </p>
+                    )}
                   </div>
                   <span className="text-[10px] text-muted-foreground/35 font-mono flex-shrink-0">
                     {p?.status ?? "—"}

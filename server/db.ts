@@ -459,6 +459,14 @@ export async function getPhaseStateForRuns(runIds: string[]) {
      */
     output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
                      THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
+    /**
+     * Two NARROW extractions from the same column. The queue needs to say WHY a
+     * phase parked and WHAT a campaign committed despite — both live in the
+     * phase output, which is otherwise far too large to ship per poll. Pulling
+     * just these keys keeps the read cheap and the answer honest.
+     */
+    parkReason: sql<string | null>`${analysisPhaseState.output}::jsonb ->> 'parkReason'`.as("park_reason"),
+    blockedGap: sql<unknown>`${analysisPhaseState.output}::jsonb -> 'blockedGap'`.as("blocked_gap"),
   })
     .from(analysisPhaseState)
     .where(inArray(analysisPhaseState.runId, runIds))

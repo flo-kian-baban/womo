@@ -501,6 +501,24 @@ const instagramCapture: CaptureTool = {
       },
       profileTitles: profileTitles.slice(0, 25),
       profileViewCounts,
+      /**
+       * NO `genuineEmpty` HERE, DELIBERATELY.
+       *
+       * The capture phase reads `assessment.genuineEmpty` to decide whether an
+       * empty result is PROVEN (terminate) or unproven (park and retry).
+       * Instagram cannot currently prove it. When Instagram rate-limits post
+       * extraction it returns a degraded profile that reports `media_count: 0`
+       * while succeeding — so a stated zero is indistinguishable from a real
+       * zero. Both live runs of `vnillalondon` and `olga.popovaa` recorded
+       * `media_count: 0` with 0 posts, and vnillalondon demonstrably has 24.
+       *
+       * Claiming emptiness from that would resurrect the exact failure the
+       * TikTok classifier exists to prevent: a false "no public content"
+       * rejection of a live creator. Omitting the field costs a rate-limited
+       * empty a few minutes of retries; asserting it costs a real creator their
+       * profile. Instagram's own zero-post floor still produces the frozen
+       * message after the retries are spent.
+       */
       assessment: { source, postsCaptured: posts.length },
       nativeProfile: native,
     };

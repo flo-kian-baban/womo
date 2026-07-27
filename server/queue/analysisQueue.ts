@@ -144,6 +144,16 @@ export interface CampaignStatus {
     /** When a parked phase becomes eligible again. */
     nextEarliestAt: Date | null;
     updatedAt: Date | null;
+    /** Why it parked, in words — null unless it parked. */
+    parkReason: string | null;
+    /**
+     * Set only when retries were spent and the phase was STILL blocked, so the
+     * campaign committed anyway. A record, never an input to scoring.
+     */
+    blockedGap: {
+      phase: string; attempts: number; failureClass: string | null;
+      detail: string | null; reason: string;
+    } | null;
   }>;
   subjectId: string | null;
   observationId: string | null;
@@ -190,6 +200,10 @@ function shapeCampaign(
     nextEarliestAt: Date | null;
     updatedAt: Date | null;
     output: unknown;
+    /** Why this phase parked, when it did. */
+    parkReason?: string | null;
+    /** What the campaign committed DESPITE, when retries were spent. */
+    blockedGap?: unknown;
   }>,
 ): CampaignStatus | null {
   if (rows.length === 0) return null;
@@ -201,6 +215,8 @@ function shapeCampaign(
     failureClass: r.failureClass,
     nextEarliestAt: r.nextEarliestAt,
     updatedAt: r.updatedAt,
+    parkReason: r.parkReason ?? null,
+    blockedGap: (r.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
   }));
   const commit = rows.find(r => r.phase === "extract_commit");
   const out = commit?.output as {

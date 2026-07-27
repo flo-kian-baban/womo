@@ -127,11 +127,51 @@ export function makeCapturePhase(platform: PlatformName): AnalysisPhase<{ handle
           d.expected.poolAfterApi = snapshotPool(pool);
         }
 
+        /**
+         * ZERO CAPTURED MEANS ONE OF TWO VERY DIFFERENT THINGS.
+         *
+         * The platform's capture tool already decides which, and reports it as
+         * `assessment.genuineEmpty` — a CONFIRMED zero from a healthy
+         * structured read. Anything else that came back empty is UNPROVEN: the
+         * usual cause is a block or rate-limit page, which is transient.
+         *
+         * Until now both collapsed into `partial`, and the scheduler treats
+         * partial as usable output — so a rate-limited capture committed a thin
+         * profile instead of waiting a minute and trying again. Measured on the
+         * live ledger: kaylee.nhi committed with 5 block pages and 5 silent
+         * failures against it. Now the unproven case is a TRANSIENT failure and
+         * the scheduler parks it.
+         *
+         * The threshold is zero, not "few". Deciding that N captured videos is
+         * too few is a min-data judgement, and those are FROZEN — the gates own
+         * them, after the assembly.
+         */
         const assessment = captured.assessment as { genuineEmpty?: boolean } | undefined;
         const genuineEmpty = Boolean(assessment?.genuineEmpty);
-        const outcome = genuineEmpty
-          ? "genuine_empty" as const
-          : pool.videoItems.length > 0 ? "complete" as const : "partial" as const;
+        const capturedNothing = pool.videoItems.length === 0;
+
+        if (capturedNothing && !genuineEmpty) {
+          return {
+            outcome: "failed",
+            failureClass: "transient",
+            // Bank what WAS read (stats, bio, titles) so an exhausted retry can
+            // still commit from it rather than starting from nothing.
+            output: {
+              stats: captured.stats,
+              profileTitles: captured.profileTitles,
+              profileViewCounts: captured.profileViewCounts,
+              assessment: captured.assessment ?? null,
+              pool: snapshotPool(pool),
+            },
+            attempts: [{
+              tool: tools.capture.name, outcome: "failed", failureClass: "transient",
+              durationMs: Date.now() - started,
+              detail: "captured no content and the emptiness is unproven — treated as a block, not an empty profile",
+            }],
+          };
+        }
+
+        const outcome = genuineEmpty ? "genuine_empty" as const : "complete" as const;
 
         return {
           outcome,
