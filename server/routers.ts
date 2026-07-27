@@ -36,7 +36,7 @@ import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
 import type { BrandCampaignDeps } from "./phases/brandCampaign";
-import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow } from "./queue/analysisQueue";
+import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow, type SubmitRequest } from "./queue/analysisQueue";
 import type { CreatorResearchResult } from "./webResearch";
 import type { PhaseStateWrite } from "./db";
 import type { RunOutcomeStatus } from "./db";
@@ -271,6 +271,38 @@ export function validateAndWeighBrandType(extracted: Record<string, unknown>) {
     extracted.brandType = fallback;
   }
   return getBrandWeights(extracted.brandType as string, extracted.campaignType as string | undefined);
+}
+
+/**
+ * A brand's queue submission, built in ONE place.
+ *
+ * Both `brand.submit` and `brand.reanalyze` go through this rather than each
+ * assembling its own descriptor. That is not tidiness: two hand-written copies
+ * of the same submission is the exact drift that left `bulkAnalyze` without a
+ * timeout, without terminal telemetry and without `followingCount` for months,
+ * and the brand router carried two near-identical copies of the whole
+ * orchestration until this session.
+ *
+ * Empty strings are dropped rather than passed through, so a brand submitted
+ * with blank optional fields encodes to the SAME `subject_hint` as one
+ * submitted without them — see _core/subjectIdentity for why that invariant is
+ * load-bearing.
+ */
+export function brandSubmitRequest(input: {
+  brandNameOrUrl: string;
+  googleMapsUrl?: string;
+  tiktokChannelUrl?: string;
+  instagramHandle?: string;
+}): SubmitRequest {
+  return {
+    handle: input.brandNameOrUrl,
+    platform: "Brand",
+    extras: {
+      ...(input.googleMapsUrl?.trim() ? { googleMapsUrl: input.googleMapsUrl.trim() } : {}),
+      ...(input.tiktokChannelUrl?.trim() ? { tiktokChannelUrl: input.tiktokChannelUrl.trim() } : {}),
+      ...(input.instagramHandle?.trim() ? { instagramHandle: input.instagramHandle.trim() } : {}),
+    },
+  };
 }
 
 /** The dependency set every brand campaign runs with. */
@@ -1539,9 +1571,10 @@ export const appRouter = router({
      * a brand with no channels encodes identically to one submitted without the
      * fields at all.
      *
-     * NOTE — `brand.analyze` below still runs inline and is NOT this. Removing
-     * it is the router consolidation, which is deliberately a separate step; see
-     * the no-bypass check in the session report.
+     * There is now ONE way in. `brand.analyze` — the synchronous endpoint that
+     * ran the whole orchestration inline — is gone (S5), and `brand.reanalyze`
+     * enqueues through the same builder as this. A single brand is a queue of
+     * one, exactly as a single creator is.
      */
     submit: publicProcedure
       .input(z.object({
@@ -1551,256 +1584,8 @@ export const appRouter = router({
         googleMapsUrl: z.string().optional().or(z.literal("")),
       }))
       .mutation(async ({ input }) => {
-        const campaigns = await submitCampaigns([{
-          handle: input.brandNameOrUrl,
-          platform: "Brand",
-          extras: {
-            ...(input.googleMapsUrl?.trim() ? { googleMapsUrl: input.googleMapsUrl.trim() } : {}),
-            ...(input.tiktokChannelUrl?.trim() ? { tiktokChannelUrl: input.tiktokChannelUrl.trim() } : {}),
-            ...(input.instagramHandle?.trim() ? { instagramHandle: input.instagramHandle.trim() } : {}),
-          },
-        }]);
+        const campaigns = await submitCampaigns([brandSubmitRequest(input)]);
         return { campaigns };
-      }),
-
-    analyze: publicProcedure
-      .input(z.object({
-        brandNameOrUrl: z.string().min(1),
-        tiktokChannelUrl: z.string().optional().or(z.literal("")),
-        instagramHandle: z.string().optional().or(z.literal("")),
-        googleMapsUrl: z.string().optional().or(z.literal("")),
-      }))
-      .mutation(async ({ input }) => {
-        // Step 1: Gather real evidence from the brand's website/web presence + review data + TikTok
-        let brandEvidenceSummary: string | undefined;
-        let brandEvidenceParts: BrandEvidenceParts | undefined;
-        let brandBaseInputs: BrandBaseEvidenceInputs | undefined;
-        let brandDecoderInputs: BrandDecoderInputs | undefined;
-        let tiktokMetadata: BrandTikTokMetadata | null = null;
-        let brandDataConfidenceLevel: string | undefined;
-        let brandSemanticWordCount: number | undefined;
-        let brandCrawledPagesCount: number | undefined;
-        let reviewFields: {
-          yelpRating?: number | null;
-          yelpReviewCount?: number | null;
-          yelpReviewExcerpts?: string;
-          googleRating?: number | null;
-          googleReviewCount?: number | null;
-          googleReviewExcerpts?: string;
-          combinedReviewText?: string;
-          overallRating?: number | null;
-          totalReviews?: number;
-        } = {};
-        let symbolFields: {
-          brandRawKeywords?: string[];
-          brandThemeLabels?: string[];
-          brandSymbolicVocabulary?: string[];
-          brandDecodedSymbols?: Record<string, unknown>;
-        } = {};
-        let mentionFields: {
-          mentionDecodedSymbols?: Record<string, unknown>;
-          mentionRawKeywords?: string[];
-          mentionHashtagCloud?: string[];
-          mentionSentiment?: string;
-          mentionSentimentConfidence?: string;
-          mentionMusicSignals?: string[];
-          mentionMusicArtists?: string[];
-          mentionTotalCount?: number;
-          mentionUniqueAuthors?: number;
-          mentionAudienceSummary?: string;
-        } = {};
-        try {
-          const brandResearch = await researchBrand(input.brandNameOrUrl, input.googleMapsUrl || undefined);
-          brandEvidenceSummary = brandResearch.evidenceSummary;
-          brandEvidenceParts = brandResearch.evidenceParts;
-          brandBaseInputs = brandResearch.brandBaseInputs;
-          brandDecoderInputs = brandResearch.brandDecoderInputs;
-          reviewFields = {
-            yelpRating: brandResearch.yelpRating,
-            yelpReviewCount: brandResearch.yelpReviewCount,
-            yelpReviewExcerpts: brandResearch.yelpReviewExcerpts || undefined,
-            googleRating: brandResearch.googleRating,
-            googleReviewCount: brandResearch.googleReviewCount,
-            googleReviewExcerpts: brandResearch.googleReviewExcerpts || undefined,
-            combinedReviewText: brandResearch.combinedReviewText || undefined,
-            overallRating: brandResearch.overallRating,
-            totalReviews: brandResearch.totalReviews,
-          };
-          // Brand Symbol Decoder fields
-          if (brandResearch.brandDecodedSymbols) {
-            symbolFields = {
-              brandRawKeywords: brandResearch.brandRawKeywords,
-              brandThemeLabels: brandResearch.brandThemeLabels,
-              brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
-              brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
-            };
-          }
-          // Phase 6: Audience Mention Intelligence fields
-          if (brandResearch.audienceMentionData) {
-            const m = brandResearch.audienceMentionData;
-            mentionFields = {
-              mentionDecodedSymbols: m as unknown as Record<string, unknown>,
-              mentionRawKeywords: m.audienceIdentityClaims,
-              mentionHashtagCloud: m.topHashtags,
-              mentionSentiment: m.sentimentSignal,
-              mentionSentimentConfidence: m.sentimentConfidence,
-              mentionMusicSignals: m.mentionMusicTitles,
-              mentionMusicArtists: m.mentionMusicArtists,
-              mentionTotalCount: m.totalMentions,
-              mentionUniqueAuthors: m.uniqueAuthors,
-              mentionAudienceSummary: m.audienceLanguageSummary,
-            };
-          }
-          // Capture data confidence level from brand research
-          brandDataConfidenceLevel = brandResearch.dataConfidenceLevel;
-          // P2-2: Capture crawl metadata for audit trail
-          brandSemanticWordCount = brandResearch.semanticWordCount;
-          brandCrawledPagesCount = brandResearch.crawledPages?.length;
-        } catch (err) {
-          console.warn("[brand.analyze] Web research failed, proceeding without evidence:", err);
-        }
-
-        // Step 1b: Analyze TikTok channel if provided
-        if (input.tiktokChannelUrl && input.tiktokChannelUrl.trim() !== "") {
-          try {
-            tiktokMetadata = await analyzeBrandTikTokChannel(input.tiktokChannelUrl);
-            if (tiktokMetadata) {
-              // Through the SHARED assembly, not a local concatenation — see
-              // phases/brandEvidence. Same bytes, one owner.
-              brandEvidenceParts = {
-                ...(brandEvidenceParts ?? { base: brandEvidenceSummary ?? "" }),
-                tiktokBlock: formatBrandTikTokEvidenceBlock(tiktokMetadata),
-              };
-              brandEvidenceSummary = assembleBrandEvidence(brandEvidenceParts);
-            }
-          } catch (err) {
-            console.warn("[brand.analyze] TikTok analysis failed, proceeding without TikTok data:", err);
-          }
-        }
-
-        // Step 1b2: Analyze Instagram channel if provided
-        let instagramMetadata: BrandInstagramMetadata | null = null;
-        if (input.instagramHandle?.trim()) {
-          try {
-            instagramMetadata = await analyzeBrandInstagramChannel(input.instagramHandle);
-            if (instagramMetadata) {
-              brandEvidenceParts = {
-                ...(brandEvidenceParts ?? { base: brandEvidenceSummary ?? "" }),
-                instagramBlock: formatBrandInstagramEvidenceBlock(instagramMetadata),
-              };
-              brandEvidenceSummary = assembleBrandEvidence(brandEvidenceParts);
-              console.log("[brand.analyze] Instagram evidence block added");
-            }
-          } catch (err) {
-            console.warn("[brand.analyze] Instagram analysis failed, proceeding without Instagram data:", err);
-          }
-        }
-
-        // Step 1c: Minimum data threshold — prevent hallucinated profiles
-        const evidenceLength = (brandEvidenceSummary || "").length;
-        const hasReviewData = (reviewFields.totalReviews ?? 0) > 0;
-        const hasMentionData = (mentionFields.mentionTotalCount ?? 0) > 0;
-        const hasTikTokChannel = tiktokMetadata !== null;
-        const hasInstagramChannel = instagramMetadata !== null;
-
-        // Records this monolith run as the reference the phased assembly must
-        // reproduce byte-for-byte. Inert without WOMO_BRAND_BASELINE.
-        if (brandEvidenceParts) {
-          maybeDumpBrandBaseline({
-            brand: input.brandNameOrUrl,
-            parts: brandEvidenceParts,
-            baseInputs: brandBaseInputs,
-            decoderInputs: brandDecoderInputs,
-            expectedEvidenceSummary: brandEvidenceSummary ?? "",
-            observed: {
-              semanticWordCount: brandSemanticWordCount ?? 0,
-              totalReviews: reviewFields.totalReviews ?? 0,
-              totalMentions: mentionFields.mentionTotalCount ?? 0,
-              hasTikTokChannel,
-              hasInstagram: hasInstagramChannel,
-            },
-          });
-        }
-        if (evidenceLength < 200 && !hasReviewData && !hasMentionData && !hasTikTokChannel && !hasInstagramChannel) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Insufficient data to analyze this brand. No website content, reviews, or social mentions were found. Please verify the brand URL and try again.",
-          });
-        }
-
-        // Step 2: AI extraction grounded in real evidence
-        // P0-3: Wrap extraction in try-catch with single retry for malformed LLM JSON
-        let extracted: Awaited<ReturnType<typeof extractBrandProfile>>;
-        try {
-          extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
-        } catch (firstErr) {
-          const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-          if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
-            console.warn(`[brand.analyze] LLM JSON parse failed on first attempt: ${errMsg.slice(0, 500)}`);
-            console.warn(`[brand.analyze] Retrying extraction after 1s delay...`);
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-              extracted = await extractBrandProfile(input.brandNameOrUrl, brandEvidenceSummary);
-            } catch (retryErr) {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Brand extraction failed after retry — please try again",
-              });
-            }
-          } else {
-            throw firstErr; // Non-JSON error, rethrow immediately
-          }
-        }
-
-        // P1-2: Validate brandType against BRAND_WEIGHT_TABLE keys
-        const validBrandTypes = Object.keys(BRAND_WEIGHT_TABLE);
-        if (!validBrandTypes.includes(extracted.brandType)) {
-          const invalidValue = extracted.brandType;
-          // Find closest match by checking substring containment
-          const closestMatch = validBrandTypes.find(vbt =>
-            vbt.toLowerCase().includes(invalidValue.toLowerCase()) ||
-            invalidValue.toLowerCase().includes(vbt.toLowerCase())
-          );
-          // Fallback: "Retail — E-Commerce / DTC Product" has α=0.5/β=0.3/γ=0.2 weights,
-          // which are closest to the table-wide average (α≈0.50, β≈0.29, γ≈0.20) across
-          // all 107 entries (Euclidean distance 0.011). It is also the most semantically
-          // generic consumer brand key — applicable to any DTC product regardless of category.
-          const fallback = closestMatch || "Retail — E-Commerce / DTC Product";
-          console.warn(`[brandType] Invalid value "${invalidValue}" received from LLM — defaulting to "${fallback}"`);
-          (extracted as unknown as Record<string, unknown>).brandType = fallback;
-        }
-
-        // Apply campaign modifier (Rule 5) when campaignType is Long-Term Ambassador or Product Launch
-        const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
-
-        // Step 3: Persist to V2 schema
-        const brandPersistResult = await persistBrandToV2({
-          brandName: extracted.brandName,
-          brandUrl: input.brandNameOrUrl.startsWith("http") ? input.brandNameOrUrl : undefined,
-          category: extracted.category,
-          extracted,
-          weights,
-          reviewFields,
-          tiktokMetadata,
-          instagramMetadata,
-          mentionFields,
-          symbolFields,
-          dataConfidenceLevel: brandDataConfidenceLevel,
-          semanticWordCount: brandSemanticWordCount,
-          crawledPagesCount: brandCrawledPagesCount,
-          tiktokRequested: Boolean(input.tiktokChannelUrl?.trim()),
-          instagramRequested: Boolean(input.instagramHandle?.trim()),
-        });
-
-        // Honest persistence outcome — never report plain success when
-        // persistence partially or wholly failed.
-        const persistence = summarizePersistence(brandPersistResult);
-        if (persistence.saved !== "full") {
-          console.warn(`[V2 Pipeline] ⚠️ Brand persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
-        }
-        const brandSubjectId = "subjectId" in brandPersistResult ? brandPersistResult.subjectId : null;
-        const saved = brandSubjectId ? await getBrandProfileById(brandSubjectId) : null;
-        return { profile: saved, persistence, extracted, weights };
       }),
 
     list: publicProcedure
@@ -1824,173 +1609,40 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    /**
+     * RE-ANALYSE — the stored profile, back through the queue.
+     *
+     * Resolves the saved brand into the SAME submit request `brand.submit`
+     * builds, then enqueues it. Both endpoints go through `brandSubmitRequest`
+     * rather than each assembling its own: two hand-written copies of a subject
+     * descriptor is precisely the drift that cost the creator side
+     * `followingCount` for months, and brand had two near-identical copies of
+     * the whole orchestration.
+     *
+     * The stored locators are the defaults; the caller may override the
+     * Instagram handle and Maps URL, which is what the old endpoint allowed and
+     * what an analyst uses when the first run had the wrong listing.
+     */
     reanalyze: publicProcedure
-      .input(z.object({ id: z.string(), instagramHandle: z.string().optional().or(z.literal("")), googleMapsUrl: z.string().optional().or(z.literal("")) }))
+      .input(z.object({
+        id: z.string(),
+        instagramHandle: z.string().optional().or(z.literal("")),
+        googleMapsUrl: z.string().optional().or(z.literal("")),
+      }))
       .mutation(async ({ input }) => {
         const existing = await getBrandProfileById(input.id);
-        if (!existing) throw new Error("Brand profile not found");
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Brand profile not found" });
 
-        let brandEvidenceSummary = "";
-        let reviewFields: any = {};
-        let symbolFields: any = {};
-        let mentionFieldsReanalyze: any = {};
-        let tiktokMetadata: BrandTikTokMetadata | null = null;
-        let brandDataConfidenceLevel: string | undefined;
-        let brandSemanticWordCountReanalyze: number | undefined;
-        let brandCrawledPagesCountReanalyze: number | undefined;
-
-        try {
-          const brandResearch = await researchBrand(existing.brandUrl || existing.brandName, input.googleMapsUrl || undefined);
-          brandEvidenceSummary = brandResearch.evidenceSummary;
-          reviewFields = {
-            yelpRating: brandResearch.yelpRating,
-            yelpReviewCount: brandResearch.yelpReviewCount,
-            yelpReviewExcerpts: brandResearch.yelpReviewExcerpts || undefined,
-            googleRating: brandResearch.googleRating,
-            googleReviewCount: brandResearch.googleReviewCount,
-            googleReviewExcerpts: brandResearch.googleReviewExcerpts || undefined,
-            combinedReviewText: brandResearch.combinedReviewText || undefined,
-            overallRating: brandResearch.overallRating,
-            totalReviews: brandResearch.totalReviews,
-          };
-          if (brandResearch.brandDecodedSymbols) {
-            symbolFields = {
-              brandRawKeywords: brandResearch.brandRawKeywords,
-              brandThemeLabels: brandResearch.brandThemeLabels,
-              brandSymbolicVocabulary: brandResearch.brandSymbolicVocabulary,
-              brandDecodedSymbols: brandResearch.brandDecodedSymbols as unknown as Record<string, unknown>,
-            };
-          }
-          // Phase 6: Audience Mention Intelligence
-          if (brandResearch.audienceMentionData) {
-            const m = brandResearch.audienceMentionData;
-            mentionFieldsReanalyze = {
-              mentionDecodedSymbols: m as unknown as Record<string, unknown>,
-              mentionRawKeywords: m.audienceIdentityClaims,
-              mentionHashtagCloud: m.topHashtags,
-              mentionSentiment: m.sentimentSignal,
-              mentionSentimentConfidence: m.sentimentConfidence,
-              mentionMusicSignals: m.mentionMusicTitles,
-              mentionMusicArtists: m.mentionMusicArtists,
-              mentionTotalCount: m.totalMentions,
-              mentionUniqueAuthors: m.uniqueAuthors,
-              mentionAudienceSummary: m.audienceLanguageSummary,
-            };
-          }
-          // Capture data confidence level from brand research
-          brandDataConfidenceLevel = brandResearch.dataConfidenceLevel;
-          brandSemanticWordCountReanalyze = brandResearch.semanticWordCount;
-          brandCrawledPagesCountReanalyze = brandResearch.crawledPages?.length;
-        } catch (err) {
-          console.warn("[brand.reanalyze] Web research failed, proceeding without evidence:", err);
-        }
-
-        // Re-run TikTok analysis if the brand has a stored TikTok handle
-        if (existing.tiktokChannelUrl) {
-          try {
-            tiktokMetadata = await analyzeBrandTikTokChannel(existing.tiktokChannelUrl);
-            if (tiktokMetadata) {
-              const tiktokEvidenceBlock = formatBrandTikTokEvidenceBlock(tiktokMetadata);
-              if (tiktokEvidenceBlock) {
-                brandEvidenceSummary = brandEvidenceSummary + "\n\n" + tiktokEvidenceBlock;
-              }
-            }
-          } catch (err) {
-            console.warn("[brand.reanalyze] TikTok analysis failed, proceeding without TikTok data:", err);
-          }
-        }
-
-        // Re-run Instagram analysis if handle is provided or stored
-        let instagramMetadataReanalyze: BrandInstagramMetadata | null = null;
-        const igHandleToUse = input.instagramHandle?.trim() || (existing as any).instagramHandle;
-        if (igHandleToUse) {
-          try {
-            instagramMetadataReanalyze = await analyzeBrandInstagramChannel(igHandleToUse);
-            if (instagramMetadataReanalyze) {
-              const igBlock = formatBrandInstagramEvidenceBlock(instagramMetadataReanalyze);
-              if (igBlock) {
-                brandEvidenceSummary = brandEvidenceSummary + "\n\n" + igBlock;
-              }
-              console.log("[brand.reanalyze] Instagram evidence block added");
-            }
-          } catch (err) {
-            console.warn("[brand.reanalyze] Instagram analysis failed, proceeding without Instagram data:", err);
-          }
-        }
-
-        // P0-3: Wrap extraction with retry for malformed JSON
-        let extracted: Awaited<ReturnType<typeof extractBrandProfile>>;
-        try {
-          extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
-        } catch (firstErr) {
-          const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-          if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
-            console.warn(`[brand.reanalyze] LLM JSON parse failed, retrying after 1s...`);
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-              extracted = await extractBrandProfile(existing.brandUrl || existing.brandName, brandEvidenceSummary);
-            } catch {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Brand extraction failed after retry — please try again",
-              });
-            }
-          } else {
-            throw firstErr;
-          }
-        }
-
-        // P1-2: Validate brandType
-        const validBrandTypesReanalyze = Object.keys(BRAND_WEIGHT_TABLE);
-        if (!validBrandTypesReanalyze.includes(extracted.brandType)) {
-          const invalidValue = extracted.brandType;
-          const closestMatch = validBrandTypesReanalyze.find(vbt =>
-            vbt.toLowerCase().includes(invalidValue.toLowerCase()) ||
-            invalidValue.toLowerCase().includes(vbt.toLowerCase())
-          );
-          // Same rationale as analyze path — closest to table-wide average α/β/γ weights
-          const fallback = closestMatch || "Retail — E-Commerce / DTC Product";
-          console.warn(`[brandType] Invalid value "${invalidValue}" received from LLM — defaulting to "${fallback}"`);
-          (extracted as unknown as Record<string, unknown>).brandType = fallback;
-        }
-
-        const weights = getBrandWeights(extracted.brandType, extracted.campaignType);
-
-        // V2: reanalyze creates a new observation (append-only)
-        const brandReanalyzePersistResult = await persistBrandToV2({
-          brandName: existing.brandName,
-          brandUrl: existing.brandUrl ?? undefined,
-          category: extracted.category,
-          extracted,
-          weights,
-          reviewFields,
-          tiktokMetadata,
-          instagramMetadata: instagramMetadataReanalyze,
-          mentionFields: mentionFieldsReanalyze,
-          symbolFields,
-          dataConfidenceLevel: brandDataConfidenceLevel,
-          semanticWordCount: brandSemanticWordCountReanalyze,
-          crawledPagesCount: brandCrawledPagesCountReanalyze,
-          tiktokRequested: Boolean(existing.tiktokChannelUrl),
-          instagramRequested: Boolean(igHandleToUse),
-        });
-        const persistence = summarizePersistence(brandReanalyzePersistResult);
-        if (persistence.saved !== "full") {
-          console.warn(`[V2 Pipeline] ⚠️ Brand reanalyze persistence outcome: ${persistence.saved}`, persistence.error ?? persistence.failedComponents);
-        }
-
-        // NOTE: on saved === "none" this returns the PREVIOUS profile — the
-        // persistence field is what tells the caller the rerun was not saved.
-        const updated = await getBrandProfileById(input.id);
-        return { profile: updated, persistence, extracted, weights };
+        const campaigns = await submitCampaigns([brandSubmitRequest({
+          // The URL when we have one — a name-only brand has nothing to crawl,
+          // and capture's `isUrl` test is what decides that.
+          brandNameOrUrl: existing.brandUrl || existing.brandName,
+          googleMapsUrl: input.googleMapsUrl,
+          tiktokChannelUrl: existing.tiktokChannelUrl ?? undefined,
+          instagramHandle: input.instagramHandle?.trim() || existing.instagramHandle || undefined,
+        })]);
+        return { campaigns };
       }),
-
-    weightTable: publicProcedure.query(() => {
-      return Object.entries(BRAND_WEIGHT_TABLE).map(([type, weights]) => ({
-        type,
-        ...weights,
-      }));
-    }),
   }),
 
     // ─── Cultural Match Score Routes ─────────────────────────────────────────────────────────────────────────────

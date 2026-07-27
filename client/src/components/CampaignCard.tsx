@@ -43,6 +43,7 @@ const PHASES: Array<{ name: Phase["phase"]; label: string; hint: string }> = [
   { name: "capture", label: "Capture", hint: "the subject and its recent content" },
   { name: "augment", label: "Augment", hint: "widening the sample" },
   { name: "transcribe", label: "Transcribe", hint: "spoken content across the sample" },
+  { name: "channel_instagram", label: "Instagram channel", hint: "the subject's own posts" },
   { name: "derive", label: "Derive", hint: "themes and symbols" },
   { name: "extract_commit", label: "Extract & commit", hint: "cultural profile, saved" },
 ];
@@ -274,6 +275,17 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
   const Icon = s.icon;
 
   const byPhase = new Map(campaign.phases.map(p => [p.phase, p]));
+  /**
+   * A subject only shows the phases it actually owes.
+   *
+   * `channel_instagram` is brand's; a creator never writes a row for it, and
+   * rendering it greyed would invent work the campaign never had. Every other
+   * phase is shown whether or not it has started, so a queued campaign still
+   * displays what is coming.
+   */
+  const visiblePhases = PHASES.filter(
+    ({ name }) => name !== "channel_instagram" || byPhase.has("channel_instagram"),
+  );
   const parkedPhase = campaign.phases.find(
     p => p.nextEarliestAt && new Date(p.nextEarliestAt).getTime() > Date.now(),
   );
@@ -296,7 +308,7 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
 
           {/* The phase spine — five marks, one per contract phase. */}
           <div className="flex items-center gap-1 mt-2.5">
-            {PHASES.map(({ name, label }) => {
+            {visiblePhases.map(({ name, label }) => {
               const p = byPhase.get(name);
               const { cls, Icon: PIcon, spin } = phaseTone(p, Boolean(parkedPhase));
               return (
@@ -326,7 +338,7 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
       {open && (
         <div className="px-4 pb-4 space-y-3 border-t border-border/40 pt-3">
           <div className="space-y-1.5">
-            {PHASES.map(({ name, label, hint }) => {
+            {visiblePhases.map(({ name, label, hint }) => {
               const p = byPhase.get(name);
               const isParked = Boolean(p?.nextEarliestAt && new Date(p.nextEarliestAt!).getTime() > Date.now());
               const { cls, Icon: PIcon, spin } = phaseTone(p, isParked);

@@ -150,13 +150,12 @@ describe("deriveCampaignState — the queue view IS the ledger", () => {
  * enforces is the part that matters architecturally: the RUNNER is reachable
  * only from the queue, exactly as the creator runner is.
  *
- * ─── The honest part ────────────────────────────────────────────────────────
- * `brand.analyze` and `brand.reanalyze` still call researchBrand and
- * persistBrandToV2 inline. They are the pre-queue endpoints and removing them is
- * the router consolidation — a separate, deliberate step. Until then brand has
- * two ways in, and that is recorded here as a COUNT rather than described in a
- * comment: a third one cannot appear without failing this file, and the count
- * drops to zero the day the consolidation lands.
+ * ─── The count is now ZERO ──────────────────────────────────────────────────
+ * `brand.analyze` is deleted and `brand.reanalyze` enqueues, so no path reaches
+ * the brand pipeline without going through the queue. The count is kept as an
+ * assertion rather than a comment because that is what stops it climbing back:
+ * a new inline endpoint fails this file on the day it is written, not on the
+ * day someone audits it.
  */
 const brandRouterSrc = routersSrc.slice(routersSrc.indexOf("brand: router({"));
 
@@ -177,7 +176,7 @@ describe("brand admission — the runner is queue-only", () => {
   it("brand.submit enqueues rather than running anything", () => {
     const submit = brandRouterSrc.slice(
       brandRouterSrc.indexOf("submit: publicProcedure"),
-      brandRouterSrc.indexOf("analyze: publicProcedure"),
+      brandRouterSrc.indexOf("reanalyze: publicProcedure"),
     );
     expect(submit).toContain("submitCampaigns(");
     expect(submit).not.toMatch(/researchBrand\s*\(/);
@@ -185,28 +184,45 @@ describe("brand admission — the runner is queue-only", () => {
   });
 
   it("the subject's locators travel as EXTRAS, not as a flattened handle", () => {
-    const submit = brandRouterSrc.slice(
-      brandRouterSrc.indexOf("submit: publicProcedure"),
-      brandRouterSrc.indexOf("analyze: publicProcedure"),
+    // They live in the shared builder now, which is the point — one place, so
+    // submit and reanalyze cannot describe the same subject differently.
+    const builder = routersSrc.slice(
+      routersSrc.indexOf("export function brandSubmitRequest"),
+      routersSrc.indexOf("/** The dependency set every brand campaign runs with. */"),
     );
-    expect(submit).toContain("extras:");
+    expect(builder).toContain("extras:");
     for (const locator of ["googleMapsUrl", "tiktokChannelUrl", "instagramHandle"]) {
-      expect(submit, `${locator} not threaded through the subject descriptor`).toContain(locator);
+      expect(builder, `${locator} not threaded through the subject descriptor`).toContain(locator);
     }
   });
 
   /**
-   * THE KNOWN BYPASSES, COUNTED. Not an endorsement — a tripwire. These two are
-   * the deferred router consolidation; a THIRD inline brand entry point is a
-   * regression and fails here.
+   * ZERO inline brand endpoints. The tripwire, not an audit note: a new inline
+   * path fails here the day it is written.
    */
-  it("exactly TWO inline brand endpoints remain — analyze and reanalyze", () => {
-    const inlineResearch = brandRouterSrc.match(/\bresearchBrand\s*\(/g) ?? [];
-    const inlinePersist = brandRouterSrc.match(/\bpersistBrandToV2\s*\(/g) ?? [];
-    expect(inlineResearch, "a new inline brand path appeared").toHaveLength(2);
-    expect(inlinePersist, "a new inline brand persist appeared").toHaveLength(2);
-    // And they are the two we know about.
-    expect(brandRouterSrc).toMatch(/^\s*analyze: publicProcedure/m);
-    expect(brandRouterSrc).toMatch(/^\s*reanalyze: publicProcedure/m);
+  it("NO path reaches the brand pipeline without enqueueing", () => {
+    expect(brandRouterSrc.match(/\bresearchBrand\s*\(/g) ?? [],
+      "an inline brand research path appeared").toHaveLength(0);
+    expect(brandRouterSrc.match(/\bpersistBrandToV2\s*\(/g) ?? [],
+      "an inline brand persist appeared").toHaveLength(0);
+    // The synchronous endpoint is gone, not renamed.
+    expect(brandRouterSrc).not.toMatch(/^\s*analyze: publicProcedure/m);
+  });
+
+  it("brand.reanalyze enqueues instead of running the pipeline", () => {
+    const reanalyze = brandRouterSrc.slice(brandRouterSrc.indexOf("reanalyze: publicProcedure"));
+    expect(reanalyze).toContain("submitCampaigns(");
+    expect(reanalyze).toContain("brandSubmitRequest(");
+  });
+
+  /**
+   * ONE builder, both doors. Two hand-written submission descriptors is the
+   * drift shape that cost the creator side `followingCount`; brand carried two
+   * copies of the entire orchestration until this session.
+   */
+  it("submit and reanalyze share one submission builder", () => {
+    expect((brandRouterSrc.match(/brandSubmitRequest\(/g) ?? []).length).toBe(2);
+    // And neither hand-rolls the descriptor beside it.
+    expect(brandRouterSrc).not.toMatch(/platform:\s*"Brand"/);
   });
 });
