@@ -28,6 +28,49 @@ import { writeFileSync } from "node:fs";
  * join. That asymmetry is the whole reason the seam is worth having.
  */
 
+/**
+ * The inputs the BASE block is built from.
+ *
+ * Recorded as well as the finished string, because a brand capture phase has to
+ * REBUILD this base rather than receive it — and a harness that only pins the
+ * finished string cannot tell a faithful rebuild from a lucky one.
+ */
+export interface BrandBaseEvidenceInputs {
+  brandName: string;
+  websiteUrl: string | null;
+  description: string;
+  snippets: string[];
+  audiencePerceptionBlock: string | null;
+}
+
+/**
+ * The BASE evidence block, verbatim.
+ *
+ * Lifted unchanged out of `researchBrand` so the monolith and any phased path
+ * build it from one place. Every element, its order, the `.filter(Boolean)` and
+ * the final `.trim()` are load-bearing: an empty element contributes NO line,
+ * which is the same absent-block asymmetry the outer assembly has, and the
+ * INSTRUCTIONS text is frozen prompt content.
+ */
+export function buildBrandBaseEvidence(i: BrandBaseEvidenceInputs): string {
+  return [
+    "BRAND RESEARCH EVIDENCE",
+    "=======================",
+    `Brand Name: ${i.brandName}`,
+    `Website: ${i.websiteUrl ?? "Not provided"}`,
+    i.description ? `Website Content:\n${i.description}` : "",
+    i.snippets.length > 0 ? `\nKey Snippets:\n${i.snippets.slice(0, 8).join("\n")}` : "",
+    i.audiencePerceptionBlock ? `\n\n${i.audiencePerceptionBlock}` : "",
+    "",
+    "INSTRUCTIONS FOR ANALYSIS:",
+    "Based on the above evidence, extract the brand's cultural profile. If the website content is limited,",
+    "use your knowledge of this brand/business name to supplement, but clearly ground your analysis in",
+    "what the evidence shows. Do NOT invent a brand identity that contradicts the evidence.",
+    "Pay special attention to the AUDIENCE PERCEPTION section — review language reveals how customers",
+    "actually decode the brand, which may differ from the brand's self-presentation.",
+  ].filter(Boolean).join("\n").trim();
+}
+
 /** The already-formatted blocks, in assembly order. Absent = omit entirely. */
 export interface BrandEvidenceParts {
   /** `researchBrand`'s summary BEFORE symbols and mentions were appended. */
@@ -71,6 +114,8 @@ export function assembleBrandEvidence(parts: BrandEvidenceParts): string {
 export interface BrandMonolithBaseline {
   brand: string;
   parts: BrandEvidenceParts;
+  /** What the base block was built FROM — see BrandBaseEvidenceInputs. */
+  baseInputs?: BrandBaseEvidenceInputs;
   /** The exact `brandEvidenceSummary` the monolith handed the model. */
   expectedEvidenceSummary: string;
   /** Coarse shape of the run, so a vacuous fixture can be refused by the harness. */

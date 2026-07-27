@@ -24,7 +24,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { assembleBrandEvidence, type BrandMonolithBaseline } from "./phases/brandEvidence";
+import { assembleBrandEvidence, buildBrandBaseEvidence, type BrandMonolithBaseline } from "./phases/brandEvidence";
 
 const FIXTURE = path.join(import.meta.dirname, "__fixtures__", "brandBaseline.json");
 const bl: BrandMonolithBaseline | null = existsSync(FIXTURE)
@@ -95,6 +95,57 @@ describe("brand evidence identity — the phased assembly reproduces the monolit
  * result to equal the recorded string byte-for-byte. If the split cannot
  * preserve it, these fail; the harness is the arbiter, not the implementation.
  */
+/**
+ * THE BASE BLOCK, REBUILT.
+ *
+ * A brand CAPTURE phase does not receive the base summary — it rebuilds it from
+ * the website crawl, the search snippets and the review block. Pinning only the
+ * finished string cannot tell a faithful rebuild from a lucky one, so the
+ * baseline records the inputs too and the harness rebuilds from them.
+ */
+describe("the base block is rebuilt byte-for-byte from its recorded inputs", () => {
+  it("the baseline records what the base was built FROM", () => {
+    expect(bl!.baseInputs, "re-record the baseline: it predates baseInputs").toBeTruthy();
+  });
+
+  it("the fixture's base inputs are NON-TRIVIAL", () => {
+    const i = bl!.baseInputs!;
+    // Website content AND snippets AND a review block — all three optional
+    // elements populated, so the filter(Boolean) asymmetry is actually exercised.
+    expect(i.description.length).toBeGreaterThan(500);
+    expect(i.snippets.length).toBeGreaterThanOrEqual(3);
+    expect(i.audiencePerceptionBlock, "no review block — the third element is untested").toBeTruthy();
+  });
+
+  it("BYTE-IDENTICAL: rebuilding from the recorded inputs reproduces the recorded base", () => {
+    expect(buildBrandBaseEvidence(bl!.baseInputs!)).toBe(bl!.parts.base);
+  });
+
+  it("and that rebuilt base still assembles into the recorded full string", () => {
+    // End to end: rebuild the base, then run the outer assembly over it.
+    const rebuilt = buildBrandBaseEvidence(bl!.baseInputs!);
+    expect(assembleBrandEvidence({ ...bl!.parts, base: rebuilt }))
+      .toBe(bl!.expectedEvidenceSummary);
+  });
+
+  it("only the first 8 snippets reach the prompt — the cap is frozen", () => {
+    const i = bl!.baseInputs!;
+    if (i.snippets.length > 8) {
+      expect(buildBrandBaseEvidence(i)).not.toContain(i.snippets[8]);
+    }
+    expect(buildBrandBaseEvidence(i)).toContain(i.snippets[0]);
+  });
+
+  it("an absent element contributes NO line — the same asymmetry as the outer assembly", () => {
+    const bare = buildBrandBaseEvidence({
+      brandName: "X", websiteUrl: null, description: "", snippets: [], audiencePerceptionBlock: null,
+    });
+    expect(bare).toContain("Website: Not provided");
+    expect(bare).not.toContain("Website Content:");
+    expect(bare).not.toContain("Key Snippets:");
+  });
+});
+
 describe("the derive split preserves the recorded string exactly", () => {
   it("collection-without-symbols, then derive-supplies-symbols, reassembles identically", () => {
     // 1. What collection now returns: every block EXCEPT the symbols one.

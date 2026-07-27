@@ -44,7 +44,7 @@ import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTi
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { newRunId, withAnalysisRun, currentDeadlineAt } from "./_core/runContext";
 import { decodeSubject } from "./_core/subjectIdentity";
-import { assembleBrandEvidence, maybeDumpBrandBaseline, type BrandEvidenceParts } from "./phases/brandEvidence";
+import { assembleBrandEvidence, maybeDumpBrandBaseline, type BrandBaseEvidenceInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
 // Run machinery (concurrency limiter, failure classification, timeout race,
@@ -1373,6 +1373,7 @@ export const appRouter = router({
         // Step 1: Gather real evidence from the brand's website/web presence + review data + TikTok
         let brandEvidenceSummary: string | undefined;
         let brandEvidenceParts: BrandEvidenceParts | undefined;
+        let brandBaseInputs: BrandBaseEvidenceInputs | undefined;
         let tiktokMetadata: BrandTikTokMetadata | null = null;
         let brandDataConfidenceLevel: string | undefined;
         let brandSemanticWordCount: number | undefined;
@@ -1410,6 +1411,7 @@ export const appRouter = router({
           const brandResearch = await researchBrand(input.brandNameOrUrl, input.googleMapsUrl || undefined);
           brandEvidenceSummary = brandResearch.evidenceSummary;
           brandEvidenceParts = brandResearch.evidenceParts;
+          brandBaseInputs = brandResearch.brandBaseInputs;
           reviewFields = {
             yelpRating: brandResearch.yelpRating,
             yelpReviewCount: brandResearch.yelpReviewCount,
@@ -1504,6 +1506,7 @@ export const appRouter = router({
           maybeDumpBrandBaseline({
             brand: input.brandNameOrUrl,
             parts: brandEvidenceParts,
+            baseInputs: brandBaseInputs,
             expectedEvidenceSummary: brandEvidenceSummary ?? "",
             observed: {
               semanticWordCount: brandSemanticWordCount ?? 0,

@@ -56,7 +56,7 @@ import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
-import { assembleBrandEvidence, type BrandEvidenceParts } from "./phases/brandEvidence";
+import { assembleBrandEvidence, buildBrandBaseEvidence, type BrandBaseEvidenceInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { encodeSubject } from "./_core/subjectIdentity";
 import type { AnalysisPhase, CampaignState, PhaseName, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { PHASE_NAMES } from "./_core/analysisPhase";
@@ -159,6 +159,8 @@ export interface BrandResearchResult {
    * rather than the finished string.
    */
   evidenceParts: BrandEvidenceParts;
+  /** What the base block was built from, for the identity harness. */
+  brandBaseInputs: BrandBaseEvidenceInputs;
   // Review data
   yelpRating: number | null;
   yelpReviewCount: number | null;
@@ -3448,22 +3450,14 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
     .map(r => `[${r.rating}\u2605] ${r.author}: "${r.text.slice(0, 300)}"`)
     .join("\n\n") ?? "";
 
-  const evidenceSummary = [
-    "BRAND RESEARCH EVIDENCE",
-    "=======================",
-    `Brand Name: ${brandName}`,
-    `Website: ${isUrl ? brandNameOrUrl : "Not provided"}`,
-    description ? `Website Content:\n${description}` : "",
-    snippets.length > 0 ? `\nKey Snippets:\n${snippets.slice(0, 8).join("\n")}` : "",
-    reviewResult.audiencePerceptionBlock ? `\n\n${reviewResult.audiencePerceptionBlock}` : "",
-    "",
-    "INSTRUCTIONS FOR ANALYSIS:",
-    "Based on the above evidence, extract the brand's cultural profile. If the website content is limited,",
-    "use your knowledge of this brand/business name to supplement, but clearly ground your analysis in",
-    "what the evidence shows. Do NOT invent a brand identity that contradicts the evidence.",
-    "Pay special attention to the AUDIENCE PERCEPTION section — review language reveals how customers",
-    "actually decode the brand, which may differ from the brand's self-presentation.",
-  ].filter(Boolean).join("\n").trim();
+  const brandBaseInputs = {
+    brandName,
+    websiteUrl: isUrl ? brandNameOrUrl : null,
+    description,
+    snippets,
+    audiencePerceptionBlock: reviewResult.audiencePerceptionBlock || null,
+  };
+  const evidenceSummary = buildBrandBaseEvidence(brandBaseInputs);
 
   // Phase 6: Fetch audience mention intelligence from TikTok (non-fatal)
   let audienceMentionData: AudienceMentionData | null = null;
@@ -3597,6 +3591,7 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
     searchSnippets: snippets,
     evidenceSummary: evidenceSummaryWithSymbols,
     evidenceParts,
+    brandBaseInputs,
     yelpRating,
     yelpReviewCount,
     yelpReviewExcerpts,
