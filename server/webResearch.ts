@@ -2518,7 +2518,10 @@ export async function runCollection(
   // that decision in its own FROZEN text. The driver only asks and throws.
   // Runs BETWEEN phase 4 and phase 5: a single five-phase pass would persist a
   // profile the min-data gate exists to refuse.
-  const verdict = toolsetFor(platform).gate({ handle, capture, augment, transcribe });
+  const verdict = toolsetFor(platform).gate({
+    handle,
+    banked: { capture, augment, transcribe, derive: derived },
+  });
   if (!verdict.ok) {
     throw new TRPCError({ code: verdict.code, message: verdict.message });
   }

@@ -91,7 +91,7 @@ describe("gate — the platform decides, the driver only asks", () => {
 
   it("refuses a null capture on every platform", () => {
     for (const platform of registeredPlatforms()) {
-      const v = toolsetFor(platform).gate({ handle: "x", capture: null, augment: null, transcribe: null });
+      const v = toolsetFor(platform).gate({ handle: "x", banked: { capture: null, augment: null, transcribe: null } });
       expect(ok(v), `${platform} should refuse an absent capture`).toBe(false);
       if (!v.ok) {
         expect(v.message.length).toBeGreaterThan(20); // an honest message, not a code
@@ -105,7 +105,7 @@ describe("gate — the platform decides, the driver only asks", () => {
     // outcome and the queue would report a crash instead of a refusal.
     for (const platform of registeredPlatforms()) {
       expect(() => toolsetFor(platform).gate({
-        handle: "x", capture: { stats: {} }, augment: undefined, transcribe: undefined,
+        handle: "x", banked: { capture: { stats: {} }, augment: undefined, transcribe: undefined },
       })).not.toThrow();
     }
   });
@@ -115,9 +115,11 @@ describe("gate — the platform decides, the driver only asks", () => {
     // when we were rate-limited sends them to delete a good profile.
     const v = toolsetFor("TikTok").gate({
       handle: "creator",
-      capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: [] } },
-      augment: { quotaExhausted: true, pool: { videoTitles: [] } },
-      transcribe: { transcripts: [] },
+      banked: {
+        capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: [] } },
+        augment: { quotaExhausted: true, pool: { videoTitles: [] } },
+        transcribe: { transcripts: [] },
+      },
     });
     expect(v.ok).toBe(false);
     if (!v.ok) {
@@ -129,9 +131,11 @@ describe("gate — the platform decides, the driver only asks", () => {
   it("TikTok: thin evidence is a min-data refusal, with the counts that justify it", () => {
     const v = toolsetFor("TikTok").gate({
       handle: "creator",
-      capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: ["one"] } },
-      augment: { quotaExhausted: false, pool: { videoTitles: ["one"] } },
-      transcribe: { transcripts: [], discoveredVideoPool: [] },
+      banked: {
+        capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: ["one"] } },
+        augment: { quotaExhausted: false, pool: { videoTitles: ["one"] } },
+        transcribe: { transcripts: [], discoveredVideoPool: [] },
+      },
     });
     expect(v.ok).toBe(false);
     if (!v.ok) {
@@ -145,9 +149,11 @@ describe("gate — the platform decides, the driver only asks", () => {
     const titles = ["a", "b", "c", "d", "e"];
     const v = toolsetFor("TikTok").gate({
       handle: "creator",
-      capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: titles } },
-      augment: { quotaExhausted: false, pool: { videoTitles: titles } },
-      transcribe: { transcripts: [], discoveredVideoPool: [1, 2] },
+      banked: {
+        capture: { stats: { followerCount: 100, bio: "b" }, pool: { videoTitles: titles } },
+        augment: { quotaExhausted: false, pool: { videoTitles: titles } },
+        transcribe: { transcripts: [], discoveredVideoPool: [1, 2] },
+      },
     });
     expect(v.ok).toBe(true);
   });
@@ -235,8 +241,11 @@ describe("engagementRate — platform-specific by design, NOT normalised", () =>
 describe("Instagram zero-post floor (S4b)", () => {
   const gate = (over: Record<string, unknown>) =>
     toolsetFor("Instagram").gate({
-      handle: "creator", augment: null, transcribe: null,
-      capture: { stats: { followerCount: 500, bio: "a real bio", videoCount: 0 }, pool: { videoItems: [] }, ...over },
+      handle: "creator",
+      banked: {
+        augment: null, transcribe: null,
+        capture: { stats: { followerCount: 500, bio: "a real bio", videoCount: 0 }, pool: { videoItems: [] }, ...over },
+      },
     });
 
   it("REFUSES a capture with zero posts — no profile from bio alone", () => {

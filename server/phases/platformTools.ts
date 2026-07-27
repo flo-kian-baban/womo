@@ -28,7 +28,7 @@
  * persist into ONE content_items table and one CreatorResearchResult today,
  * which is what makes a single contract honest here.
  */
-import type { PlatformName, SampleBucket } from "../_core/analysisPhase";
+import type { PhaseName, PlatformName, SampleBucket } from "../_core/analysisPhase";
 import type {
   CreatorResearchResult, EngagementSignals, LongitudinalSample,
   PoolVideoItem, TranscriptEntry,
@@ -132,9 +132,20 @@ export type GateVerdict =
 /** What the gate reads: the banked outputs of phases 1-4. */
 export interface GateInput {
   handle: string;
-  capture: unknown;
-  augment: unknown;
-  transcribe: unknown;
+  /**
+   * Every phase's banked output, keyed by phase name (S5 — the seventh
+   * extension).
+   *
+   * This used to be three fields named `capture`, `augment` and `transcribe`.
+   * They were already typed `unknown`, so a subject with different phases could
+   * technically pass its own shapes through them — but the NAMES would then lie
+   * about what they held, which is worse than a type that needs widening. A map
+   * keyed by phase name says exactly what it is for every subject type.
+   *
+   * Gates read the phases they care about and ignore the rest; a gate that
+   * needs no transcribe simply never looks for it.
+   */
+  banked: Partial<Record<PhaseName, unknown>>;
 }
 
 export interface TranscribeTool {
@@ -326,9 +337,9 @@ const tiktokTranscribe: TranscribeTool = {
  * the no-data refusal. Moving them must not reword them.
  */
 const tiktokGate: PlatformToolset["gate"] = (input) => {
-  const capture = input.capture as TikTokGateCapture | null;
-  const augment = input.augment as { quotaExhausted?: boolean; pool?: { videoTitles?: string[] } } | null;
-  const transcribe = input.transcribe as { transcripts?: unknown[]; discoveredVideoPool?: unknown[] } | null;
+  const capture = input.banked.capture as TikTokGateCapture | null;
+  const augment = input.banked.augment as { quotaExhausted?: boolean; pool?: { videoTitles?: string[] } } | null;
+  const transcribe = input.banked.transcribe as { transcripts?: unknown[]; discoveredVideoPool?: unknown[] } | null;
   const handle = input.handle;
 
   const generic = `No public content found for @${handle}. TikTok did not expose this profile through any capture path. Please verify the handle is correct and that the account is public.`;
@@ -648,7 +659,7 @@ export function __rememberInstagramVideoUrls(handle: string, posts: InstagramPos
 
 /** Instagram's evidence gate — messages VERBATIM from the monolith. */
 const instagramGate: PlatformToolset["gate"] = (input) => {
-  const capture = input.capture as {
+  const capture = input.banked.capture as {
     stats?: { followerCount?: number; bio?: string; videoCount?: number };
     pool?: { videoItems?: unknown[] };
   } | null;
@@ -870,12 +881,12 @@ const youtubeTranscribe: TranscribeTool = {
 
 /** YouTube's evidence gates — messages VERBATIM from researchYouTubeCreator. */
 const youtubeGate: PlatformToolset["gate"] = (input) => {
-  const capture = input.capture as {
+  const capture = input.banked.capture as {
     stats?: { followerCount?: number; bio?: string };
     pool?: { videoTitles?: string[] };
     assessment?: { quotaExhausted?: boolean };
   } | null;
-  const transcribe = input.transcribe as { transcripts?: unknown[] } | null;
+  const transcribe = input.banked.transcribe as { transcripts?: unknown[] } | null;
   const handle = input.handle;
 
   const transcripts = transcribe?.transcripts ?? [];
