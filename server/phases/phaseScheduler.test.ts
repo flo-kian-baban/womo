@@ -191,6 +191,44 @@ describe("makeSchedulerExecute — attempts, admission and sleeps", () => {
     expect(result.nextEarliestAt).toBeNull();
   });
 
+  /**
+   * RETRIES BANK THEIR REASONS (corpus-rebuild finding). The 20-creator batch
+   * retried capture four times, and afterwards nobody could say why: a
+   * successful retry overwrites the failed attempt's banked output, so the only
+   * durable trace was attemptCount — the reasons lived in console lines the log
+   * buffer had rotated away. The scheduler now merges `retryHistory` into
+   * whatever output it banks, exactly as parkReason is merged, so the ledger
+   * itself answers "why did this take three attempts".
+   */
+  it("a success that took retries banks WHY each earlier attempt failed", async () => {
+    const phase = scriptedPhase("capture", [
+      {
+        outcome: "failed", failureClass: "transient",
+        attempts: [{ tool: "capture:test", outcome: "failed", durationMs: 5, detail: "socket reset mid-scroll" }],
+      },
+      { outcome: "failed", failureClass: "transient" },
+      { outcome: "complete", output: { ok: true } },
+    ]);
+    const execute = makeSchedulerExecute({ now: () => NOW, sleep: async () => {} });
+    const result = await execute(phase, {} as never, ctx);
+
+    expect(result.outcome).toBe("complete");
+    // The phase's own output is intact; the history rides beside it.
+    const out = result.output as { ok: boolean; retryHistory: Array<{ attempt: number; reason: string; detail: string | null; delayMs: number }> };
+    expect(out.ok).toBe(true);
+    expect(out.retryHistory).toHaveLength(2);
+    expect(out.retryHistory[0]).toMatchObject({ attempt: 1, detail: "socket reset mid-scroll", delayMs: 1_000 });
+    expect(out.retryHistory[0]!.reason).toContain("transient failure — retry 2");
+    expect(out.retryHistory[1]).toMatchObject({ attempt: 2, detail: null, delayMs: 2_000 });
+  });
+
+  it("a first-try success banks NO retryHistory — the key is absent, not empty", async () => {
+    const phase = scriptedPhase("capture", [{ outcome: "complete", output: { ok: true } }]);
+    const execute = makeSchedulerExecute({ now: () => NOW, sleep: async () => {} });
+    const result = await execute(phase, {} as never, ctx);
+    expect(result.output).toEqual({ ok: true });
+  });
+
   it("HOLDS NO PERMIT WHILE SLEEPING — the backoff must not park a browser slot", async () => {
     __testSlots.setBounds({ browser: 1 });
     const heldDuringSleep: Array<string | null> = [];

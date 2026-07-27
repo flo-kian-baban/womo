@@ -483,6 +483,7 @@ export async function getPhaseStateForRuns(runIds: string[]) {
     output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
                        OR ${analysisPhaseState.output}::text LIKE '%"parkReason"%'
                        OR ${analysisPhaseState.output}::text LIKE '%"blockedGap"%'
+                       OR ${analysisPhaseState.output}::text LIKE '%"retryHistory"%'
                      THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
   })
     .from(analysisPhaseState)

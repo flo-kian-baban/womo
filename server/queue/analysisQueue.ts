@@ -236,6 +236,15 @@ export interface CampaignStatus {
       phase: string; attempts: number; failureClass: string | null;
       detail: string | null; reason: string;
     } | null;
+    /**
+     * Every in-process retry this phase took, banked by the scheduler with its
+     * reason — so a success that took three attempts says why the first two
+     * failed WITHOUT a live console. Null when it succeeded first try.
+     */
+    retryHistory: Array<{
+      attempt: number; reason: string; detail: string | null;
+      delayMs: number; at: string;
+    }> | null;
   }>;
   subjectId: string | null;
   observationId: string | null;
@@ -268,12 +277,13 @@ export function deriveCampaignState(phases: CampaignStatus["phases"]): CampaignR
  * the by-runId read and the list read both go through here, so the list can be
  * batched without the two drifting apart.
  */
-/** The park/gap marks a phase's banked output may carry. */
-function phaseMarks(output: unknown): Pick<CampaignStatus["phases"][number], "parkReason" | "blockedGap"> {
-  const o = (output ?? null) as { parkReason?: string; blockedGap?: unknown } | null;
+/** The park/gap/retry marks a phase's banked output may carry. */
+function phaseMarks(output: unknown): Pick<CampaignStatus["phases"][number], "parkReason" | "blockedGap" | "retryHistory"> {
+  const o = (output ?? null) as { parkReason?: string; blockedGap?: unknown; retryHistory?: unknown } | null;
   return {
     parkReason: o?.parkReason ?? null,
     blockedGap: (o?.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
+    retryHistory: (o?.retryHistory ?? null) as CampaignStatus["phases"][number]["retryHistory"],
   };
 }
 

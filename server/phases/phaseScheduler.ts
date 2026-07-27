@@ -248,6 +248,34 @@ export interface ScheduledPhaseResult extends PhaseResult<unknown> {
 }
 
 /**
+ * One in-process retry, recorded durably in the phase's banked output under
+ * `retryHistory` — the exact treatment parkReason already gets.
+ *
+ * ─── Why this exists (corpus-rebuild finding) ───────────────────────────────
+ * The 20-creator batch exercised the retry ladder four times, and afterwards
+ * nobody could say why any of them fired: a successful retry OVERWRITES the
+ * failed attempt's banked output, so the only durable trace was attemptCount,
+ * and the reasons lived in console lines the log buffer had rotated away. A
+ * park banks its reason; a retry banked nothing. The next batch must be
+ * diagnosable without a live console.
+ *
+ * A RECORD, never an input: nothing reads this back into scheduling, scoring,
+ * or evidence — the identity harnesses arbitrate that the assembled evidence
+ * is untouched, since the phases' own output fields are spread first and
+ * consumers read only the keys they declare.
+ */
+export interface RetryRecord {
+  /** The 1-based attempt that FAILED and triggered this retry. */
+  attempt: number;
+  /** The scheduler's decision line, verbatim — same text the console got. */
+  reason: string;
+  /** The phase's own last words on what went wrong, when it left any. */
+  detail: string | null;
+  delayMs: number;
+  at: string;
+}
+
+/**
  * What a campaign committed DESPITE, recorded durably in the phase's banked
  * output under `blockedGap`.
  *
@@ -305,6 +333,15 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
   return async function execute(phase, input, ctx): Promise<ScheduledPhaseResult> {
     const cls = classForPhase(phase.name);
     let attempt = 1;
+    /** Every retry this execution took, banked with the final outcome. */
+    const retryHistory: RetryRecord[] = [];
+    /** Merge accumulated retries into whatever output is being banked. */
+    const withRetries = (output: unknown): unknown => {
+      if (retryHistory.length === 0) return output;
+      return output && typeof output === "object"
+        ? { ...(output as Record<string, unknown>), retryHistory }
+        : { retryHistory };
+    };
 
     for (;;) {
       // Queued: waiting for a permit, holding nothing.
@@ -349,9 +386,11 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
           return {
             ...result,
             outcome: "partial",
-            output: result.output && typeof result.output === "object"
-              ? { ...(result.output as Record<string, unknown>), blockedGap: gap }
-              : { blockedGap: gap },
+            output: withRetries(
+              result.output && typeof result.output === "object"
+                ? { ...(result.output as Record<string, unknown>), blockedGap: gap }
+                : { blockedGap: gap },
+            ),
             attemptCount: attempt,
             nextEarliestAt: null,
             parkReason: decision.reason,
@@ -361,15 +400,19 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
         // A park's REASON is persisted the same way the gap is — merged into
         // the phase's durable output. Without it the queue can only say
         // "parked", never "parked because it was rate-limited", which is the
-        // one thing the analyst actually needs.
+        // one thing the analyst actually needs. `withRetries` merges the same
+        // way on EVERY terminal return, so a success that took three attempts
+        // says why attempts one and two failed.
         const parked = decision.action === "park";
         return {
           ...result,
-          output: parked
-            ? (result.output && typeof result.output === "object"
-              ? { ...(result.output as Record<string, unknown>), parkReason: decision.reason }
-              : { parkReason: decision.reason })
-            : result.output,
+          output: withRetries(
+            parked
+              ? (result.output && typeof result.output === "object"
+                ? { ...(result.output as Record<string, unknown>), parkReason: decision.reason }
+                : { parkReason: decision.reason })
+              : result.output,
+          ),
           attemptCount: attempt,
           nextEarliestAt: nextEarliestAtFor(decision, now()),
           parkReason: parked ? decision.reason : null,
@@ -379,6 +422,13 @@ export function makeSchedulerExecute(opts: SchedulerOptions = {}): ExecuteFn {
       // The permit is already released — `withResourceSlot` returned above.
       // Sleeping here holds nothing.
       console.warn(`[scheduler] ${phase.name} (${phase.tool}): ${decision.reason}`);
+      retryHistory.push({
+        attempt,
+        reason: decision.reason,
+        detail: result.attempts?.[result.attempts.length - 1]?.detail ?? null,
+        delayMs: decision.delayMs!,
+        at: new Date(now()).toISOString(),
+      });
       await sleep(decision.delayMs!);
       attempt++;
     }

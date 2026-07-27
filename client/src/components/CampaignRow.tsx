@@ -325,6 +325,14 @@ function CampaignDetail({
                 {p?.parkReason && (
                   <p className="text-[10px] text-amber-400/70 mt-0.5 leading-snug">{p.parkReason}</p>
                 )}
+                {/* WHY it retried — banked by the scheduler, so a phase that
+                    took three attempts says what the first two hit without
+                    anyone having watched the console. */}
+                {p?.retryHistory?.map((r, i) => (
+                  <p key={i} className="text-[10px] text-muted-foreground/60 mt-0.5 leading-snug">
+                    attempt {r.attempt}: {r.detail ?? r.reason}
+                  </p>
+                ))}
                 {p?.blockedGap && (
                   <p className="text-[10px] text-amber-400/70 mt-0.5 leading-snug">
                     {p.blockedGap.detail ?? p.blockedGap.reason}
