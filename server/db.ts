@@ -2869,9 +2869,36 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
 /**
  * Get provenance data (LLM invocations + scrape events) for an observation.
  */
+/**
+ * Per-call LLM and scrape provenance for one observation. READ-PATH ONLY.
+ *
+ * ─── Why it takes the run id into account (B2a) ─────────────────────────────
+ * This filtered on `observation_id` alone. Under the queue architecture the
+ * pipeline stamps telemetry with `run_id` and leaves `observation_id` NULL —
+ * measured on the rebuilt corpus: 3 of 3 llm_invocations carried a run id and
+ * 0 carried an observation id. So this returned ZERO rows for every profile,
+ * and the Analysis Provenance footer read "No provenance data available" on
+ * all of them.
+ *
+ * `getRunDiagnostics` was updated for that at womo_0006 and this, its sibling,
+ * was not — the same query against the same tables, one taught about run
+ * linkage and one left behind. It now resolves the same way: prefer the run id
+ * when the observation carries one, fall back to observation linkage for rows
+ * written before run tagging. Nothing about what is COUNTED changes; the rows
+ * that were always there are simply found.
+ */
 export async function getProvenance(observationId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+
+  // Resolve the run first — it decides which linkage the reads below use.
+  const [linkRow] = await db.select({ runId: observations.runId })
+    .from(observations)
+    .where(eq(observations.id, observationId))
+    .limit(1);
+  const runId = linkRow?.runId ?? null;
+  const llmWhere = runId ? eq(llmInvocations.runId, runId) : eq(llmInvocations.observationId, observationId);
+  const scrapeWhere = runId ? eq(scrapeEvents.runId, runId) : eq(scrapeEvents.observationId, observationId);
 
   const [llmRows, scrapeRows, obsRow] = await Promise.all([
     db.select({
@@ -2883,7 +2910,7 @@ export async function getProvenance(observationId: string) {
       createdAt: llmInvocations.createdAt,
     })
       .from(llmInvocations)
-      .where(eq(llmInvocations.observationId, observationId))
+      .where(llmWhere)
       .orderBy(desc(llmInvocations.createdAt)),
     db.select({
       platform: scrapeEvents.platform,
@@ -2897,7 +2924,7 @@ export async function getProvenance(observationId: string) {
       createdAt: scrapeEvents.createdAt,
     })
       .from(scrapeEvents)
-      .where(eq(scrapeEvents.observationId, observationId))
+      .where(scrapeWhere)
       .orderBy(desc(scrapeEvents.createdAt)),
     db.select({
       observedAt: observations.observedAt,

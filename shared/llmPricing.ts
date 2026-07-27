@@ -5,6 +5,16 @@
  * same figures. Unknown models cost 0 (shown as unpriced, not guessed).
  */
 
+/**
+ * When the rates below were last checked, ISO date.
+ *
+ * It lives HERE, beside the numbers it describes, because a cost figure without
+ * a date is not an estimate — it is a claim. Any surface quoting a dollar amount
+ * must quote this alongside the rates, so a stale table is visible rather than
+ * silently wrong. Update it in the same edit that touches a rate.
+ */
+export const PRICING_AS_OF = "2026-07-27";
+
 export const MODEL_PRICING: Record<string, { input: number; output: number; label: string }> = {
   "gemini-2.5-flash": { input: 0.15, output: 0.60, label: "Gemini 2.5 Flash" },
   "gemini-2.5-pro": { input: 1.25, output: 10.00, label: "Gemini 2.5 Pro" },

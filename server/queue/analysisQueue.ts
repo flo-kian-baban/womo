@@ -225,6 +225,19 @@ export interface CampaignStatus {
     failureClass: string | null;
     /** When a parked phase becomes eligible again. */
     nextEarliestAt: Date | null;
+    /**
+     * When this phase row was first written, and when it was last touched.
+     *
+     * BOTH, because one without the other cannot express duration. The report
+     * page needs to say how long a phase took, and deriving that from the gap
+     * between consecutive phases' `updatedAt` would fold the queue wait into
+     * execution time and present an invented number as a measured one. The
+     * row has carried `created_at` since womo_0008; it was simply never
+     * shipped. (Note what the span MEANS: creation is when the phase was
+     * enqueued, so a phase that waited for a permit shows that wait inside its
+     * span — see the report page, which labels it accordingly.)
+     */
+    createdAt: Date | null;
     updatedAt: Date | null;
     /** Why it parked, in words — null unless it parked. */
     parkReason: string | null;
@@ -299,6 +312,7 @@ function shapeCampaign(
     attemptCount: number;
     failureClass: string | null;
     nextEarliestAt: Date | null;
+    createdAt: Date | null;
     updatedAt: Date | null;
     output: unknown;
   }>,
@@ -311,6 +325,7 @@ function shapeCampaign(
     attemptCount: r.attemptCount,
     failureClass: r.failureClass,
     nextEarliestAt: r.nextEarliestAt,
+    createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     // Read in JS, not SQL: see getPhaseStateForRuns — Postgres JSON operators
     // reject the lone surrogates that live in some scraped captions.
