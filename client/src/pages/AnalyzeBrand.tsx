@@ -145,7 +145,7 @@ export default function AnalyzeBrand() {
   const campaigns: Campaign[] = (queue.data?.campaigns ?? []).filter(isBrandCampaign);
 
   return (
-    /* Wide for the queue, narrow for the form — see AnalyzeCreator. */
+    /* Form and queue share one width — see AnalyzeCreator. */
     <div className="max-w-6xl mx-auto px-6 py-10 space-y-6">
       <div className="max-w-3xl">
         <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
@@ -159,7 +159,7 @@ export default function AnalyzeBrand() {
 
       <form
         onSubmit={handleSubmit(values => submit.mutate(values))}
-        className="fit-card rounded-xl p-5 space-y-4 max-w-3xl"
+        className="fit-card rounded-xl p-5 space-y-4"
       >
         <div className="space-y-2">
           <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">

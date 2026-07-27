@@ -40,6 +40,51 @@ export function platformLabel(platform: string): string {
   return LABEL[key(platform)] ?? platform;
 }
 
+/**
+ * The hostnames each platform is reachable at — the ONE place a platform's
+ * domains are named.
+ *
+ * It lives here, beside the glyph and the label, because this file is where
+ * platform identity is defined and where "adding a platform is one entry" has
+ * to stay true. `normalizeHandle` deliberately stays domain-blind: it reduces
+ * any URL to its last path segment for every platform alike, and teaching it
+ * about domains would put the same knowledge in two places.
+ *
+ * Only SUPPORTED platforms appear. A YouTube link resolves to null rather than
+ * to a platform the queue would refuse — the disabled list is not this map's
+ * business, and inventing an entry for it would let a dead platform be selected.
+ */
+const DOMAINS: Record<SupportedPlatform, readonly string[]> = {
+  TikTok: ["tiktok.com"],
+  Instagram: ["instagram.com", "instagr.am"],
+};
+
+/**
+ * Which platform does this link belong to? `null` when it is not a link, or
+ * not one we recognise.
+ *
+ * NULL IS THE HONEST ANSWER, and the caller must treat it as "no information"
+ * rather than as a default. A bare handle is genuinely ambiguous — @nasa exists
+ * on both platforms — so guessing from anything but a hostname would be
+ * fabricating a choice the analyst did not make.
+ */
+export function detectPlatform(input: string): SupportedPlatform | null {
+  const s = input.trim();
+  if (!s) return null;
+  let host: string;
+  try {
+    // Accept a bare "tiktok.com/@user" as readily as a full https:// URL.
+    host = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  for (const [platform, domains] of Object.entries(DOMAINS) as Array<[SupportedPlatform, readonly string[]]>) {
+    // endsWith, so www. / m. / vm. subdomains resolve to the same platform.
+    if (domains.some(d => host === d || host.endsWith(`.${d}`))) return platform;
+  }
+  return null;
+}
+
 export function PlatformMark({
   platform,
   className = "w-3.5 h-3.5",
