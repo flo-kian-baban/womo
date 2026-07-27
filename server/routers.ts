@@ -31,7 +31,6 @@ import { extractCreatorProfile, extractBrandProfile, generateFITNarrative, build
 import { runFullFITCalculation, getBrandWeights, BRAND_WEIGHT_TABLE, ARCHETYPES } from "./fitEngine";
 import { calculateAllSignals } from "./performanceSignals";
 import { invokeLLM } from "./_core/llm";
-import { researchBrand } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";

@@ -51,7 +51,8 @@ const FIXTURE_DIR = path.join(import.meta.dirname, "__fixtures__");
 const GOLDEN_DIR = path.join(FIXTURE_DIR, "golden");
 
 // ─── (a) FROZEN pre-seam reference ───────────────────────────────────────────
-// Verbatim copy of the assembly tail of researchTikTokCreator as it stood at
+// Verbatim copy of the assembly tail of researchTikTokCreator (removed in S5 — see CREATOR_PIPELINE_AUDIT.md)
+// as it stood at
 // commit 2282b17 (before the M1 seam), with the former local variables read off
 // the banked struct. DO NOT "improve" this function — its whole value is that
 // it is a museum piece. If a future change makes this disagree with

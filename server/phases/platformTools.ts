@@ -669,7 +669,8 @@ const instagramGate: PlatformToolset["gate"] = (input) => {
     || String(capture?.stats?.bio ?? "").length > 0;
   const postsCaptured = capture?.pool?.videoItems?.length ?? 0;
 
-  // ── Gate: nothing at all (VERBATIM from researchInstagramCreator) ──
+  // ── Gate: nothing at all (VERBATIM from researchInstagramCreator,
+  //    (removed in S5 — see CREATOR_PIPELINE_AUDIT.md)) ──
   if (!capture || (!hasProfileData && postsCaptured === 0)) {
     return {
       ok: false,
@@ -732,7 +733,8 @@ export const INSTAGRAM_TOOLSET: PlatformToolset = {
   transcribe: instagramTranscribe,
   gate: instagramGate,
   profileUrl: (handle) => `https://www.instagram.com/${handle}/`,
-  // VERBATIM from researchInstagramCreator: mean LIKES per post over followers,
+  // VERBATIM from researchInstagramCreator (removed in S5 — see CREATOR_PIPELINE_AUDIT.md):
+  // mean LIKES per post over followers,
   // rounded to one decimal. Deliberately not TikTok's formula — Instagram view
   // counts are absent on many posts (5 of 12 read zero in the captured
   // baselines), so a views-based rate would be both inflated and arbitrary.
@@ -879,7 +881,8 @@ const youtubeTranscribe: TranscribeTool = {
   },
 };
 
-/** YouTube's evidence gates — messages VERBATIM from researchYouTubeCreator. */
+/** YouTube's evidence gates — messages VERBATIM from researchYouTubeCreator
+ *  (removed in S5 — see CREATOR_PIPELINE_AUDIT.md). */
 const youtubeGate: PlatformToolset["gate"] = (input) => {
   const capture = input.banked.capture as {
     stats?: { followerCount?: number; bio?: string };
@@ -957,7 +960,8 @@ export const YOUTUBE_TOOLSET: PlatformToolset = {
   profileUrl: (handle) => `https://www.youtube.com/@${handle}`,
   // No platform-specific evidence block.
   evidenceExtras: () => "",
-  // VERBATIM from researchYouTubeCreator: avgViews over followers. YouTube
+  // VERBATIM from researchYouTubeCreator (removed in S5 — see CREATOR_PIPELINE_AUDIT.md):
+  // avgViews over followers. YouTube
   // exposes no per-video likes or comments on this path, so there is no
   // interaction rate to compute.
   engagementRate: ({ followerCount, avgViews }) =>
