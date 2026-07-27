@@ -56,6 +56,7 @@ import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
+import { assembleBrandEvidence, type BrandEvidenceParts } from "./phases/brandEvidence";
 import type { CampaignState, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
@@ -150,6 +151,12 @@ export interface BrandResearchResult {
   description: string;
   searchSnippets: string[];
   evidenceSummary: string;
+  /**
+   * The same evidence, UNCONCATENATED (S5). The router appends its own blocks
+   * and must do so through the one shared assembly, so it needs the parts
+   * rather than the finished string.
+   */
+  evidenceParts: BrandEvidenceParts;
   // Review data
   yelpRating: number | null;
   yelpReviewCount: number | null;
@@ -3386,16 +3393,25 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
   }
 
   // Inject decoded symbols block into evidence summary for AI extraction
-  const decodedSymbolsBlock = brandDecodedSymbols
-    ? `\n\n${formatBrandDecodedSymbolsBlock(brandDecodedSymbols)}`
-    : "";
+  /**
+   * The blocks are now handed UNPREFIXED to the shared assembly (S5, Part 1).
+   * Byte-identical by construction: this used to be `"\n\n" + block` when the
+   * block existed and `""` when it did not, which is precisely the rule
+   * `assembleBrandEvidence` applies. What changes is WHERE the concatenation
+   * lives — so that moving decodeBrandSymbols into a derive phase cannot
+   * reorder it.
+   */
+  const evidenceParts: BrandEvidenceParts = {
+    base: evidenceSummary,
+    decodedSymbolsBlock: brandDecodedSymbols
+      ? formatBrandDecodedSymbolsBlock(brandDecodedSymbols)
+      : null,
+    mentionEvidenceBlock: audienceMentionData
+      ? formatAudienceMentionEvidenceBlock(audienceMentionData)
+      : null,
+  };
 
-  // Inject audience mention intelligence block (PRIMARY evidence for audience perception)
-  const mentionEvidenceBlock = audienceMentionData
-    ? `\n\n${formatAudienceMentionEvidenceBlock(audienceMentionData)}`
-    : "";
-
-  const evidenceSummaryWithSymbols = evidenceSummary + decodedSymbolsBlock + mentionEvidenceBlock;
+  const evidenceSummaryWithSymbols = assembleBrandEvidence(evidenceParts);
 
   // Actualize Goffman gap signal: compare brand-authored vocabulary vs audience vocabulary
   if (audienceMentionData && brandDecodedSymbols) {
@@ -3470,6 +3486,7 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
     description,
     searchSnippets: snippets,
     evidenceSummary: evidenceSummaryWithSymbols,
+    evidenceParts,
     yelpRating,
     yelpReviewCount,
     yelpReviewExcerpts,

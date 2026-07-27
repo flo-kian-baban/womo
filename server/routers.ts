@@ -44,6 +44,7 @@ import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTi
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { newRunId, withAnalysisRun, currentDeadlineAt } from "./_core/runContext";
 import { decodeSubject } from "./_core/subjectIdentity";
+import { assembleBrandEvidence, maybeDumpBrandBaseline, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
 // Run machinery (concurrency limiter, failure classification, timeout race,
@@ -1371,6 +1372,7 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         // Step 1: Gather real evidence from the brand's website/web presence + review data + TikTok
         let brandEvidenceSummary: string | undefined;
+        let brandEvidenceParts: BrandEvidenceParts | undefined;
         let tiktokMetadata: BrandTikTokMetadata | null = null;
         let brandDataConfidenceLevel: string | undefined;
         let brandSemanticWordCount: number | undefined;
@@ -1407,6 +1409,7 @@ export const appRouter = router({
         try {
           const brandResearch = await researchBrand(input.brandNameOrUrl, input.googleMapsUrl || undefined);
           brandEvidenceSummary = brandResearch.evidenceSummary;
+          brandEvidenceParts = brandResearch.evidenceParts;
           reviewFields = {
             yelpRating: brandResearch.yelpRating,
             yelpReviewCount: brandResearch.yelpReviewCount,
@@ -1457,8 +1460,13 @@ export const appRouter = router({
           try {
             tiktokMetadata = await analyzeBrandTikTokChannel(input.tiktokChannelUrl);
             if (tiktokMetadata) {
-              const tiktokEvidenceBlock = formatBrandTikTokEvidenceBlock(tiktokMetadata);
-              brandEvidenceSummary = (brandEvidenceSummary || "") + "\n\n" + tiktokEvidenceBlock;
+              // Through the SHARED assembly, not a local concatenation — see
+              // phases/brandEvidence. Same bytes, one owner.
+              brandEvidenceParts = {
+                ...(brandEvidenceParts ?? { base: brandEvidenceSummary ?? "" }),
+                tiktokBlock: formatBrandTikTokEvidenceBlock(tiktokMetadata),
+              };
+              brandEvidenceSummary = assembleBrandEvidence(brandEvidenceParts);
             }
           } catch (err) {
             console.warn("[brand.analyze] TikTok analysis failed, proceeding without TikTok data:", err);
@@ -1471,8 +1479,11 @@ export const appRouter = router({
           try {
             instagramMetadata = await analyzeBrandInstagramChannel(input.instagramHandle);
             if (instagramMetadata) {
-              const igBlock = formatBrandInstagramEvidenceBlock(instagramMetadata);
-              brandEvidenceSummary = (brandEvidenceSummary ?? "") + "\n\n" + igBlock;
+              brandEvidenceParts = {
+                ...(brandEvidenceParts ?? { base: brandEvidenceSummary ?? "" }),
+                instagramBlock: formatBrandInstagramEvidenceBlock(instagramMetadata),
+              };
+              brandEvidenceSummary = assembleBrandEvidence(brandEvidenceParts);
               console.log("[brand.analyze] Instagram evidence block added");
             }
           } catch (err) {
@@ -1486,6 +1497,23 @@ export const appRouter = router({
         const hasMentionData = (mentionFields.mentionTotalCount ?? 0) > 0;
         const hasTikTokChannel = tiktokMetadata !== null;
         const hasInstagramChannel = instagramMetadata !== null;
+
+        // Records this monolith run as the reference the phased assembly must
+        // reproduce byte-for-byte. Inert without WOMO_BRAND_BASELINE.
+        if (brandEvidenceParts) {
+          maybeDumpBrandBaseline({
+            brand: input.brandNameOrUrl,
+            parts: brandEvidenceParts,
+            expectedEvidenceSummary: brandEvidenceSummary ?? "",
+            observed: {
+              semanticWordCount: brandSemanticWordCount ?? 0,
+              totalReviews: reviewFields.totalReviews ?? 0,
+              totalMentions: mentionFields.mentionTotalCount ?? 0,
+              hasTikTokChannel,
+              hasInstagram: hasInstagramChannel,
+            },
+          });
+        }
         if (evidenceLength < 200 && !hasReviewData && !hasMentionData && !hasTikTokChannel && !hasInstagramChannel) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
