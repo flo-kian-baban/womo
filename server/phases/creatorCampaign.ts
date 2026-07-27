@@ -159,9 +159,22 @@ export interface SubjectCampaignSpec<TResearch> {
   }) => Promise<{ research: TResearch; phases: CampaignState["phases"] }>;
   /** Map a thrown gate to a terminal outcome — the messages are FROZEN. */
   classifyFailure: (err: unknown) => { status: CampaignOutcome["status"]; message: string };
+  /**
+   * The extract_commit phase, when this subject builds its own (S5).
+   *
+   * Creator omits it and gets the creator phase below, unchanged. Brand supplies
+   * one because it extracts a different profile, persists through a different
+   * function with a different parameter shape, and reads different banked
+   * phases — while the sequence, the retry policy and the saved→outcome mapping
+   * stay shared, which is the whole point of the seam.
+   */
+  makeExtractCommit?: (args: {
+    platform: PlatformName;
+    deps: CreatorCampaignDeps;
+  }) => Parameters<typeof runPhases>[0]["phases"][number];
 }
 
-async function runSubjectCampaign<TResearch>(
+export async function runSubjectCampaign<TResearch>(
   args: {
     runId: string;
     handle: string;
@@ -204,30 +217,32 @@ async function runSubjectCampaign<TResearch>(
   }
 
   // ── Phase 5: extract_commit, through the same runner ──
-  const extractCommitPhase = makeExtractCommitPhase(
-    args.platform,
-    {
-      extract: deps.extract,
-      buildSnapshot: deps.buildSnapshot,
-      persist: deps.persist,
-      summarize: deps.summarize,
-    },
-    // The creator spec — VERBATIM what the phase used to do inline: the same
-    // four banked reads, the same NOT_READY condition, the same assembly and
-    // the same ledger tool name.
-    {
-      tool: "llm:extractCreatorProfile+persist",
-      readInputs: (state) => {
-        const capture = state.phases.capture?.output as CapturePhaseOutput | undefined;
-        const augment = state.phases.augment?.output as AugmentPhaseOutput | undefined;
-        const transcribe = state.phases.transcribe?.output as TranscribePhaseOutput | undefined;
-        const derived = state.phases.derive?.output as DerivePhaseOutput | undefined;
-        if (!capture || !augment || !transcribe || !derived) return NOT_READY;
-        return { handle: state.handle, capture, augment, transcribe, derived };
-      },
-      assemble: (input) => assembleFromPhases(input.handle, args.platform, input, input.derived),
-    },
-  );
+  const extractCommitPhase = spec.makeExtractCommit
+    ? spec.makeExtractCommit({ platform: args.platform, deps })
+    : makeExtractCommitPhase(
+        args.platform,
+        {
+          extract: deps.extract,
+          buildSnapshot: deps.buildSnapshot,
+          persist: deps.persist,
+          summarize: deps.summarize,
+        },
+        // The creator spec — VERBATIM what the phase used to do inline: the same
+        // four banked reads, the same NOT_READY condition, the same assembly and
+        // the same ledger tool name.
+        {
+          tool: "llm:extractCreatorProfile+persist",
+          readInputs: (state) => {
+            const capture = state.phases.capture?.output as CapturePhaseOutput | undefined;
+            const augment = state.phases.augment?.output as AugmentPhaseOutput | undefined;
+            const transcribe = state.phases.transcribe?.output as TranscribePhaseOutput | undefined;
+            const derived = state.phases.derive?.output as DerivePhaseOutput | undefined;
+            if (!capture || !augment || !transcribe || !derived) return NOT_READY;
+            return { handle: state.handle, capture, augment, transcribe, derived };
+          },
+          assemble: (input) => assembleFromPhases(input.handle, args.platform, input, input.derived),
+        },
+      );
 
   const summary = await runPhases({
     runId: args.runId,

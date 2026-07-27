@@ -1,5 +1,5 @@
 /**
- * BRAND'S FOUR COLLECTION PHASES (S5, step 3).
+ * BRAND'S FIVE COLLECTION PHASES (S5).
  *
  * Brand is not another platform — it is a different KIND of subject. It has no
  * video pool, no sampler and no handle; it has a website, review sites, search
@@ -62,7 +62,7 @@ import {
 import { formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "../brandSymbolDecoder";
 import { classifyPhaseError } from "./collectionPhases";
 import {
-  assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
+  assembleBrandEvidence, brandDataConfidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
   type BrandDecoderInputs, type BrandEvidenceParts,
 } from "./brandEvidence";
 
@@ -155,11 +155,28 @@ export interface BrandCollectionResult {
   brandName: string;
   evidenceParts: BrandEvidenceParts;
   evidenceSummary: string;
+  /**
+   * The monolith's P0-1 swallow fired: brand research was discarded wholesale
+   * and only the channels contribute. REPLICATED, NOT DESIGNED — see
+   * `brandResearchDiscarded`. Persistence reads this to write the same empty
+   * review/symbol/mention fields the router writes.
+   */
+  researchDiscarded: boolean;
   capture: BrandCaptureOutput;
   augment: BrandAugmentOutput;
   transcribe: BrandTranscribeOutput;
   channelInstagram: BrandInstagramChannelOutput;
   derive: BrandDeriveOutput;
+}
+
+/**
+ * Collection result plus the banked state that produced it — the brand twin of
+ * `TikTokCollectionCampaign`. extract_commit reads its inputs from banked
+ * output, so a collection that dropped the state could not feed it.
+ */
+export interface BrandCollectionCampaign {
+  research: BrandCollectionResult;
+  phases: CampaignState["phases"];
 }
 
 // ─── Phase 1 — capture: the website crawl, and nothing else ──────────────────
@@ -516,6 +533,57 @@ export function makeBrandDerivePhase(): AnalysisPhase<
   };
 }
 
+// ─── The P0-1 discard ────────────────────────────────────────────────────────
+
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ REPLICATED, NOT DESIGNED. Nobody chose this behaviour — it is reproduced  ║
+ * ║ because the constraint is byte-identical evidence, and that constraint    ║
+ * ║ does not carve out cases where the existing behaviour is unappealing.     ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ *
+ * ─── What the monolith does ─────────────────────────────────────────────────
+ * `researchBrand` ends with a "P0-1 minimum evidence guard" that THROWS
+ * PRECONDITION_FAILED when a brand has essentially nothing. The `brand.analyze`
+ * router wraps the whole call in a try/catch that only WARNS:
+ *
+ *     catch (err) { console.warn("[brand.analyze] Web research failed, …"); }
+ *
+ * So the throw never reaches the client. Its actual effect is that every
+ * variable the try block would have assigned keeps its initial value — evidence
+ * summary and parts stay `undefined`, and `reviewFields`, `symbolFields` and
+ * `mentionFields` stay `{}`. The TikTok and Instagram analyses then run anyway
+ * and append their blocks to a base of `""`, so the model is handed
+ * `"\n\n" + tiktokBlock` and the observation records no review, symbol,
+ * mention, confidence or crawl data at all.
+ *
+ * ─── Why it is here and not simply omitted ──────────────────────────────────
+ * The phased path has no monolithic call to discard, so without this it would
+ * hand the model `base + tiktokBlock` — a different prompt for the same brand,
+ * and a populated observation where the router writes an empty one. That is a
+ * WHAT change, which is the one thing this program may not do.
+ *
+ * ─── Removing it later ──────────────────────────────────────────────────────
+ * This is a candidate for deletion the moment the behaviour is ruled on: it is
+ * one predicate and three ternaries in `assembleBrandCollection`, plus the
+ * `researchDiscarded` flag that `buildBrandPersistParams` reads. Delete all
+ * four together. No archaeology required — that is the point of this comment.
+ *
+ * The predicate is VERBATIM: the same four conditions, the same `&&`, reading
+ * capture's word count, augment's review and mention counts, and augment's
+ * EXTENDED snippets (the monolith evaluated it on the post-fallback array).
+ */
+export function brandResearchDiscarded(
+  capture: BrandCaptureOutput,
+  augment: BrandAugmentOutput,
+): boolean {
+  const hasInsufficientWebsite = capture.semanticWordCount < 100;
+  const hasNoReviews = augment.perception.review.totalReviews === 0;
+  const hasNoMentions = (augment.perception.mentions?.totalMentions ?? 0) === 0;
+  const hasNoSnippets = augment.rescue.snippets.length < 3;
+  return hasInsufficientWebsite && hasNoReviews && hasNoMentions && hasNoSnippets;
+}
+
 // ─── The assembly ────────────────────────────────────────────────────────────
 
 /**
@@ -541,8 +609,14 @@ export function assembleBrandCollection(banked: {
 }): BrandCollectionResult {
   const { capture, augment, transcribe, channelInstagram, derive } = banked;
 
+  // ── The monolith's P0-1 discard (see brandResearchDiscarded) ──
+  const researchDiscarded = brandResearchDiscarded(capture, augment);
+
   const parts: BrandEvidenceParts = {
-    base: buildBrandBaseEvidence({
+    // Discarded research contributes an EMPTY base, because the router's
+    // `brandEvidenceSummary` was still `undefined` at this point and it
+    // seeded the parts with `{ base: brandEvidenceSummary ?? "" }`.
+    base: researchDiscarded ? "" : buildBrandBaseEvidence({
       brandName: capture.brandName,
       websiteUrl: capture.websiteUrl,
       // The RESCUED description and the EXTENDED snippets — capture's values
@@ -551,10 +625,13 @@ export function assembleBrandCollection(banked: {
       snippets: augment.rescue.snippets,
       audiencePerceptionBlock: augment.perception.audiencePerceptionBlock,
     }),
-    decodedSymbolsBlock: derive?.decodedSymbolsBlock ?? null,
-    mentionEvidenceBlock: augment.perception.mentionEvidenceBlock,
-    // Absent metadata contributes NO block — the same asymmetry the router had,
-    // where a null channel meant the block was never appended at all.
+    // Symbols and mentions go with it: they were `researchBrand`'s return
+    // value, and the router never received them.
+    decodedSymbolsBlock: researchDiscarded ? null : (derive?.decodedSymbolsBlock ?? null),
+    mentionEvidenceBlock: researchDiscarded ? null : augment.perception.mentionEvidenceBlock,
+    // The channels SURVIVE the discard — they are the router's own work, run
+    // after the swallow, and they are the only evidence such a brand gets.
+    // Absent metadata contributes NO block, the same asymmetry the router had.
     tiktokBlock: transcribe?.metadata ? formatBrandTikTokEvidenceBlock(transcribe.metadata) : null,
     instagramBlock: channelInstagram?.metadata
       ? formatBrandInstagramEvidenceBlock(channelInstagram.metadata)
@@ -565,11 +642,118 @@ export function assembleBrandCollection(banked: {
     brandName: capture.brandName,
     evidenceParts: parts,
     evidenceSummary: assembleBrandEvidence(parts),
+    researchDiscarded,
     capture,
     augment,
     transcribe: transcribe ?? { metadata: null, skippedReason: "phase produced nothing" },
     channelInstagram: channelInstagram ?? { metadata: null, skippedReason: "phase produced nothing" },
     derive: derive ?? { decodedSymbols: null, decodedSymbolsBlock: null },
+  };
+}
+
+// ─── The persistence parameters ──────────────────────────────────────────────
+
+/**
+ * Build `persistBrandToV2`'s parameters from banked phase output.
+ *
+ * PURE, and enumerated field by field against the `brand.analyze` router rather
+ * than reasoned about as a shape — persistence has no harness of its own and a
+ * wrong shape saves silently. Four details below are load-bearing and each was
+ * found by reading the router line by line; every one of them fails quietly.
+ *
+ *  1. `symbolFields` and `mentionFields` are CONDITIONAL SPREADS, not field-wise
+ *     maps. The router builds `symbolFields = {}` when there are no decoded
+ *     symbols, which is what lets persistence fall through:
+ *
+ *         symbolFields.brandRawKeywords ?? tiktokMetadata?.rawKeywords ?? []
+ *
+ *     Writing `{ brandRawKeywords: symbols?.rawKeywords ?? [] }` yields `[]`,
+ *     which is NOT nullish — the fallback would never fire and the channel's own
+ *     keywords would vanish from every brand with no decoder output.
+ *
+ *  2. Three strings pass as `x || undefined`. Persistence then writes
+ *     `?? null`, so an empty excerpt string must arrive as `undefined` or the
+ *     column gets `""` where the router puts `null`.
+ *
+ *  3. Under the P0-1 discard the router persists `{}` for all three groups and
+ *     `undefined` for confidence and the crawl counters, because the assignments
+ *     never ran. See `brandResearchDiscarded`.
+ *
+ *  4. `dataConfidenceLevel` comes from the SHARED `brandDataConfidence`, not a
+ *     second copy of the bucketing rule.
+ */
+export function buildBrandPersistParams(args: {
+  collection: BrandCollectionResult;
+  extracted: Record<string, unknown>;
+  weights: { alpha: number; beta: number; gamma: number; priority: string };
+  /** What the SUBJECT asked for — distinguishes "not attempted" from "no data". */
+  requested: { tiktokChannelUrl?: string; instagramHandle?: string };
+}): Record<string, unknown> {
+  const { collection, extracted, weights, requested } = args;
+  const { capture, augment, transcribe, channelInstagram, derive, researchDiscarded } = collection;
+
+  const r = augment.perception.review;
+  // TRAP 2: `|| undefined`, exactly as the router passes them.
+  const reviewFields = researchDiscarded ? {} : {
+    yelpRating: r.yelpRating,
+    yelpReviewCount: r.yelpReviewCount,
+    yelpReviewExcerpts: r.yelpReviewExcerpts || undefined,
+    googleRating: r.googleRating,
+    googleReviewCount: r.googleReviewCount,
+    googleReviewExcerpts: r.googleReviewExcerpts || undefined,
+    combinedReviewText: r.combinedReviewText || undefined,
+    overallRating: r.overallRating,
+    totalReviews: r.totalReviews,
+  };
+
+  // TRAP 1: conditional SPREAD — `{}` when the decoder produced nothing, so the
+  // `?? tiktokMetadata?.…` fallback in persistence still fires.
+  const symbols = researchDiscarded ? null : derive.decodedSymbols;
+  const symbolFields = symbols ? {
+    brandRawKeywords: symbols.rawKeywords,
+    brandThemeLabels: symbols.themeLabels,
+    brandSymbolicVocabulary: symbols.symbolicVocabulary,
+    brandDecodedSymbols: symbols as unknown as Record<string, unknown>,
+  } : {};
+
+  // TRAP 3: same shape, same reason — `{}` when there is no mention data.
+  const m = researchDiscarded ? null : augment.perception.mentions;
+  const mentionFields = m ? {
+    mentionDecodedSymbols: m as unknown as Record<string, unknown>,
+    mentionRawKeywords: m.audienceIdentityClaims,
+    mentionHashtagCloud: m.topHashtags,
+    mentionSentiment: m.sentimentSignal,
+    mentionSentimentConfidence: m.sentimentConfidence,
+    mentionMusicSignals: m.mentionMusicTitles,
+    mentionMusicArtists: m.mentionMusicArtists,
+    mentionTotalCount: m.totalMentions,
+    mentionUniqueAuthors: m.uniqueAuthors,
+    mentionAudienceSummary: m.audienceLanguageSummary,
+  } : {};
+
+  return {
+    brandName: extracted.brandName,
+    // The router's predicate exactly: a URL subject yields a brandUrl, a name
+    // subject yields undefined. `capture.websiteUrl` is that same test, banked.
+    brandUrl: capture.websiteUrl ?? undefined,
+    category: extracted.category,
+    extracted,
+    weights,
+    reviewFields,
+    tiktokMetadata: transcribe.metadata,
+    instagramMetadata: channelInstagram.metadata,
+    mentionFields,
+    symbolFields,
+    // TRAP 3 + 4: undefined under the discard, shared rule otherwise.
+    dataConfidenceLevel: researchDiscarded
+      ? undefined
+      : brandDataConfidence(capture.semanticWordCount, augment.perception.totalReviews),
+    semanticWordCount: researchDiscarded ? undefined : capture.semanticWordCount,
+    crawledPagesCount: researchDiscarded ? undefined : capture.crawledPages.length,
+    // Read from what was ASKED for, never from what came back — this is the
+    // whole distinction between skipped_not_attempted and skipped_no_data.
+    tiktokRequested: Boolean(requested.tiktokChannelUrl?.trim()),
+    instagramRequested: Boolean(requested.instagramHandle?.trim()),
   };
 }
 
@@ -635,8 +819,8 @@ export async function runBrandCollection(
   brandNameOrUrl: string,
   extras: { googleMapsUrl?: string; tiktokChannelUrl?: string; instagramHandle?: string } = {},
   initialPhases?: CampaignState["phases"],
-): Promise<BrandCollectionResult> {
-  return runPhaseCollection<BrandCollectionResult>({
+): Promise<BrandCollectionCampaign> {
+  return runPhaseCollection<BrandCollectionCampaign>({
     handle: brandNameOrUrl,
     platform: BRAND_PSEUDO_PLATFORM,
     initialPhases,
@@ -649,12 +833,18 @@ export async function runBrandCollection(
     ] as never,
     // Brand's own FROZEN gate — it resolves no toolset (Option C).
     gate: brandGate,
-    assemble: ({ banked }) => assembleBrandCollection({
-      capture: banked.capture as BrandCaptureOutput,
-      augment: banked.augment as BrandAugmentOutput,
-      transcribe: banked.transcribe as BrandTranscribeOutput | null,
-      channelInstagram: banked.channel_instagram as BrandInstagramChannelOutput | null,
-      derive: banked.derive as BrandDeriveOutput | null,
+    // The banked state travels with the result, as it does for a creator:
+    // extract_commit is the fifth phase and reads its inputs from banked output,
+    // so a campaign that discarded the state could not run it.
+    assemble: ({ banked, summary }) => ({
+      research: assembleBrandCollection({
+        capture: banked.capture as BrandCaptureOutput,
+        augment: banked.augment as BrandAugmentOutput,
+        transcribe: banked.transcribe as BrandTranscribeOutput | null,
+        channelInstagram: banked.channel_instagram as BrandInstagramChannelOutput | null,
+        derive: banked.derive as BrandDeriveOutput | null,
+      }),
+      phases: summary.state.phases,
     }),
   });
 }

@@ -149,6 +149,30 @@ export function buildBrandDecoderInputs(i: BrandDecoderInputSources): BrandDecod
   };
 }
 
+// ─── Data confidence ─────────────────────────────────────────────────────────
+
+/**
+ * A brand's data-confidence level, VERBATIM from `researchBrand`.
+ *
+ * Lifted for the same reason `selectBrandReviewFields` was: it is now read by
+ * both the monolith and the phased persistence path, and a second copy of a
+ * bucketing rule is how one path starts recording "medium" where the other
+ * records "high". P1-4's review boost is part of the rule, not a decoration —
+ * reviews are genuine audience evidence and the thresholds were set with them
+ * counted.
+ */
+export function brandDataConfidence(
+  semanticWordCount: number,
+  totalReviews: number,
+): "high" | "medium" | "low" {
+  const reviewEvidenceBoost = totalReviews >= 30 ? 1000 :
+    totalReviews >= 10 ? 500 : 0;
+  const evidenceScore = semanticWordCount + reviewEvidenceBoost;
+  return evidenceScore >= 2000 ? "high" :
+    evidenceScore >= 500 ? "medium" :
+      "low";
+}
+
 /** The already-formatted blocks, in assembly order. Absent = omit entirely. */
 export interface BrandEvidenceParts {
   /** `researchBrand`'s summary BEFORE symbols and mentions were appended. */

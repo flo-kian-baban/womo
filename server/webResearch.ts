@@ -56,7 +56,7 @@ import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { toolsetFor, type GateInput, type GateVerdict } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
-import { assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs, type BrandBaseEvidenceInputs, type BrandDecoderInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
+import { assembleBrandEvidence, brandDataConfidence, buildBrandBaseEvidence, buildBrandDecoderInputs, type BrandBaseEvidenceInputs, type BrandDecoderInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { encodeSubject } from "./_core/subjectIdentity";
 import type { AnalysisPhase, CampaignState, PhaseName, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { PHASE_NAMES } from "./_core/analysisPhase";
@@ -3561,13 +3561,9 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
 
   // Compute data confidence level for brand
   // P1-4: Factor review data into confidence — reviews provide genuine audience perception evidence
-  const reviewEvidenceBoost = reviewResult.totalReviews >= 30 ? 1000 :
-    reviewResult.totalReviews >= 10 ? 500 : 0;
-  const evidenceScore = semanticWordCount + reviewEvidenceBoost;
+  // The rule is shared with the phased persistence path; see brandDataConfidence.
   const brandDataConfidenceLevel: BrandResearchResult["dataConfidenceLevel"] =
-    evidenceScore >= 2000 ? "high" :
-      evidenceScore >= 500 ? "medium" :
-        "low";
+    brandDataConfidence(semanticWordCount, reviewResult.totalReviews);
 
   // ── P0-1: Minimum evidence guard ──
   // Prevent fully hallucinated brand profiles when all evidence sources fail.

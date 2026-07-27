@@ -246,6 +246,26 @@ export interface ExtractCommitSpec<TIn extends { handle: string }, TResearch> {
   assemble: (input: TIn) => TResearch & { evidenceSummary?: string; profileUrl?: string };
   /** Names the tool in the ledger — creator and brand extract different things. */
   tool: string;
+  /**
+   * The persist call's parameters, when this subject's persister takes a
+   * different shape (S5).
+   *
+   * `persistCreatorToV2` and `persistBrandToV2` share nothing but a name: one
+   * takes handle/platform/profileUrl/displayName/pronouns, the other takes
+   * brandName/brandUrl/category/weights/reviewFields/…. The sequence around them
+   * — assemble, extract, snapshot, persist, summarize, and the saved→outcome
+   * mapping — is identical, and that is the part worth keeping in one place.
+   *
+   * Omitted, the creator shape is used verbatim, so every existing caller is
+   * unchanged.
+   */
+  persistParams?: (ctx: {
+    input: TIn;
+    platform: PlatformName;
+    research: TResearch & { evidenceSummary?: string; profileUrl?: string };
+    extracted: Record<string, unknown>;
+    evidenceSnapshot: unknown;
+  }) => Record<string, unknown>;
 }
 
 export function makeExtractCommitPhase<TIn extends { handle: string }, TResearch>(
@@ -269,16 +289,21 @@ export function makeExtractCommitPhase<TIn extends { handle: string }, TResearch
         // FUSED: assemble → extract → snapshot → persist, in one unit.
         const research = spec.assemble(input);
         const extracted = await deps.extract(input.handle, platform, research.evidenceSummary ?? "");
-        const persistResult = await deps.persist({
-          handle: input.handle,
-          platform,
-          profileUrl: research.profileUrl,
-          displayName: extracted.displayName,
-          pronouns: extracted.pronouns,
-          extracted,
-          research,
-          evidenceSnapshot: deps.buildSnapshot(input.handle, platform, research.evidenceSummary, research),
-        });
+        const evidenceSnapshot = deps.buildSnapshot(input.handle, platform, research.evidenceSummary, research);
+        const persistResult = await deps.persist(
+          spec.persistParams
+            ? spec.persistParams({ input, platform, research, extracted, evidenceSnapshot })
+            : {
+                handle: input.handle,
+                platform,
+                profileUrl: research.profileUrl,
+                displayName: extracted.displayName,
+                pronouns: extracted.pronouns,
+                extracted,
+                research,
+                evidenceSnapshot,
+              },
+        );
         const persistence = deps.summarize(persistResult);
         const outcome = persistence.saved === "full" ? "complete" as const
           : persistence.saved === "partial" ? "partial" as const : "failed" as const;

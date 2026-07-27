@@ -28,7 +28,10 @@ import {
   assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
   type BrandMonolithBaseline,
 } from "./phases/brandEvidence";
-import { assembleBrandCollection, brandDecoderInputsFrom, brandGate } from "./phases/brandPhases";
+import {
+  assembleBrandCollection, brandDecoderInputsFrom, brandGate,
+  brandResearchDiscarded, buildBrandPersistParams,
+} from "./phases/brandPhases";
 import { EMPTY_BRAND_REVIEW_FIELDS, type BrandReviewFields } from "./reviewResearch";
 
 const FIXTURE = path.join(import.meta.dirname, "__fixtures__", "brandBaseline.json");
@@ -671,20 +674,24 @@ describe("the brand min-data gate", () => {
   });
 
   /**
-   * ─── OPEN FINDING — the length conjunct is structurally unsatisfiable ──────
+   * ─── OPEN FINDING for Jason — the threshold never measures evidence ────────
    *
-   * The router measured `(brandEvidenceSummary || "").length`, which is 0 when
-   * `researchBrand` threw and the router swallowed it. The phased path always
-   * BUILDS a base block, and that block's frozen INSTRUCTIONS boilerplate is 574
-   * characters before any evidence is added. So the moment capture and augment
-   * bank anything at all — including a total-failure brand with an empty
-   * description, no snippets, no reviews and no mentions — `evidenceLength < 200`
-   * is false and the gate admits.
+   * `evidenceLength < 200` cannot discriminate. A base block that gets BUILT is
+   * 574 characters of frozen INSTRUCTIONS boilerplate before a single word of
+   * evidence is added, so the conjunct is satisfiable ONLY when brand research
+   * was discarded wholesale — the P0-1 swallow — or when capture produced
+   * nothing at all.
    *
-   * These two cases pin that as the CURRENT behaviour, not as the intended one.
-   * Reported for a decision; nothing has been adjusted to work around it.
+   * In other words the gate's entire discriminating power comes from the P0-1
+   * predicate upstream of it, and none from its own 200-char threshold. A brand
+   * with one word of website text and two snippets is admitted on exactly the
+   * same footing as one with five thousand words.
+   *
+   * NOT FIXED, and deliberately so: the threshold and the refusal text are
+   * Jason's, and moving either changes WHEN a brand is refused — science, not
+   * plumbing. These pin the behaviour as it is. See docs/BRAND_OPEN_QUESTIONS.md.
    */
-  it("FINDING: an empty base block is already 574 chars of frozen boilerplate", () => {
+  it("FINDING: a built base block is already 574 chars of frozen boilerplate", () => {
     const empty = buildBrandBaseEvidence({
       brandName: "X", websiteUrl: null, description: "", snippets: [], audiencePerceptionBlock: null,
     });
@@ -692,11 +699,200 @@ describe("the brand min-data gate", () => {
     expect(empty.length).toBeGreaterThan(200);
   });
 
-  it("FINDING: a brand with no evidence whatsoever is ADMITTED once capture banks", () => {
-    // Every conjunct but the first is satisfied — no reviews, no mentions,
-    // neither channel — and the gate still passes, because the boilerplate
-    // alone clears the 200-char bar.
-    const v = gate({ ...bare, transcribe: null, channel_instagram: null });
-    expect(v.ok).toBe(true);
+  it("FINDING: with research kept, the gate ADMITS whatever else is missing", () => {
+    // One snippet past the P0-1 predicate (3 snippets) and the base is built —
+    // no reviews, no mentions, neither channel, 0 crawled words, and the gate
+    // still passes, because the boilerplate alone clears the 200-char bar.
+    const kept = {
+      ...bare,
+      augment: {
+        ...bare.augment,
+        rescue: { ...bare.augment.rescue, snippets: ["a", "b", "c"] },
+      },
+    };
+    expect(gate({ ...kept, transcribe: null, channel_instagram: null }).ok).toBe(true);
+  });
+
+  it("the P0-1 discard is what actually refuses a dead brand, not the threshold", () => {
+    // Same brand, two snippets instead of three: the discard fires, the base is
+    // emptied, and only THEN does the length conjunct bite.
+    const discarded = {
+      ...bare,
+      augment: {
+        ...bare.augment,
+        rescue: { ...bare.augment.rescue, snippets: ["a", "b"] },
+      },
+    };
+    expect(gate({ ...discarded, transcribe: null, channel_instagram: null }).ok).toBe(false);
+  });
+});
+
+/**
+ * THE P0-1 DISCARD — REPLICATED, NOT DESIGNED, AND PINNED.
+ *
+ * `researchBrand` throws PRECONDITION_FAILED on a brand with essentially
+ * nothing, and `brand.analyze` catches it with a `console.warn` and continues.
+ * The throw therefore never reaches the client; its real effect is that every
+ * variable the try block would have assigned keeps its initial value. The
+ * channels then run anyway and append to a base of `""`, so the model receives
+ * `"\n\n" + tiktokBlock` and the observation records no review, symbol, mention,
+ * confidence or crawl data at all.
+ *
+ * Nobody designed that. It is reproduced because the constraint is byte-
+ * identical evidence and the constraint does not carve out cases where the
+ * existing behaviour is unappealing.
+ *
+ * ─── Why this block exists ──────────────────────────────────────────────────
+ * Without it the discard is another uncovered surface, and Finding C showed
+ * exactly what those cost: the symbol decoder's inputs were silently changed and
+ * twenty-two green assertions could not see it. So the degenerate case gets a
+ * fixture that exercises it rather than a comment claiming it works.
+ */
+describe("the P0-1 discard reproduces the monolith's degenerate case", () => {
+  /**
+   * A brand that trips every P0-1 condition: under 100 crawled words, no
+   * reviews, no mentions, fewer than 3 snippets. Deliberately NOT empty — it
+   * carries a description and two snippets, so a discard that merely happened
+   * to produce an empty string would not pass.
+   */
+  const deadBrand = {
+    capture: {
+      brandName: "Ghost Coffee",
+      websiteUrl: "https://ghostcoffee.example",
+      description: "Ghost Coffee is a coffee shop.",
+      snippets: ["Google: Ghost Coffee", "A coffee shop."],
+      semanticWordCount: 42,
+      crawledPages: ["https://ghostcoffee.example"],
+    },
+    augment: {
+      rescue: {
+        description: "Ghost Coffee is a coffee shop.",
+        snippets: ["Google: Ghost Coffee", "A coffee shop."],
+        googleFallbackRan: true,
+        youtubeFallbackRan: true,
+      },
+      perception: {
+        audiencePerceptionBlock: null,
+        totalReviews: 0,
+        review: EMPTY_BRAND_REVIEW_FIELDS,
+        mentionEvidenceBlock: null,
+        totalMentions: 0,
+        mentions: null,
+      },
+    },
+    // Derive still RAN — the monolith called the decoder before its guard threw,
+    // and discarded the result. Same waste, same outcome.
+    derive: { decodedSymbols: null, decodedSymbolsBlock: "SYMBOLS-BLOCK" },
+  };
+
+  it("the fixture actually trips the predicate — otherwise this proves nothing", () => {
+    expect(brandResearchDiscarded(deadBrand.capture as never, deadBrand.augment as never)).toBe(true);
+    // And each condition is individually load-bearing: relax any one and the
+    // discard stops firing.
+    const keep = (over: Record<string, unknown>) =>
+      brandResearchDiscarded(
+        { ...deadBrand.capture, ...(over.capture as object ?? {}) } as never,
+        { ...deadBrand.augment, ...(over.augment as object ?? {}) } as never,
+      );
+    expect(keep({ capture: { semanticWordCount: 100 } }), "word count ≥100 must keep research").toBe(false);
+    expect(keep({
+      augment: { ...deadBrand.augment, rescue: { ...deadBrand.augment.rescue, snippets: ["a", "b", "c"] } },
+    }), "3 snippets must keep research").toBe(false);
+    expect(keep({
+      augment: {
+        ...deadBrand.augment,
+        perception: { ...deadBrand.augment.perception, review: { ...EMPTY_BRAND_REVIEW_FIELDS, totalReviews: 1 } },
+      },
+    }), "any review must keep research").toBe(false);
+    expect(keep({
+      augment: {
+        ...deadBrand.augment,
+        perception: { ...deadBrand.augment.perception, mentions: { totalMentions: 1 } },
+      },
+    }), "any mention must keep research").toBe(false);
+  });
+
+  it("with NO channels the model receives the empty string — exactly what the router built", () => {
+    const out = assembleBrandCollection({ ...deadBrand, transcribe: null, channelInstagram: null } as never);
+    expect(out.researchDiscarded).toBe(true);
+    expect(out.evidenceSummary).toBe("");
+    // The description and snippets are real and still discarded — proof the
+    // emptiness is the discard's doing, not the fixture's.
+    expect(out.evidenceSummary).not.toContain("Ghost Coffee is a coffee shop.");
+    expect(out.evidenceSummary).not.toContain("SYMBOLS-BLOCK");
+  });
+
+  it("with a TikTok channel the model receives '\\n\\n' + the block, and nothing else", () => {
+    const out = assembleBrandCollection({
+      ...deadBrand,
+      transcribe: { metadata: { channelHandle: "ghost" }, skippedReason: null },
+      channelInstagram: null,
+    } as never);
+    // The router's exact construction: assembleBrandEvidence({base: "", tiktokBlock}).
+    expect(out.evidenceSummary.startsWith("\n\n")).toBe(true);
+    expect(out.evidenceSummary).toBe(`\n\n${out.evidenceParts.tiktokBlock}`);
+    expect(out.evidenceParts.base).toBe("");
+    expect(out.evidenceParts.decodedSymbolsBlock).toBeNull();
+    expect(out.evidenceParts.mentionEvidenceBlock).toBeNull();
+  });
+
+  it("both channels survive the discard, in the recorded order", () => {
+    const out = assembleBrandCollection({
+      ...deadBrand,
+      transcribe: { metadata: { channelHandle: "ghost" }, skippedReason: null },
+      channelInstagram: { metadata: { channelHandle: "ghostcoffee", postCaptions: ["x"] }, skippedReason: null },
+    } as never);
+    const t = out.evidenceSummary.indexOf(out.evidenceParts.tiktokBlock!);
+    const i = out.evidenceSummary.indexOf(out.evidenceParts.instagramBlock!);
+    expect(t).toBeGreaterThan(0);
+    expect(t).toBeLessThan(i);
+  });
+
+  /**
+   * PERSISTENCE MUST MATCH. Under the swallow the router persists `{}` for
+   * review, symbol and mention fields, and `undefined` for confidence and the
+   * crawl counters, because those assignments never ran.
+   */
+  it("persistence writes the router's EMPTY fields under the discard", () => {
+    const collection = assembleBrandCollection({
+      ...deadBrand,
+      transcribe: { metadata: { channelHandle: "ghost", rawKeywords: ["chan-kw"] }, skippedReason: null },
+      channelInstagram: null,
+    } as never);
+    const p = buildBrandPersistParams({
+      collection,
+      extracted: { brandName: "Ghost Coffee", category: "Food" },
+      weights: { alpha: 0.5, beta: 0.3, gamma: 0.2, priority: "x" },
+      requested: { tiktokChannelUrl: "https://tiktok.com/@ghost" },
+    });
+
+    expect(p.reviewFields).toEqual({});
+    expect(p.symbolFields).toEqual({});
+    expect(p.mentionFields).toEqual({});
+    expect(p.dataConfidenceLevel).toBeUndefined();
+    expect(p.semanticWordCount).toBeUndefined();
+    expect(p.crawledPagesCount).toBeUndefined();
+    // The channel itself is NOT discarded — it ran after the swallow.
+    expect(p.tiktokMetadata).toMatchObject({ channelHandle: "ghost" });
+    expect(p.tiktokRequested).toBe(true);
+  });
+
+  it("an EMPTY symbolFields is what lets the channel keyword fallback fire", () => {
+    // The trap: `{brandRawKeywords: []}` is not nullish, so
+    // `symbolFields.brandRawKeywords ?? tiktokMetadata?.rawKeywords` would stop
+    // at the empty array and the channel's keywords would vanish.
+    const collection = assembleBrandCollection({
+      ...deadBrand,
+      transcribe: { metadata: { channelHandle: "ghost", rawKeywords: ["chan-kw"] }, skippedReason: null },
+      channelInstagram: null,
+    } as never);
+    const p = buildBrandPersistParams({
+      collection, extracted: {}, weights: { alpha: 0, beta: 0, gamma: 0, priority: "" },
+      requested: {},
+    });
+    const symbolFields = p.symbolFields as Record<string, unknown>;
+    expect("brandRawKeywords" in symbolFields).toBe(false);
+    expect(symbolFields.brandRawKeywords ?? (p.tiktokMetadata as { rawKeywords: string[] }).rawKeywords)
+      .toEqual(["chan-kw"]);
   });
 });
