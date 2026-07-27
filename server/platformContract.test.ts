@@ -172,7 +172,14 @@ describe("sampling buckets", () => {
 
 describe("the shared layers never learn a platform's name", () => {
   it("the phase names are platform-independent", () => {
-    expect(PHASE_NAMES).toEqual(["capture", "augment", "transcribe", "derive", "extract_commit"]);
+    // `channel_instagram` is brand's (S5) and no creator campaign writes it —
+    // but it names a KIND OF WORK, not a platform, which is why it belongs in
+    // this list rather than behind a subject branch. Updated deliberately: a
+    // phase list that grows without moving this pin is a ledger shape nobody
+    // agreed to.
+    expect(PHASE_NAMES).toEqual([
+      "capture", "augment", "transcribe", "channel_instagram", "derive", "extract_commit",
+    ]);
   });
 });
 

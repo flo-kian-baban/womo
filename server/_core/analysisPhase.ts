@@ -53,10 +53,29 @@
 
 // ─── Names ───────────────────────────────────────────────────────────────────
 
+/**
+ * ─── Why there are six, and why only brand writes the fifth ─────────────────
+ * `channel_instagram` was added for brand (S5). It is not a creator concept and
+ * a creator campaign never writes a row for it — the banked map simply carries
+ * a null under that key, and the heartbeat touches a row that does not exist,
+ * which is a no-op.
+ *
+ * It is a PHASE rather than a fold into `augment` because THE PHASE IS THE RETRY
+ * UNIT. Brand's Instagram channel is an independent scrape plus an LLM call;
+ * bundled into augment, one failed Instagram fetch would re-run the review
+ * scrape and the mention scrape alongside it, under a single failure class that
+ * describes none of them. Same argument that made `derive` its own phase.
+ *
+ * Adding a name is deliberately noisy: `classForPhase` is an exhaustive switch
+ * (compile error until the new phase is classified) and two contract harnesses
+ * assert this array literally. That visibility is the point — a phase list that
+ * can grow silently is a ledger whose shape nobody agreed to.
+ */
 export const PHASE_NAMES = [
   "capture",
   "augment",
   "transcribe",
+  "channel_instagram",
   "derive",
   "extract_commit",
 ] as const;
@@ -73,6 +92,54 @@ export type PhaseName = (typeof PHASE_NAMES)[number];
  * can *do* is decided solely by the REGISTRY in phases/platformTools.ts.
  */
 export type PlatformName = "TikTok" | "Instagram" | "YouTube";
+
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ KNOWN GAP — brand is not a platform, and this constant is where we say so.║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ *
+ * A brand campaign runs on the same driver, runner, scheduler and ledger as a
+ * creator, and that driver carries a `platform: PlatformName` on every campaign,
+ * phase context and ledger row. Brand has no platform. It is a different KIND of
+ * SUBJECT — it has a website, review sites and (optionally) two social channels
+ * — so it fills that slot with this value instead.
+ *
+ * ─── This is a deliberate compromise, not an oversight ──────────────────────
+ * Two honest fixes were on the table (S5):
+ *
+ *   B — SEPARATE SUBJECT TYPE FROM PLATFORM. The correct model, and the
+ *       EVENTUAL FIX. A campaign would carry a subject descriptor and the
+ *       driver would key its gate off subject type, so no non-platform ever
+ *       occupies a platform slot.
+ *
+ *   C — BRAND SUPPLIES ITS GATE THROUGH ITS OWN SPEC (chosen). One optional
+ *       parameter on `runPhaseCollection`; the registry, `PlatformName` and the
+ *       subject-hint encoding are all untouched.
+ *
+ * C was chosen KNOWINGLY. B touches `encodeSubject`/`decodeSubject` and so the
+ * `subject_hint` that every in-flight campaign is keyed by — an invariant that
+ * is strict (a no-extras subject must encode byte-identically, forever) and that
+ * NO harness can arbitrate, because subject identity is not evidence. The brand
+ * symbol decoder had its inputs silently changed for exactly that reason: an
+ * uncovered surface. Making an unarbitrated change to the identity of live work
+ * in order to repair a type-level untruth is the wrong trade at this point.
+ *
+ * ─── What it costs, stated plainly ──────────────────────────────────────────
+ * `CampaignState.platform` and every brand ledger row carry a value outside the
+ * `PlatformName` union, and `decodeSubject` hands the queue a platform string
+ * the union does not contain. Nothing reads it as a platform — brand resolves no
+ * toolset and supplies its own gate — but the type says otherwise.
+ *
+ * DO NOT spread this. One named constant, referenced where brand meets the
+ * shared spine, is auditable; `as never` scattered at each call site is not.
+ * See docs/BRAND_PSEUDO_PLATFORM.md for the full decision record.
+ */
+export const BRAND_PSEUDO_PLATFORM = "Brand" as PlatformName;
+
+/** True for a subject occupying a platform slot without being a platform. */
+export function isPseudoPlatform(platform: string): boolean {
+  return platform === BRAND_PSEUDO_PLATFORM;
+}
 
 /**
  * Which slice of a creator's history a sampled video came from.

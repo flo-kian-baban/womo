@@ -63,6 +63,11 @@ export function classForPhase(phase: PhaseName): ResourceClass {
     case "capture":
     case "augment":
     case "transcribe":
+    // Brand's Instagram channel: a profile scrape and a post fetch before its
+    // LLM call, so it is admitted against the BROWSER bound like the other
+    // scraping phases — not the llm one, which would let it hold a browser
+    // context outside the bound that exists to cap them.
+    case "channel_instagram":
       return "browser";
     case "derive":
     case "extract_commit":

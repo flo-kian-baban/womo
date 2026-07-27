@@ -42,7 +42,8 @@
 import type {
   AnalysisPhase, CampaignState, PhaseResult, PhaseRunContext,
 } from "../_core/analysisPhase";
-import { NOT_READY } from "../_core/analysisPhase";
+import { NOT_READY, BRAND_PSEUDO_PLATFORM } from "../_core/analysisPhase";
+import type { GateInput, GateVerdict } from "./platformTools";
 import { crawlBrandWebsite, deriveBrandSymbols, runPhaseCollection } from "../webResearch";
 import { searchWeb } from "../scraping/brand/searchFallback";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
@@ -51,8 +52,13 @@ import {
   EMPTY_BRAND_REVIEW_FIELDS, type BrandReviewFields,
 } from "../reviewResearch";
 import {
-  fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData,
+  analyzeBrandTikTokChannel, fetchBrandMentionData, formatAudienceMentionEvidenceBlock,
+  formatBrandTikTokEvidenceBlock, type AudienceMentionData, type BrandTikTokMetadata,
 } from "../brandTikTokAnalysis";
+import {
+  analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock,
+  type BrandInstagramMetadata,
+} from "../brandInstagramAnalysis";
 import { formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "../brandSymbolDecoder";
 import { classifyPhaseError } from "./collectionPhases";
 import {
@@ -107,8 +113,35 @@ export interface BrandAugmentOutput {
 }
 
 export interface BrandTranscribeOutput {
-  /** The brand channel's own videos. Empty when no channel was supplied. */
-  transcripts: Array<{ videoId: string; transcriptText: string | null }>;
+  /**
+   * The channel analysis IN FULL — profile, videos, transcripts, LLM output.
+   *
+   * This replaced a `transcripts: Array<{videoId, transcriptText}>` field, which
+   * was a strictly poorer subset of `metadata.videoTranscripts`. Banking both
+   * would put two representations of the same videos in one blob and let them
+   * disagree; banking only the text would lose every field a brand observation
+   * records — follower count, engagement rate, handle, captions, posted dates,
+   * transcript sources and the channel's own decoded symbols.
+   *
+   * Nothing had consumed the old shape (this phase was a stub) and no brand
+   * campaign exists in the ledger, so nothing resumes into it.
+   */
+  metadata: BrandTikTokMetadata | null;
+  skippedReason: string | null;
+}
+
+/** Phase 4's banked shape — the brand's Instagram channel, whole. */
+export interface BrandInstagramChannelOutput {
+  /**
+   * IN FULL, and `postRefs` is the reason this is not reduced to captions.
+   *
+   * Persistence keys each Instagram content item by `postRefs[].id`. Keying by
+   * POSITION instead — the `ig-post-<handle>-<i>` form this replaced — means a
+   * re-analysis whose feed shifted by one writes post #3's caption over a
+   * DIFFERENT post #3. `postCaptions` stays alongside it, unchanged, because it
+   * is fed verbatim to the model.
+   */
+  metadata: BrandInstagramMetadata | null;
   skippedReason: string | null;
 }
 
@@ -124,6 +157,8 @@ export interface BrandCollectionResult {
   evidenceSummary: string;
   capture: BrandCaptureOutput;
   augment: BrandAugmentOutput;
+  transcribe: BrandTranscribeOutput;
+  channelInstagram: BrandInstagramChannelOutput;
   derive: BrandDeriveOutput;
 }
 
@@ -293,20 +328,27 @@ export function makeBrandAugmentPhase(
   };
 }
 
-// ─── Phase 3 — transcribe: the brand channel's own videos ────────────────────
+// ─── Phase 3 — transcribe: the brand's own TikTok channel ────────────────────
 
 /**
- * A REAL phase, not a null tool — brand transcribes up to TRANSCRIPT_LIMIT (6)
- * of its own channel's videos. It skips when no channel was supplied, which is
- * the common case until the router passes the channel through as a subject
- * extra (step 4).
+ * A REAL phase now, not a stub — the whole channel analysis: profile, video
+ * list, up to TRANSCRIPT_LIMIT (6) transcripts, and the channel's own LLM pass.
+ * The router owned this until S5; it banks here instead.
+ *
+ * ─── Degrade, never fail ────────────────────────────────────────────────────
+ * The router wrapped this in a try/catch that warned and continued with no
+ * channel data. So must this: a brand with an unreachable TikTok channel is
+ * still an analysable brand. It reports `partial` with the reason rather than
+ * `failed`, which is the same convention brand capture already uses for the
+ * work the router swallowed.
  */
 export function makeBrandTranscribePhase(
   tiktokChannelUrl: string | undefined,
 ): AnalysisPhase<{ augment: BrandAugmentOutput }, BrandTranscribeOutput> {
+  const TOOL = "brand:channel_tiktok";
   return {
     name: "transcribe",
-    tool: "brand:channel_transcripts",
+    tool: TOOL,
     retry: { maxAttempts: 2, backoffMs: { transient: [60_000] } },
     inputs: (state: CampaignState) => {
       const augment = state.phases.augment?.output as BrandAugmentOutput | undefined;
@@ -314,27 +356,100 @@ export function makeBrandTranscribePhase(
     },
     async run(_input, _ctx: PhaseRunContext): Promise<PhaseResult<BrandTranscribeOutput>> {
       const started = Date.now();
+      const skip = (reason: string): PhaseResult<BrandTranscribeOutput> => ({
+        outcome: "partial",
+        output: { metadata: null, skippedReason: reason },
+        attempts: [{ tool: TOOL, outcome: "partial", durationMs: Date.now() - started, detail: reason }],
+      });
+
       if (!tiktokChannelUrl || tiktokChannelUrl.trim() === "") {
+        return skip("no brand channel supplied");
+      }
+      try {
+        const metadata = await analyzeBrandTikTokChannel(tiktokChannelUrl);
+        // `analyzeBrandTikTokChannel` returns null for an unusable URL rather
+        // than throwing — the same "no data" outcome, recorded as such.
+        if (!metadata) return skip("channel analysis returned no data");
+        return {
+          outcome: "complete",
+          output: { metadata, skippedReason: null },
+          attempts: [{ tool: TOOL, outcome: "complete", durationMs: Date.now() - started }],
+        };
+      } catch (err) {
+        console.warn("[brandPhases] TikTok channel analysis failed (non-fatal):", err);
         return {
           outcome: "partial",
-          output: { transcripts: [], skippedReason: "no brand channel supplied" },
-          attempts: [{ tool: "brand:channel_transcripts", outcome: "partial", durationMs: Date.now() - started,
-            detail: "no brand channel supplied" }],
+          output: { metadata: null, skippedReason: "channel analysis failed" },
+          failureClass: classifyPhaseError(err),
+          attempts: [{ tool: TOOL, outcome: "partial", durationMs: Date.now() - started,
+            detail: (err as Error).message?.slice(0, 300) }],
         };
       }
-      // The channel analysis (profile + videos + transcripts + voice) is the
-      // router's today; step 4 threads it through here. Until then this phase
-      // records honestly that it had nothing to do rather than pretending.
-      return {
-        outcome: "partial",
-        output: { transcripts: [], skippedReason: "channel analysis still owned by the router (step 4)" },
-        attempts: [{ tool: "brand:channel_transcripts", outcome: "partial", durationMs: Date.now() - started }],
-      };
     },
   };
 }
 
-// ─── Phase 4 — derive: the brand symbol decoder ──────────────────────────────
+// ─── Phase 4 — channel_instagram: the brand's own Instagram ───────────────────
+
+/**
+ * ITS OWN PHASE, and the reason is the retry unit.
+ *
+ * Folded into `augment` — the only place it would otherwise fit — a single
+ * failed Instagram scrape would re-run the review fetch and the mention fetch
+ * beside it, under one failure class that describes none of the three. Folded
+ * into `capture` it would re-run the website crawl. The phase boundary is what
+ * makes a retry cost only the thing that failed, which is the same argument
+ * that made `derive` separate.
+ *
+ * It is also where `postRefs` enters the ledger — see BrandInstagramChannelOutput.
+ */
+export function makeBrandInstagramPhase(
+  instagramHandle: string | undefined,
+): AnalysisPhase<{ augment: BrandAugmentOutput }, BrandInstagramChannelOutput> {
+  const TOOL = "brand:channel_instagram";
+  return {
+    name: "channel_instagram",
+    tool: TOOL,
+    retry: { maxAttempts: 2, backoffMs: { transient: [60_000] } },
+    inputs: (state: CampaignState) => {
+      const augment = state.phases.augment?.output as BrandAugmentOutput | undefined;
+      return augment ? { augment } : NOT_READY;
+    },
+    async run(_input, _ctx: PhaseRunContext): Promise<PhaseResult<BrandInstagramChannelOutput>> {
+      const started = Date.now();
+      const skip = (reason: string): PhaseResult<BrandInstagramChannelOutput> => ({
+        outcome: "partial",
+        output: { metadata: null, skippedReason: reason },
+        attempts: [{ tool: TOOL, outcome: "partial", durationMs: Date.now() - started, detail: reason }],
+      });
+
+      if (!instagramHandle || instagramHandle.trim() === "") {
+        return skip("no Instagram handle supplied");
+      }
+      try {
+        const metadata = await analyzeBrandInstagramChannel(instagramHandle);
+        if (!metadata) return skip("Instagram analysis returned no data");
+        return {
+          outcome: "complete",
+          output: { metadata, skippedReason: null },
+          attempts: [{ tool: TOOL, outcome: "complete", durationMs: Date.now() - started }],
+        };
+      } catch (err) {
+        // Same swallow the router performed: no Instagram is not no brand.
+        console.warn("[brandPhases] Instagram analysis failed (non-fatal):", err);
+        return {
+          outcome: "partial",
+          output: { metadata: null, skippedReason: "Instagram analysis failed" },
+          failureClass: classifyPhaseError(err),
+          attempts: [{ tool: TOOL, outcome: "partial", durationMs: Date.now() - started,
+            detail: (err as Error).message?.slice(0, 300) }],
+        };
+      }
+    },
+  };
+}
+
+// ─── Phase 5 — derive: the brand symbol decoder ──────────────────────────────
 
 /**
  * Route a banked augment output into the shared decoder-input builder.
@@ -411,15 +526,20 @@ export function makeBrandDerivePhase(): AnalysisPhase<
  * order and the absent-block asymmetry are both owned by the two pinned
  * builders — this only routes the banked pieces into them.
  *
- * The TikTok and Instagram blocks are deliberately absent: they are appended by
- * the router, which owns those inputs until step 4.
+ * All FIVE blocks now, including the two the router used to append: phases 3
+ * and 4 bank the channel metadata, so the collection produces the whole string
+ * rather than a prefix of it. The formatters are the router's own, unchanged,
+ * so the blocks themselves are the same bytes; what moved is where they are
+ * concatenated, which `assembleBrandEvidence` has owned since S5 Part 1.
  */
 export function assembleBrandCollection(banked: {
   capture: BrandCaptureOutput;
   augment: BrandAugmentOutput;
+  transcribe?: BrandTranscribeOutput | null;
+  channelInstagram?: BrandInstagramChannelOutput | null;
   derive: BrandDeriveOutput | null;
 }): BrandCollectionResult {
-  const { capture, augment, derive } = banked;
+  const { capture, augment, transcribe, channelInstagram, derive } = banked;
 
   const parts: BrandEvidenceParts = {
     base: buildBrandBaseEvidence({
@@ -433,6 +553,12 @@ export function assembleBrandCollection(banked: {
     }),
     decodedSymbolsBlock: derive?.decodedSymbolsBlock ?? null,
     mentionEvidenceBlock: augment.perception.mentionEvidenceBlock,
+    // Absent metadata contributes NO block — the same asymmetry the router had,
+    // where a null channel meant the block was never appended at all.
+    tiktokBlock: transcribe?.metadata ? formatBrandTikTokEvidenceBlock(transcribe.metadata) : null,
+    instagramBlock: channelInstagram?.metadata
+      ? formatBrandInstagramEvidenceBlock(channelInstagram.metadata)
+      : null,
   };
 
   return {
@@ -441,38 +567,93 @@ export function assembleBrandCollection(banked: {
     evidenceSummary: assembleBrandEvidence(parts),
     capture,
     augment,
+    transcribe: transcribe ?? { metadata: null, skippedReason: "phase produced nothing" },
+    channelInstagram: channelInstagram ?? { metadata: null, skippedReason: "phase produced nothing" },
     derive: derive ?? { decodedSymbols: null, decodedSymbolsBlock: null },
   };
+}
+
+// ─── The gate (S5, Option C — brand supplies its own) ────────────────────────
+
+/**
+ * Brand's minimum-data gate, FROZEN.
+ *
+ * Lifted verbatim from the `brand.analyze` router: the same five conditions, the
+ * same `&&`, the same PRECONDITION_FAILED message. It cannot come from the
+ * platform registry because brand is not a platform — see BRAND_PSEUDO_PLATFORM
+ * for why that compromise was taken over separating subject type from platform.
+ *
+ * IT MUST RUN AFTER PHASES 3 AND 4. `evidenceLength` is measured on the summary
+ * INCLUDING the TikTok and Instagram blocks, and two of the five conditions ask
+ * whether those channels produced anything at all. Gating before them would
+ * refuse a brand whose only evidence is its channels — which the router
+ * explicitly admits.
+ */
+export function brandGate(input: GateInput): GateVerdict {
+  const capture = input.banked.capture as BrandCaptureOutput | null;
+  const augment = input.banked.augment as BrandAugmentOutput | null;
+  const transcribe = input.banked.transcribe as BrandTranscribeOutput | null;
+  const channelInstagram = input.banked.channel_instagram as BrandInstagramChannelOutput | null;
+  const derive = input.banked.derive as BrandDeriveOutput | null;
+
+  const evidenceSummary = capture && augment
+    ? assembleBrandCollection({ capture, augment, transcribe, channelInstagram, derive }).evidenceSummary
+    : "";
+
+  const evidenceLength = evidenceSummary.length;
+  const hasReviewData = (augment?.perception.totalReviews ?? 0) > 0;
+  const hasMentionData = (augment?.perception.totalMentions ?? 0) > 0;
+  const hasTikTokChannel = (transcribe?.metadata ?? null) !== null;
+  const hasInstagramChannel = (channelInstagram?.metadata ?? null) !== null;
+
+  if (evidenceLength < 200 && !hasReviewData && !hasMentionData && !hasTikTokChannel && !hasInstagramChannel) {
+    return {
+      ok: false,
+      code: "PRECONDITION_FAILED",
+      message: "Insufficient data to analyze this brand. No website content, reviews, or social mentions were found. Please verify the brand URL and try again.",
+    };
+  }
+  return { ok: true };
 }
 
 // ─── The brand collection, through the SHARED driver ─────────────────────────
 
 /**
- * Brand's four phases, run by the same generic driver every subject uses.
+ * Brand's FIVE collection phases, run by the same generic driver every subject
+ * uses.
  *
  * Note what is NOT here: no branch on subject type, no pool, no sampler. The
- * driver is handed phases and an assembly and knows nothing else — which is the
- * whole reason generalising it was worth doing rather than writing a second
- * orchestration.
+ * driver is handed phases, a gate and an assembly, and knows nothing else —
+ * which is the whole reason generalising it was worth doing rather than writing
+ * a second orchestration.
+ *
+ * The platform slot carries BRAND_PSEUDO_PLATFORM, a named and documented
+ * compromise rather than a bare cast. Read its declaration before adding a
+ * second one anywhere.
  */
 export async function runBrandCollection(
   brandNameOrUrl: string,
-  extras: { googleMapsUrl?: string; tiktokChannelUrl?: string } = {},
+  extras: { googleMapsUrl?: string; tiktokChannelUrl?: string; instagramHandle?: string } = {},
   initialPhases?: CampaignState["phases"],
 ): Promise<BrandCollectionResult> {
   return runPhaseCollection<BrandCollectionResult>({
     handle: brandNameOrUrl,
-    platform: "Brand" as never,
+    platform: BRAND_PSEUDO_PLATFORM,
     initialPhases,
     phases: [
       makeBrandCapturePhase(brandNameOrUrl),
       makeBrandAugmentPhase(extras.googleMapsUrl),
       makeBrandTranscribePhase(extras.tiktokChannelUrl),
+      makeBrandInstagramPhase(extras.instagramHandle),
       makeBrandDerivePhase(),
     ] as never,
+    // Brand's own FROZEN gate — it resolves no toolset (Option C).
+    gate: brandGate,
     assemble: ({ banked }) => assembleBrandCollection({
       capture: banked.capture as BrandCaptureOutput,
       augment: banked.augment as BrandAugmentOutput,
+      transcribe: banked.transcribe as BrandTranscribeOutput | null,
+      channelInstagram: banked.channel_instagram as BrandInstagramChannelOutput | null,
       derive: banked.derive as BrandDeriveOutput | null,
     }),
   });

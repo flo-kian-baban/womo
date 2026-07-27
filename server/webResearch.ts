@@ -54,7 +54,7 @@ import { transcribeAudio } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseObservation, type PhaseStateWrite } from "./db";
 import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
-import { toolsetFor } from "./phases/platformTools";
+import { toolsetFor, type GateInput, type GateVerdict } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
 import { assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs, type BrandBaseEvidenceInputs, type BrandDecoderInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { encodeSubject } from "./_core/subjectIdentity";
@@ -2456,6 +2456,19 @@ export async function runPhaseCollection<TOut>(args: {
    * already collected, which is precisely the cost resumption exists to avoid.
    */
   initialPhases?: CampaignState["phases"];
+  /**
+   * The evidence gate, when this subject supplies its own (S5, Option C).
+   *
+   * Defaults to the PLATFORM REGISTRY's gate, which is how every creator
+   * campaign resolves it and is unchanged. Brand passes its own because it has
+   * no registry entry and is not a platform — see BRAND_PSEUDO_PLATFORM, which
+   * documents why that compromise was taken over separating subject type from
+   * platform outright.
+   *
+   * The driver still only ASKS and THROWS. It does not learn what a brand is,
+   * and the gate's message stays FROZEN and owned by the subject.
+   */
+  gate?: (input: GateInput) => GateVerdict;
   /** Turn the banked outputs into whatever this subject's result type is. */
   assemble: (ctx: {
     handle: string;
@@ -2530,12 +2543,16 @@ export async function runPhaseCollection<TOut>(args: {
     banked[name] = bankedOutput<unknown>(summary, name);
   }
 
-  // ── Evidence gate (S4) ──
-  // The platform decides whether its evidence is fit to extract from, and words
+  // ── Evidence gate (S4; subject-supplied since S5) ──
+  // The SUBJECT decides whether its evidence is fit to extract from, and words
   // that decision in its own FROZEN text. The driver only asks and throws.
-  // Runs BETWEEN phase 4 and phase 5: a single five-phase pass would persist a
-  // profile the min-data gate exists to refuse.
-  const verdict = toolsetFor(platform).gate({ handle, banked });
+  // Runs AFTER the collection phases and BEFORE extract_commit: a single
+  // straight-through pass would persist a profile the min-data gate exists to
+  // refuse.
+  //
+  // Resolution order is what keeps creators untouched: a subject that brings no
+  // gate falls through to the platform registry exactly as before.
+  const verdict = (args.gate ?? toolsetFor(platform).gate)({ handle, banked });
   if (!verdict.ok) {
     throw new TRPCError({ code: verdict.code, message: verdict.message });
   }

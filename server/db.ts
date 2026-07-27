@@ -17,6 +17,7 @@ import {
 import { ENV } from './_core/env';
 import { currentRunId } from './_core/runContext';
 import { canonicalizeHandle } from './_core/handles';
+import type { PhaseName } from './_core/analysisPhase';
 import { isSpeechTranscript, classifyTranscriptSource } from '@shared/transcriptSource';
 import { computeLlmCostUsd } from '../shared/llmPricing';
 
@@ -130,7 +131,15 @@ export interface PhaseStateWrite {
   runId: string;
   /** handle+platform — findable before a subject row exists. */
   subjectHint: string;
-  phase: "capture" | "augment" | "transcribe" | "derive" | "extract_commit";
+  /**
+   * The phase list, IMPORTED rather than restated.
+   *
+   * This was a second copy of the union, and adding `channel_instagram` to
+   * PHASE_NAMES broke here — which is the good outcome; a copy that silently
+   * accepted the new name would have let the ledger and the contract disagree.
+   * `_core/analysisPhase` imports nothing, so there is no cycle to buy.
+   */
+  phase: PhaseName;
   tool?: string;
   status: "pending" | "running" | "complete" | "partial" | "blocked" | "genuine_empty" | "failed";
   /** Which attempt produced this row, 1-based. The scheduler (S3a) passes the

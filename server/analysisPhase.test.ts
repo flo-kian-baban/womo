@@ -17,11 +17,16 @@ import {
 } from "./_core/analysisPhase";
 
 describe("phase names", () => {
-  it("are the five approved phases, in pipeline order", () => {
+  it("are the six approved phases, in pipeline order", () => {
+    // Six since S5. `channel_instagram` is written only by brand campaigns; it
+    // is a phase rather than part of augment because the phase is the RETRY
+    // UNIT, and a failed Instagram scrape must not re-run the review and
+    // mention fetches.
     expect(PHASE_NAMES).toEqual([
       "capture",
       "augment",
       "transcribe",
+      "channel_instagram",
       "derive",
       "extract_commit",
     ]);

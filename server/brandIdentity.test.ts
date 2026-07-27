@@ -28,7 +28,7 @@ import {
   assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
   type BrandMonolithBaseline,
 } from "./phases/brandEvidence";
-import { assembleBrandCollection, brandDecoderInputsFrom } from "./phases/brandPhases";
+import { assembleBrandCollection, brandDecoderInputsFrom, brandGate } from "./phases/brandPhases";
 import { EMPTY_BRAND_REVIEW_FIELDS, type BrandReviewFields } from "./reviewResearch";
 
 const FIXTURE = path.join(import.meta.dirname, "__fixtures__", "brandBaseline.json");
@@ -227,9 +227,10 @@ describe("the assembly rule itself — order, and the absent-block asymmetry", (
  * thing under test is the routing of banked pieces into the two pinned
  * builders — not the builders themselves, which are already pinned above.
  *
- * The TikTok and Instagram blocks are deliberately excluded: the router still
- * owns those inputs until step 4, so collection's string is the recorded one
- * MINUS those two blocks.
+ * The TikTok and Instagram blocks are now COLLECTION's too (S5 phases 3 and 4).
+ * With no channel metadata banked they are absent, so the string is the recorded
+ * one minus those two blocks — which is what these drive. Their presence and
+ * their slot order are pinned in the block below.
  */
 describe("assembleBrandCollection rebuilds from banked phase outputs", () => {
   /** The baseline's parts, rearranged into what the four phases would bank. */
@@ -302,10 +303,94 @@ describe("assembleBrandCollection rebuilds from banked phase outputs", () => {
     expect(out.evidenceSummary).toContain(bl!.parts.base);
   });
 
-  it("it never emits the router's blocks — those are step 4's business", () => {
+  it("a channel that banked no metadata contributes NO block and NO separator", () => {
+    // The router's asymmetry, preserved: a null channel meant the block was
+    // never appended at all, not appended empty.
     const s = assembleBrandCollection(bankedFromBaseline()).evidenceSummary;
     if (bl!.parts.tiktokBlock) expect(s).not.toContain(bl!.parts.tiktokBlock);
     if (bl!.parts.instagramBlock) expect(s).not.toContain(bl!.parts.instagramBlock);
+    expect(s.endsWith("\n\n")).toBe(false);
+  });
+});
+
+/**
+ * THE CHANNEL BLOCKS, NOW COLLECTION'S (S5 phases 3 and 4).
+ *
+ * The router used to append these two after `researchBrand` returned. Phases 3
+ * and 4 bank the channel metadata, so the collection emits all five blocks and
+ * produces the WHOLE string rather than a prefix of it.
+ *
+ * The hazard is slot order, not omission: appending a late-arriving block at the
+ * end would still contain every block and still look plausible, while handing
+ * the model a differently-ordered prompt. The recorded baseline pins the true
+ * order, so these check the phased assembly against it.
+ */
+describe("the channel blocks land in the recorded slots", () => {
+  function bankedWithChannels() {
+    const i = bl!.baseInputs!;
+    return {
+      capture: {
+        brandName: i.brandName, websiteUrl: i.websiteUrl,
+        description: "", snippets: [], semanticWordCount: 0, crawledPages: [],
+      },
+      augment: {
+        rescue: { description: i.description, snippets: i.snippets, googleFallbackRan: false, youtubeFallbackRan: false },
+        perception: {
+          audiencePerceptionBlock: i.audiencePerceptionBlock,
+          totalReviews: bl!.observed.totalReviews,
+          review: { ...EMPTY_BRAND_REVIEW_FIELDS, totalReviews: bl!.observed.totalReviews },
+          mentionEvidenceBlock: bl!.parts.mentionEvidenceBlock ?? null,
+          totalMentions: bl!.observed.totalMentions,
+          mentions: null,
+        },
+      },
+      derive: { decodedSymbols: null, decodedSymbolsBlock: bl!.parts.decodedSymbolsBlock ?? null },
+    };
+  }
+
+  /**
+   * The block FORMATTERS are the router's own and are already exercised by the
+   * recorded baseline (its tiktokBlock and instagramBlock are their output). So
+   * these stub the formatting step by asserting on slot ORDER with the recorded
+   * blocks standing in — the routing is what phases 3 and 4 changed.
+   */
+  it("the recorded string orders the blocks base → symbols → mentions → tiktok → instagram", () => {
+    const s = bl!.expectedEvidenceSummary;
+    const at = (b: string | null | undefined) => (b ? s.indexOf(b) : -1);
+    const symbols = at(bl!.parts.decodedSymbolsBlock);
+    const tiktok = at(bl!.parts.tiktokBlock);
+    const instagram = at(bl!.parts.instagramBlock);
+    expect(tiktok, "fixture has no tiktok block — the slot is untested").toBeGreaterThan(0);
+    expect(instagram, "fixture has no instagram block — the slot is untested").toBeGreaterThan(0);
+    expect(symbols).toBeLessThan(tiktok);
+    expect(tiktok).toBeLessThan(instagram);
+  });
+
+  it("BYTE-IDENTICAL: collection + the recorded channel blocks reproduces the whole recorded string", () => {
+    // Collection's parts with the two channel blocks filled from the baseline —
+    // run through the SAME pinned assembly, so this proves the phased parts
+    // reach the recorded string once the channels have banked.
+    const parts = assembleBrandCollection(bankedWithChannels()).evidenceParts;
+    expect(assembleBrandEvidence({
+      ...parts,
+      tiktokBlock: bl!.parts.tiktokBlock,
+      instagramBlock: bl!.parts.instagramBlock,
+    })).toBe(bl!.expectedEvidenceSummary);
+  });
+
+  it("a banked channel emits its block; an unbanked one emits nothing", () => {
+    const withNeither = assembleBrandCollection(bankedWithChannels());
+    expect(withNeither.evidenceParts.tiktokBlock).toBeNull();
+    expect(withNeither.evidenceParts.instagramBlock).toBeNull();
+
+    // `metadata: null` is the skip outcome both channel phases bank when no
+    // locator was supplied — it must read as absent, not as an empty block.
+    const withSkips = assembleBrandCollection({
+      ...bankedWithChannels(),
+      transcribe: { metadata: null, skippedReason: "no brand channel supplied" },
+      channelInstagram: { metadata: null, skippedReason: "no Instagram handle supplied" },
+    });
+    expect(withSkips.evidenceSummary).toBe(withNeither.evidenceSummary);
   });
 });
 
@@ -493,4 +578,125 @@ describe("the symbol decoder receives the monolith's inputs, byte for byte", () 
       }) as never).reviewText).toBe(recorded.reviewText);
     },
   );
+});
+
+/**
+ * BRAND'S GATE — FROZEN, supplied by the subject rather than the registry.
+ *
+ * Lifted verbatim from `brand.analyze`: the same five conditions, the same
+ * `&&`, the same PRECONDITION_FAILED text. It cannot come from the platform
+ * registry because brand is not a platform — see BRAND_PSEUDO_PLATFORM for why
+ * that compromise was taken knowingly over separating subject type from
+ * platform.
+ *
+ * ─── AN OPEN FINDING LIVES IN HERE ──────────────────────────────────────────
+ * The lift is faithful and the gate is, as a result, ALMOST UNREACHABLE on the
+ * phased path. See the last two cases: they pin the behaviour as it actually is
+ * so it cannot be mistaken for endorsement.
+ */
+describe("the brand min-data gate", () => {
+  const FROZEN = "Insufficient data to analyze this brand. No website content, reviews, or social mentions were found. Please verify the brand URL and try again.";
+
+  const bare = {
+    capture: {
+      brandName: "X", websiteUrl: null, description: "",
+      snippets: [], semanticWordCount: 0, crawledPages: [],
+    },
+    augment: {
+      rescue: { description: "", snippets: [], googleFallbackRan: true, youtubeFallbackRan: true },
+      perception: {
+        audiencePerceptionBlock: null,
+        totalReviews: 0,
+        review: EMPTY_BRAND_REVIEW_FIELDS,
+        mentionEvidenceBlock: null,
+        totalMentions: 0,
+        mentions: null,
+      },
+    },
+    derive: { decodedSymbols: null, decodedSymbolsBlock: null },
+  };
+
+  const gate = (banked: Record<string, unknown>) => brandGate({ handle: "X", banked } as never);
+
+  it("refuses when collection banked NOTHING — the frozen text, to the byte", () => {
+    // capture absent ⇒ no base block ⇒ evidence length 0, which is the phased
+    // equivalent of the router's `brandEvidenceSummary` being undefined because
+    // `researchBrand` threw.
+    const v = gate({ capture: null, augment: null, transcribe: null, channel_instagram: null, derive: null });
+    expect(v.ok).toBe(false);
+    expect((v as { code: string }).code).toBe("PRECONDITION_FAILED");
+    expect((v as { message: string }).message).toBe(FROZEN);
+  });
+
+  /**
+   * THE ORDERING CLAIM, ASSERTED. Two of the five conditions ask whether the
+   * channels produced anything, so a gate running BEFORE phases 3 and 4 would
+   * refuse a brand whose only evidence is its channels — which the router
+   * explicitly admits. These prove the gate reads both.
+   */
+  it("a TikTok channel alone admits a brand with nothing else", () => {
+    expect(gate({
+      capture: null, augment: null, derive: null,
+      transcribe: { metadata: { channelHandle: "x" }, skippedReason: null },
+      channel_instagram: null,
+    }).ok).toBe(true);
+  });
+
+  it("an Instagram channel alone admits a brand with nothing else", () => {
+    expect(gate({
+      capture: null, augment: null, derive: null,
+      transcribe: null,
+      channel_instagram: { metadata: { channelHandle: "x" }, skippedReason: null },
+    }).ok).toBe(true);
+  });
+
+  it("a SKIPPED channel is not a channel — banked metadata null must not admit", () => {
+    expect(gate({
+      capture: null, augment: null, derive: null,
+      transcribe: { metadata: null, skippedReason: "no brand channel supplied" },
+      channel_instagram: { metadata: null, skippedReason: "no Instagram handle supplied" },
+    }).ok).toBe(false);
+  });
+
+  it("reviews alone, or mentions alone, admit", () => {
+    const perception = bare.augment.perception;
+    expect(gate({
+      capture: null, derive: null, transcribe: null, channel_instagram: null,
+      augment: { ...bare.augment, perception: { ...perception, totalReviews: 3 } },
+    }).ok).toBe(true);
+    expect(gate({
+      capture: null, derive: null, transcribe: null, channel_instagram: null,
+      augment: { ...bare.augment, perception: { ...perception, totalMentions: 5 } },
+    }).ok).toBe(true);
+  });
+
+  /**
+   * ─── OPEN FINDING — the length conjunct is structurally unsatisfiable ──────
+   *
+   * The router measured `(brandEvidenceSummary || "").length`, which is 0 when
+   * `researchBrand` threw and the router swallowed it. The phased path always
+   * BUILDS a base block, and that block's frozen INSTRUCTIONS boilerplate is 574
+   * characters before any evidence is added. So the moment capture and augment
+   * bank anything at all — including a total-failure brand with an empty
+   * description, no snippets, no reviews and no mentions — `evidenceLength < 200`
+   * is false and the gate admits.
+   *
+   * These two cases pin that as the CURRENT behaviour, not as the intended one.
+   * Reported for a decision; nothing has been adjusted to work around it.
+   */
+  it("FINDING: an empty base block is already 574 chars of frozen boilerplate", () => {
+    const empty = buildBrandBaseEvidence({
+      brandName: "X", websiteUrl: null, description: "", snippets: [], audiencePerceptionBlock: null,
+    });
+    expect(empty.length).toBe(574);
+    expect(empty.length).toBeGreaterThan(200);
+  });
+
+  it("FINDING: a brand with no evidence whatsoever is ADMITTED once capture banks", () => {
+    // Every conjunct but the first is satisfied — no reviews, no mentions,
+    // neither channel — and the gate still passes, because the boilerplate
+    // alone clears the 200-char bar.
+    const v = gate({ ...bare, transcribe: null, channel_instagram: null });
+    expect(v.ok).toBe(true);
+  });
 });
