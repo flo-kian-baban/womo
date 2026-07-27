@@ -27,7 +27,7 @@ interface CreatorProfileCardProps {
   };
 }
 
-const FIELD_SECTIONS = [
+export const FIELD_SECTIONS = [
   {
     title: "Field Note Two: Creator Snapshot",
     subtitle: "Jungian Archetype & Cultural Identity",
@@ -59,58 +59,97 @@ const FIELD_SECTIONS = [
   },
 ];
 
-const BOOLEAN_FIELDS = [
+export const BOOLEAN_FIELDS = [
   { key: "undergroundDensity", label: "Underground Density" },
   { key: "mainstreamBleed", label: "Mainstream Bleed" },
   { key: "remixRate", label: "Remix Rate" },
   { key: "brandSaturation", label: "Brand Saturation" },
 ];
 
-function getStatusColor(key: string, value: string) {
-  if (key === "goffmanStageConsistency") {
-    if (value === "Consistent") return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (value === "Minor Gap") return "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
-    return "text-red-400 bg-red-400/10 border-red-400/30";
-  }
-  if (key === "driftSignal") {
-    if (value === "Zero Change") return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (value === "Minor Drift") return "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
-    if (value === "Significant Drift") return "text-orange-400 bg-orange-400/10 border-orange-400/30";
-    return "text-red-400 bg-red-400/10 border-red-400/30";
-  }
-  if (key === "culturalVelocity") {
-    if (value === "Focusing") return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (value === "Drifting") return "text-orange-400 bg-orange-400/10 border-orange-400/30";
-    return "text-muted-foreground bg-muted/20 border-border/50";
-  }
-  if (key === "stuartHallDecoding") {
-    if (value === "Dominant") return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (value === "Negotiated") return "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
-    return "text-red-400 bg-red-400/10 border-red-400/30";
-  }
-  if (key === "creatorNichePosition") {
-    if (value === "Ahead") return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (value === "Consistent") return "text-blue-400 bg-blue-400/10 border-blue-400/30";
-    return "text-red-400 bg-red-400/10 border-red-400/30";
-  }
-  return "text-primary bg-primary/10 border-primary/30";
+/**
+ * B2a COLOUR DISCIPLINE — a framework reading is a POSITION, not a verdict.
+ *
+ * Every one of these was a traffic light: Goffman "Consistent" green and
+ * "Significant Gap" destructive-red, Hall "Dominant" green and "Oppositional"
+ * red, niche position "Ahead" green. That reads as good/bad on readings which
+ * are neither — an oppositional Hall decoding is a finding about how an
+ * audience receives a creator, not a fault, and colouring it red tells the
+ * analyst to distrust the creator rather than to read the label.
+ *
+ * All categorical values now render in ONE quiet chip. Colour on this page is
+ * reserved for evidence quality and attention — confidence, coverage, capture
+ * health, provenance, review state — so a healthy profile reads almost
+ * entirely neutral and the coloured things are the ones that want a decision.
+ */
+/**
+ * The six metric tooltips, EXPORTED so the report page and the compact card
+ * quote the same words. These carry a real caveat — TikTok's profile stats are
+ * bot-restricted placeholders and the derived figures cover only the captured
+ * SAMPLE — and a second hand-copied set is exactly how that caveat goes stale
+ * in one place and not the other.
+ */
+export const METRIC_TOOLTIPS: Record<string, {
+  title: string; explanation: string; whyItMatters: string; dataPoints: string[];
+}> = {
+  followerCount: {
+    title: "Followers — Unverified",
+    explanation: "TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data (typically a very small number) rather than the real follower count.",
+    whyItMatters: "Don't use this for reach. Total Views / Avg Views are computed from the captured per-video data — a SAMPLE of the channel (see coverage in Run diagnostics) — so treat them as scrape-derived, not independently verified.",
+    dataPoints: ["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"],
+  },
+  totalLikes: {
+    title: "Total Likes — Unverified",
+    explanation: "TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data rather than the real total likes count.",
+    whyItMatters: "Don't use this for engagement. The Engagement Rate is computed from the captured per-video data — as reliable as the scrape, over a sample of the channel, and not independently verified.",
+    dataPoints: ["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"],
+  },
+  totalViews: {
+    title: "Total Views — Derived",
+    explanation: "Summed from the per-video view counts we captured — a SAMPLE of the channel (see coverage in Run diagnostics), not an independently verified channel total.",
+    whyItMatters: "As reliable as the scrape it came from, and it reflects the captured subset of videos, not the whole channel.",
+    dataPoints: ["Sum of scraped per-video view counts", "Captured subset only — not the full channel"],
+  },
+  avgViews: {
+    title: "Avg Views — Derived",
+    explanation: "Average of the per-video view counts we captured. Computed over the captured SUBSET of videos (often a small % of the channel), so a few viral clips can skew it.",
+    whyItMatters: "As reliable as the scrape it came from, and biased toward whichever videos were captured — not a channel-wide average.",
+    dataPoints: ["Mean of scraped per-video view counts", "Captured subset only — see coverage"],
+  },
+  videoCount: {
+    title: "Video Count — Unverified",
+    explanation: "TikTok restricts direct profile stat access from server-side requests. This number is sourced from TikTok's HTML response, which returns placeholder data rather than the real video count.",
+    whyItMatters: "The actual number of videos analyzed is shown in the transcript badge below. Use that count for data confidence assessment.",
+    dataPoints: ["TikTok HTML page response (bot-restricted)", "Real value requires TikTok Official API access"],
+  },
+  engagementRate: {
+    title: "Engagement Rate — Derived",
+    explanation: "Computed from the per-video like/comment counts we captured (likes+comments ÷ plays, averaged over the captured videos). It is derived from scraped, bot-restricted data over a sample of the channel.",
+    whyItMatters: "As reliable as the scrape it came from, and computed over the captured subset — not independently verified and not a channel-wide figure.",
+    dataPoints: ["Averaged from scraped per-video like/comment/play counts", "Captured subset only — see coverage"],
+  },
+};
+
+export const CHIP_NEUTRAL = "text-foreground/75 bg-secondary/50 border-border/60";
+
+function getStatusColor(_key: string, _value: string) {
+  return CHIP_NEUTRAL;
 }
 
-function formatNum(n: number): string {
+export function formatNum(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknown; type: string }) {
+export function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknown; type: string }) {
   if (value === null || value === undefined) {
     return <span className="text-muted-foreground/40 text-sm italic">—</span>;
   }
 
   if (type === "badge") {
     return (
-      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-primary/30 bg-primary/10 text-primary">
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${CHIP_NEUTRAL}`}>
         {String(value)}
       </span>
     );
@@ -131,7 +170,7 @@ function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknow
 
   if (type === "quote") {
     return (
-      <blockquote className="border-l-2 border-primary/40 pl-3 text-sm text-muted-foreground italic leading-relaxed">
+      <blockquote className="border-l-2 border-border pl-3 text-sm text-muted-foreground italic leading-relaxed">
         {String(value)}
       </blockquote>
     );
@@ -146,7 +185,7 @@ function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknow
             <div
               key={i}
               className={`w-2.5 h-2.5 rounded-full transition-colors ${
-                i <= Math.round(score) ? "bg-primary" : "bg-border"
+                i <= Math.round(score) ? "bg-foreground/55" : "bg-border"
               }`}
             />
           ))}
@@ -169,7 +208,7 @@ function FieldValue({ fieldKey, value, type }: { fieldKey: string; value: unknow
 }
 
 // ─── Supplemental Video Panel ────────────────────────────────────────────────
-function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
+export function SupplementalVideoPanel({ profile }: { profile: CreatorProfile }) {
   const utils = trpc.useUtils();
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestedIds, setIngestedIds] = useState<Set<string>>(new Set());
@@ -402,7 +441,7 @@ function DataHealthBar({ profile }: { profile: CreatorProfile }) {
 
 // ─── Video Evidence Table ─────────────────────────────────────────────────────
 
-function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
+export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
   const [expanded, setExpanded] = useState(false);
   const { data: contentItems, isLoading } = trpc.creator.getContentItems.useQuery(
     { subjectId: profile.id },

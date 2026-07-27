@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import CreatorProfileCard from "@/components/CreatorProfileCard";
+import CreatorReport from "@/components/CreatorReport";
 import { PendingRerunNotice, ReviewGatePanel } from "@/components/ReviewGate";
 import { Button } from "@/components/ui/button";
 
@@ -75,7 +75,7 @@ export default function CreatorDetail() {
             </>
           )}
 
-          <CreatorProfileCard profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
+          <CreatorReport profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
 
           {/* Diagnostics for the displayed run (with accept/decline when it is
               itself pending — i.e. a first analysis awaiting review). */}
