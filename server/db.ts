@@ -944,19 +944,55 @@ export async function upsertSubject(data: {
 /**
  * Find or create a platform_handles row.
  */
+/**
+ * What an `upsertPlatformHandle` call actually did.
+ *
+ * ─── Why this is not just an id ─────────────────────────────────────────────
+ * The lookup below matches on `(platform, lower(handle))` and IGNORES
+ * `subject_id`, because `handles_lookup_idx` is `UNIQUE (platform, handle)` —
+ * the database itself permits only one subject per handle. So when another
+ * subject already holds the handle, this function cannot write a row, returned
+ * the other subject's id, and the caller recorded SUCCESS.
+ *
+ * That is the content_items attribution bug in a different table: a write that
+ * lands against the wrong owner and reports as fine. Found live twice —
+ *
+ *   creator `vnilla`   lost instagram/vnillalondon to brand `vnilla.co.uk`
+ *   brand   `Glossier` lost instagram/glossier    to brand `glossier.com`
+ *
+ * — including once to a CREATOR, inside the atomic identity core, before brand
+ * campaigns existed.
+ *
+ * The uniqueness policy is NOT changed here (that is Option A and its own
+ * decision, see docs/BRAND_OPEN_QUESTIONS.md). What changes is that the
+ * collision is now REPORTABLE instead of silent.
+ */
+export interface PlatformHandleWrite {
+  /** The row's id — this subject's when written, the other owner's otherwise. */
+  id: string;
+  outcome:
+    | "created"            // a new row, owned by this subject
+    | "already_owned"      // the row exists and belongs to this subject (re-analysis)
+    | "claimed_by_other";  // the row exists and belongs to a DIFFERENT subject
+  /** Set only for `claimed_by_other` — who actually holds the handle. */
+  ownerSubjectId?: string;
+}
+
 export async function upsertPlatformHandle(
   subjectId: string,
   platform: string,
   handle: string,
   profileUrl?: string,
   executor?: DbExecutor,
-): Promise<string> {
+): Promise<PlatformHandleWrite> {
   const db = executor ?? await getDb();
   if (!db) throw new Error("Database not available");
 
   const normalizedPlatform = normalizePlatform(platform);
 
-  const existing = await db.select({ id: platformHandles.id })
+  // `subjectId` is selected, not filtered on: the unique index is global, so the
+  // question is not "does this subject have a row?" but "who owns this handle?".
+  const existing = await db.select({ id: platformHandles.id, subjectId: platformHandles.subjectId })
     .from(platformHandles)
     .where(and(
       eq(platformHandles.platform, normalizedPlatform),
@@ -965,7 +1001,12 @@ export async function upsertPlatformHandle(
     ))
     .limit(1);
 
-  if (existing.length > 0) return existing[0].id;
+  if (existing.length > 0) {
+    const row = existing[0]!;
+    return row.subjectId === subjectId
+      ? { id: row.id, outcome: "already_owned" }
+      : { id: row.id, outcome: "claimed_by_other", ownerSubjectId: row.subjectId };
+  }
 
   const result = await db.insert(platformHandles).values({
     subjectId,
@@ -975,7 +1016,7 @@ export async function upsertPlatformHandle(
     isPrimary: true,
   }).returning({ id: platformHandles.id });
 
-  return result[0].id;
+  return { id: result[0].id, outcome: "created" };
 }
 
 /**

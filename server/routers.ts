@@ -7,7 +7,7 @@ import {
   // Transaction plumbing (atomic identity core)
   withTransaction,
   // V2 write functions
-  upsertSubject, upsertPlatformHandle, insertObservation, insertCreatorObservation,
+  upsertSubject, upsertPlatformHandle, type PlatformHandleWrite, insertObservation, insertCreatorObservation,
   insertSignalValues, insertDecodedSignals, insertContentItems,
   updateContentItemTranscript, updateObservationTranscriptCount,
   updateCreatorObservationAvgDuration, updateObservationPersistenceStatus,
@@ -285,6 +285,57 @@ export const brandCampaignDeps: BrandCampaignDeps = {
 };
 
 /**
+ * Turn a platform-handle write into an honest outcome for persistence_status.
+ *
+ * ─── Why `failed` and not a skip ────────────────────────────────────────────
+ * The two skip kinds both mean "no write was owed": `skipped_no_data` is a fact
+ * about the subject (it has no such handle) and `skipped_not_attempted` means we
+ * never tried. Neither is true here. We had a handle, we attempted the write,
+ * and the subject ends up WITHOUT the row it should own — the write did not
+ * achieve what it claimed. That is the definition of `failed`, and it is the
+ * same call `reportContentItemsWrite` makes for the identical situation one
+ * table over.
+ *
+ * The reason names the owning subject id, because the first question anyone asks
+ * is "then who has it?" and the answer decides whether this is a duplicate
+ * subject to merge or a genuine collision between two different real accounts.
+ *
+ * Shared by the creator core and the brand enrichment so the two cannot drift
+ * into reporting the same event differently.
+ */
+export function platformHandleCollisionReport(
+  write: PlatformHandleWrite,
+  label: string,
+): EnrichmentReport {
+  const reason =
+    `${label} is already owned by subject ${write.ownerSubjectId} — ` +
+    `handles are globally unique per platform (handles_lookup_idx), so no row was written for this subject`;
+  console.warn(`[persist] platform handle collision: ${reason}`);
+  return { status: "failed", reason };
+}
+
+/** The same verdict, recorded directly — for callers outside `runEnrichment`. */
+function recordPlatformHandleOutcome(
+  map: PersistenceStatusMap,
+  component: string,
+  write: PlatformHandleWrite | null,
+  label: string,
+): void {
+  if (!write) {
+    // Unreachable while the transaction assigns it, but a silent `success` here
+    // would be the very failure mode this component exists to end.
+    recordOutcome(map, component, "failed", `${label}: handle write did not run`);
+    return;
+  }
+  if (write.outcome === "claimed_by_other") {
+    const report = platformHandleCollisionReport(write, label);
+    recordOutcome(map, component, report.status, report.reason);
+    return;
+  }
+  recordOutcome(map, component, "success");
+}
+
+/**
  * Turn a content_items write into an honest outcome for persistence_status.
  *
  * "We wrote rows" and "this observation owns evidence" are different claims,
@@ -469,6 +520,17 @@ export async function persistCreatorToV2(params: {
     // the core because it FK-references the subject created in the same
     // transaction. Enrichments (signals, content items, transcripts) are
     // written independently below.
+    /**
+     * The handle write's outcome, carried OUT of the transaction.
+     *
+     * A collision must not abort the core: a subject without its handle row is a
+     * DEGRADED result, not a dead one, and throwing here would roll back the
+     * subject, the observation and the creator_observation over a row that
+     * already exists under another owner. So the outcome is captured and
+     * reported afterwards, alongside every other component.
+     */
+    let handleWrite: PlatformHandleWrite | null = null;
+
     const { subjectId, observationId } = await withTransaction(async (tx) => {
       // 1. upsertSubject
       const subjectId = await upsertSubject({
@@ -482,8 +544,8 @@ export async function persistCreatorToV2(params: {
         engagementTier: computeEngagementTierLocal(researchData.followerCount),
       }, tx);
 
-      // 2. upsertPlatformHandle
-      await upsertPlatformHandle(subjectId, platform, handle, profileUrl, tx);
+      // 2. upsertPlatformHandle — never throws on a collision; see handleWrite.
+      handleWrite = await upsertPlatformHandle(subjectId, platform, handle, profileUrl, tx);
 
       // 3. insertObservation — review gate (womo_0006): creator runs persist as
       // 'pending' and await analyst acceptance before entering the corpus.
@@ -534,7 +596,23 @@ export async function persistCreatorToV2(params: {
 
     // ── INDEPENDENT ENRICHMENTS — each records its own outcome, none aborts the others ──
     const persistence: PersistenceStatusMap = {};
+    /**
+     * `identity_core` stays SUCCESS in a handle collision, and that is not a
+     * softened verdict — it is the accurate one.
+     *
+     * The core's claim is atomicity: subject, handle, observation and
+     * creator_observation commit together or not at all, so that no orphaned
+     * observation or handle can exist. In a collision the handle row DOES exist
+     * (owned by another subject), nothing is orphaned, and every row the
+     * transaction is responsible for was written. Reporting `failed` here would
+     * say the identity chain did not persist, which is false and would send
+     * anyone triaging it to the wrong table.
+     *
+     * The ownership loss is a different fact and gets its own component below,
+     * so both are legible at once instead of one masking the other.
+     */
     recordOutcome(persistence, "identity_core", "success");
+    recordPlatformHandleOutcome(persistence, "platform_handle", handleWrite, `@${handle} on ${platform}`);
 
     // 5. insertSignalValues
     const signals: Array<{ domain: string; signalKey: string; rank?: number; source?: string }> = [];
@@ -955,12 +1033,20 @@ export async function persistBrandToV2(params: {
       instagramGate ?? (!instagramMetadata?.channelHandle
         ? { skip: "skipped_no_data", reason: "Instagram analysis returned no channel handle" }
         : async () => {
-            await upsertPlatformHandle(
+            const write = await upsertPlatformHandle(
               subjectId,
               "instagram",
               instagramMetadata.channelHandle,
               `https://www.instagram.com/${instagramMetadata.channelHandle}/`,
             );
+            // A collision must be REPORTED, not logged as "saved" — this
+            // component said success while writing nothing for the live
+            // Glossier run. `runEnrichment` records whatever this returns.
+            if (write.outcome === "claimed_by_other") {
+              return platformHandleCollisionReport(
+                write, `@${instagramMetadata.channelHandle} on instagram`,
+              );
+            }
             console.log(`[persist] Instagram handle @${instagramMetadata.channelHandle} saved`);
           }));
 

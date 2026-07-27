@@ -35,6 +35,64 @@ path forks a new subject.
 
 ---
 
+## F3 / Option A — should `handles_lookup_idx` stay globally unique?
+
+**Status:** open. Option B has landed — a handle collision now reports `failed`
+with the owning subject named, instead of silent success. The *policy* is
+unchanged: `handles_lookup_idx` is still `UNIQUE (platform, handle)`, so a
+subject whose handle is already claimed still ends up without a row. Option A is
+the decision to change that, and it needs DDL.
+
+### Known victims (2026-07-27)
+
+| victim | type | handle | claimed by |
+|---|---|---|---|
+| `vnilla` (`5968049c`) | creator | `instagram/vnillalondon` | brand `vnilla.co.uk` (`fb6716a2`) |
+| `Glossier` (`db6770ae`) | brand | `instagram/glossier` | brand `glossier.com` (`bf39c035`) |
+
+Zero rows are *mis-owned* — the global unique index made a wrong-owner row
+impossible. The defect produces **absences**, which is why nothing looked wrong.
+
+### What depends on the global one-subject-per-handle guarantee
+
+Gathered so the decision does not have to re-derive it. Every reader of
+`platform_handles` in the server, and what each would do if the index were
+scoped to the subject:
+
+| reader | what it does | under Option A |
+|---|---|---|
+| `upsertPlatformHandle` (db.ts) | the writer; global lookup on `(platform, lower(handle))` | **must change** — match on subject, and the collision branch disappears |
+| `findExistingCreatorByHandle` (db.ts) — **duplicate pre-flight** | secondary probe joins `platform_handles → subjects` filtered to `subject_type='creator'`, `.limit(1)` | **safe, with a caveat**: already scoped to creators, so it still finds *a* creator. But `.limit(1)` over a no-longer-unique set picks arbitrarily — today the index guarantees at most one |
+| `getBrandProfileById` (db.ts) — brand's Instagram handle | selects by `subject_id` + `platform`, `.limit(1)` | **safe** — already subject-scoped. Same `.limit(1)` caveat if a subject could hold two handles on one platform |
+| `brand.reanalyze` (routers.ts) | reuses `existing.instagramHandle` from the reader above | **safe** — inherits whatever that returns |
+
+Two things that look like dependencies and are **not**:
+
+- **`upsertSubject`** dedupes on `(lower(primaryHandle), primaryPlatform,
+  subjectType)` and never consults `platform_handles`. Independent of this index
+  entirely. (Note: brand subjects carry a null `primary_handle`, so brands are
+  deduped by nothing — that is F6, a separate problem.)
+- **Creator duplicate creation.** Two creator subjects cannot share a
+  handle+platform regardless of this index, because `upsertSubject` refuses it.
+  The index is not what prevents that.
+
+### The shape question Option A must answer
+
+Scoping is not one choice but two, and they have different consequences:
+
+- `UNIQUE (subject_id, platform, handle)` — a subject may hold **several**
+  handles per platform. Permits a creator and a brand to share a handle string
+  (true in the world), but breaks the `.limit(1)` assumption in the two readers
+  above, which would then need an explicit primary.
+- `UNIQUE (subject_id, platform)` — one handle per subject per platform. Keeps
+  every `.limit(1)` correct as-is. Currently 0 duplicates on this key, so it
+  migrates cleanly.
+
+Either way the two known victims need backfilling, and `is_primary` — set to
+`true` on every row today — becomes meaningful for the first time.
+
+---
+
 # Open questions for Jason
 
 Interpretation calls found while moving brand onto the phased spine (S5). Each is
