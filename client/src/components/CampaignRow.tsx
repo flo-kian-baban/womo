@@ -224,10 +224,11 @@ export function CampaignRow({
             variant="ghost"
             size="sm"
             onClick={() => { acknowledge(campaign.runId); onAcknowledged(); }}
-            title="Remove from this machine's attention list. The campaign and its ledger are untouched; other analysts' lists are unaffected."
-            className="h-7 px-2 text-[11px] text-muted-foreground/70 hover:text-foreground flex-shrink-0"
+            title="Acknowledge — remove from this machine's attention list. The campaign and its ledger are untouched; other analysts' lists are unaffected."
+            aria-label="Acknowledge — remove from this machine's attention list"
+            className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-foreground flex-shrink-0"
           >
-            <Check className="w-3 h-3 mr-1" />Acknowledge
+            <Check className="w-3.5 h-3.5" />
           </Button>
         )}
       </div>
@@ -272,22 +273,24 @@ function RequeueAction({ view, runId }: { view: CampaignView; runId: string }) {
   const offer = view.state === "parked_for_human" || view.state === "failed" || view.state === "parked";
   if (!offer) return null;
 
+  // Icon-only: at seven attention rows the repeated words were noise, and the
+  // action is one of two, both spelled out in the title/aria-label.
+  const label = view.state === "parked"
+    ? "Run now — clear the backoff gate and offer this campaign to the next drain"
+    : "Requeue — clear the failure class and gates so the queue will offer this campaign again";
   return (
     <Button
       variant="ghost"
       size="sm"
       disabled={resume.isPending}
       onClick={() => resume.mutate({ runId })}
-      title={
-        view.state === "parked"
-          ? "Clear the backoff gate and offer this campaign to the next drain"
-          : "Clear the failure class and gates so the queue will offer this campaign again"
-      }
-      className="h-7 px-2 text-[11px] text-muted-foreground/70 hover:text-foreground flex-shrink-0"
+      title={label}
+      aria-label={label}
+      className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-foreground flex-shrink-0"
     >
       {resume.isPending
-        ? <Loader2 className="w-3 h-3 animate-spin" />
-        : <><RotateCw className="w-3 h-3 mr-1" />{view.state === "parked" ? "Run now" : "Requeue"}</>}
+        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        : <RotateCw className="w-3.5 h-3.5" />}
     </Button>
   );
 }
