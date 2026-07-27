@@ -231,29 +231,43 @@ export interface ExtractCommitOutput {
   evidenceSummaryBytes: number;
 }
 
-export function makeExtractCommitPhase(platform: PlatformName, deps: {
-  extract: (handleOrUrl: string, platform: string, evidenceSummary: string) => Promise<Record<string, unknown>>;
-  buildSnapshot: (handleOrUrl: string, platform: string, evidenceSummary: string | undefined, structured: unknown) => unknown;
-  persist: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  summarize: (result: unknown) => { saved: string };
-}): AnalysisPhase<DerivePhaseInput & { derived: DerivePhaseOutput }, ExtractCommitOutput> {
+/**
+ * WHAT VARIES BY SUBJECT, injected. Everything else in this phase — the
+ * extract → snapshot → persist → summarize sequence, the saved-to-outcome
+ * mapping and the error classification — is identical for every subject, and
+ * that is precisely the part worth keeping in ONE place. A second copy of the
+ * outcome mapping is how a brand campaign starts reporting `partial` where a
+ * creator reports `complete`.
+ */
+export interface ExtractCommitSpec<TIn extends { handle: string }, TResearch> {
+  /** Read this subject's banked phases, or NOT_READY. */
+  readInputs: (state: CampaignState) => TIn | typeof NOT_READY;
+  /** Turn them into the research object the model and the persister receive. */
+  assemble: (input: TIn) => TResearch & { evidenceSummary?: string; profileUrl?: string };
+  /** Names the tool in the ledger — creator and brand extract different things. */
+  tool: string;
+}
+
+export function makeExtractCommitPhase<TIn extends { handle: string }, TResearch>(
+  platform: PlatformName,
+  deps: {
+    extract: (handleOrUrl: string, platform: string, evidenceSummary: string) => Promise<Record<string, unknown>>;
+    buildSnapshot: (handleOrUrl: string, platform: string, evidenceSummary: string | undefined, structured: unknown) => unknown;
+    persist: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    summarize: (result: unknown) => { saved: string };
+  },
+  spec: ExtractCommitSpec<TIn, TResearch>,
+): AnalysisPhase<TIn, ExtractCommitOutput> {
   return {
     name: "extract_commit",
-    tool: "llm:extractCreatorProfile+persist",
+    tool: spec.tool,
     retry: { maxAttempts: 3, backoffMs: { transient: [30_000, 120_000] } },
-    inputs: (state: CampaignState) => {
-      const capture = state.phases.capture?.output as CapturePhaseOutput | undefined;
-      const augment = state.phases.augment?.output as AugmentPhaseOutput | undefined;
-      const transcribe = state.phases.transcribe?.output as TranscribePhaseOutput | undefined;
-      const derived = state.phases.derive?.output as DerivePhaseOutput | undefined;
-      if (!capture || !augment || !transcribe || !derived) return NOT_READY;
-      return { handle: state.handle, capture, augment, transcribe, derived };
-    },
+    inputs: spec.readInputs,
     async run(input, ctx: PhaseRunContext): Promise<PhaseResult<ExtractCommitOutput>> {
       const started = Date.now();
       try {
         // FUSED: assemble → extract → snapshot → persist, in one unit.
-        const research = assembleFromPhases(input.handle, platform, input, input.derived);
+        const research = spec.assemble(input);
         const extracted = await deps.extract(input.handle, platform, research.evidenceSummary ?? "");
         const persistResult = await deps.persist({
           handle: input.handle,
@@ -277,14 +291,14 @@ export function makeExtractCommitPhase(platform: PlatformName, deps: {
             persistence,
             evidenceSummaryBytes: research.evidenceSummary?.length ?? 0,
           },
-          attempts: [{ tool: "llm:extractCreatorProfile+persist", outcome, durationMs: Date.now() - started }],
+          attempts: [{ tool: spec.tool, outcome, durationMs: Date.now() - started }],
         };
       } catch (err) {
         const failureClass = classifyPhaseError(err);
         return {
           outcome: "failed", failureClass, output: null,
           attempts: [{
-            tool: "llm:extractCreatorProfile+persist", outcome: "failed", failureClass,
+            tool: spec.tool, outcome: "failed", failureClass,
             durationMs: Date.now() - started, detail: (err as Error).message?.slice(0, 300),
           }],
         };

@@ -39,6 +39,11 @@ import { runPhases, bankedOutput, type BankFn } from "./phaseRunner";
 import { makeSchedulerExecute } from "./phaseScheduler";
 import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
 import { runCollection } from "../webResearch";
+import { NOT_READY } from "../_core/analysisPhase";
+import { assembleFromPhases, type DerivePhaseOutput } from "./derivePhases";
+import type {
+  CapturePhaseOutput, AugmentPhaseOutput, TranscribePhaseOutput,
+} from "./collectionPhases";
 import { encodeSubject } from "../_core/subjectIdentity";
 import type { CreatorResearchResult } from "../webResearch";
 
@@ -199,12 +204,30 @@ async function runSubjectCampaign<TResearch>(
   }
 
   // ── Phase 5: extract_commit, through the same runner ──
-  const extractCommitPhase = makeExtractCommitPhase(args.platform, {
-    extract: deps.extract,
-    buildSnapshot: deps.buildSnapshot,
-    persist: deps.persist,
-    summarize: deps.summarize,
-  });
+  const extractCommitPhase = makeExtractCommitPhase(
+    args.platform,
+    {
+      extract: deps.extract,
+      buildSnapshot: deps.buildSnapshot,
+      persist: deps.persist,
+      summarize: deps.summarize,
+    },
+    // The creator spec — VERBATIM what the phase used to do inline: the same
+    // four banked reads, the same NOT_READY condition, the same assembly and
+    // the same ledger tool name.
+    {
+      tool: "llm:extractCreatorProfile+persist",
+      readInputs: (state) => {
+        const capture = state.phases.capture?.output as CapturePhaseOutput | undefined;
+        const augment = state.phases.augment?.output as AugmentPhaseOutput | undefined;
+        const transcribe = state.phases.transcribe?.output as TranscribePhaseOutput | undefined;
+        const derived = state.phases.derive?.output as DerivePhaseOutput | undefined;
+        if (!capture || !augment || !transcribe || !derived) return NOT_READY;
+        return { handle: state.handle, capture, augment, transcribe, derived };
+      },
+      assemble: (input) => assembleFromPhases(input.handle, args.platform, input, input.derived),
+    },
+  );
 
   const summary = await runPhases({
     runId: args.runId,

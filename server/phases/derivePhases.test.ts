@@ -94,7 +94,24 @@ describe("declared inputs", () => {
   const commit = makeExtractCommitPhase("TikTok", {
     extract: async () => ({}), buildSnapshot: () => ({}),
     persist: async () => ({}), summarize: () => ({ saved: "full" }),
-  });
+  },
+    {
+      // The creator spec — the same four banked reads and the same assembly the
+      // phase used to do inline, so these assertions cover what they always did.
+      tool: "llm:extractCreatorProfile+persist",
+      readInputs: (state) => {
+        const c = state.phases.capture?.output as never;
+        const a = state.phases.augment?.output as never;
+        const t = state.phases.transcribe?.output as never;
+        const d = state.phases.derive?.output as never;
+        if (!c || !a || !t || !d) return NOT_READY;
+        return { handle: state.handle, capture: c, augment: a, transcribe: t, derived: d };
+      },
+      assemble: (input: never) => assembleFromPhases(
+        (input as { handle: string }).handle, "TikTok", input, (input as { derived: never }).derived,
+      ),
+    },
+  );
 
   it("derive is NOT_READY until capture, augment AND transcribe have banked", () => {
     expect(derive.inputs(stateWith({}))).toBe(NOT_READY);
@@ -155,7 +172,24 @@ describe("extract_commit is FUSED", () => {
       buildSnapshot: () => ({}),
       persist: async () => { throw new Error("db down"); },
       summarize: () => ({ saved: "full" }),
-    });
+    },
+    {
+      // The creator spec — the same four banked reads and the same assembly the
+      // phase used to do inline, so these assertions cover what they always did.
+      tool: "llm:extractCreatorProfile+persist",
+      readInputs: (state) => {
+        const c = state.phases.capture?.output as never;
+        const a = state.phases.augment?.output as never;
+        const t = state.phases.transcribe?.output as never;
+        const d = state.phases.derive?.output as never;
+        if (!c || !a || !t || !d) return NOT_READY;
+        return { handle: state.handle, capture: c, augment: a, transcribe: t, derived: d };
+      },
+      assemble: (input: never) => assembleFromPhases(
+        (input as { handle: string }).handle, "TikTok", input, (input as { derived: never }).derived,
+      ),
+    },
+  );
     const res = await commit.run({ ...input, derived }, { runId: "r", handle: "h", platform: "TikTok", attempt: 1 });
     expect(extract).toHaveBeenCalledOnce();      // extraction DID run…
     expect(res.outcome).toBe("failed");          // …and the phase still fails as one unit
@@ -168,7 +202,24 @@ describe("extract_commit is FUSED", () => {
       buildSnapshot: () => ({}),
       persist: async () => ({ subjectId: "s1", observationId: "o1" }),
       summarize: () => ({ saved: "partial" }),
-    });
+    },
+    {
+      // The creator spec — the same four banked reads and the same assembly the
+      // phase used to do inline, so these assertions cover what they always did.
+      tool: "llm:extractCreatorProfile+persist",
+      readInputs: (state) => {
+        const c = state.phases.capture?.output as never;
+        const a = state.phases.augment?.output as never;
+        const t = state.phases.transcribe?.output as never;
+        const d = state.phases.derive?.output as never;
+        if (!c || !a || !t || !d) return NOT_READY;
+        return { handle: state.handle, capture: c, augment: a, transcribe: t, derived: d };
+      },
+      assemble: (input: never) => assembleFromPhases(
+        (input as { handle: string }).handle, "TikTok", input, (input as { derived: never }).derived,
+      ),
+    },
+  );
     const res = await commit.run({ ...input, derived }, { runId: "r", handle: "h", platform: "TikTok", attempt: 1 });
     expect(res.outcome).toBe("partial");
     expect(res.output?.observationId).toBe("o1");
@@ -184,7 +235,24 @@ describe("extract_commit is FUSED", () => {
       buildSnapshot: (_h, _p, summary) => { snapshotSummary = summary; return {}; },
       persist: async () => ({ subjectId: "s", observationId: "o" }),
       summarize: () => ({ saved: "full" }),
-    });
+    },
+    {
+      // The creator spec — the same four banked reads and the same assembly the
+      // phase used to do inline, so these assertions cover what they always did.
+      tool: "llm:extractCreatorProfile+persist",
+      readInputs: (state) => {
+        const c = state.phases.capture?.output as never;
+        const a = state.phases.augment?.output as never;
+        const t = state.phases.transcribe?.output as never;
+        const d = state.phases.derive?.output as never;
+        if (!c || !a || !t || !d) return NOT_READY;
+        return { handle: state.handle, capture: c, augment: a, transcribe: t, derived: d };
+      },
+      assemble: (input: never) => assembleFromPhases(
+        (input as { handle: string }).handle, "TikTok", input, (input as { derived: never }).derived,
+      ),
+    },
+  );
     await commit.run({ ...input, derived }, { runId: "r", handle: "h", platform: "TikTok", attempt: 1 });
     expect(snapshotSummary).toBe(extractedSummary);
     expect(extractedSummary.length).toBeGreaterThan(100);
