@@ -13,6 +13,11 @@
     "test:integration": "TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/womo_test vitest run --config vitest.integration.config.ts",
     "test:db:up": "docker run -d --rm --name womo-test-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=womo_test -p 55432:5432 postgres:17-alpine",
     "test:db:down": "docker rm -f womo-test-pg",
+    "harness:up": "pnpm run test:db:up && sleep 4 && docker exec womo-test-pg psql -q -U postgres -d womo_test -c 'drop schema if exists public cascade; create schema public;' && docker exec -i womo-test-pg psql -q -U postgres -d womo_test < server/integration/schema.sql > /dev/null && pnpm run harness:seed && echo 'harness ready — pnpm harness:app'",
+    "harness:app": "DATABASE_URL=postgresql://postgres:postgres@localhost:55432/womo_test NODE_ENV=development tsx watch server/_core/index.ts",
+    "harness:seed": "docker exec -i womo-test-pg psql -q -v ON_ERROR_STOP=1 -U postgres -d womo_test < tools/queue-state-harness/seed-states.sql && echo 're-seeded'",
+    "harness:capture": "tsx tools/queue-state-harness/capture.ts",
+    "harness:down": "pnpm run test:db:down",
     "db:push": "echo 'BLOCKED: this DB is Supabase-migration-managed. Do NOT run drizzle-kit against it (there is no __drizzle_migrations ledger, so drizzle would try to recreate every object). Make schema changes via a Supabase migration (apply_migration), then mirror them into drizzle/schema.ts for types. See docs/STORAGE_MODEL.md. To override knowingly against a NON-production database: pnpm run db:push:UNSAFE' && exit 1",
     "db:push:UNSAFE": "drizzle-kit generate && drizzle-kit migrate"
   },

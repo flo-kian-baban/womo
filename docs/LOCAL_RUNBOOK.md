@@ -76,6 +76,26 @@ To stop: `Ctrl-C` in the terminal. To run again later: `pnpm start:local`.
   can be given more room locally — set `ANALYSIS_TIMEOUT_MS=600000` in `.env`
   and restart.
 
+## Working on the queue UI
+
+Most campaign states cannot be produced on demand — parking, committing with
+gaps and the two refusals need conditions you cannot summon against a real
+profile. `tools/queue-state-harness/` forces all of them as ledger rows in an
+**isolated local Postgres** and runs the real app against it, so a rendering can
+be verified without waiting for production to happen to produce it:
+
+```bash
+pnpm harness:up        # local Postgres + schema + the 14 state fixtures
+pnpm harness:app       # the real app, pointed at it
+pnpm harness:capture   # screenshot every state (separate shell)
+pnpm harness:down
+```
+
+`pnpm harness:*` never touches the shared database. Read
+`tools/queue-state-harness/README.md` before changing the queue view — it
+documents which states exist, why each fixture is shaped the way it is, and how
+to tell a forced state from a natural one.
+
 ## Version discipline (multi-analyst)
 
 The database schema is shared by every running copy of the app, so versions
