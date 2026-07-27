@@ -47,6 +47,7 @@ import {
   HEARTBEAT_MS,
 } from "../db";
 import { newRunId, withAnalysisRun } from "../_core/runContext";
+import { encodeSubject, decodeSubject } from "../_core/subjectIdentity";
 import { startRunMemoryTracker } from "../scraping/memoryTelemetry";
 import { runCreatorCampaign, type CreatorCampaignDeps, type CampaignOutcome } from "../phases/creatorCampaign";
 import type { CampaignState, PhaseName, PhaseStateEntry } from "../_core/analysisPhase";
@@ -57,6 +58,12 @@ import { PHASE_NAMES } from "../_core/analysisPhase";
 export interface SubmitRequest {
   handle: string;
   platform: QueueablePlatform;
+  /**
+   * Subject-specific locators the platform's capture tool understands (S5).
+   * Absent for every single-handle subject, which is what keeps their
+   * `subject_hint` byte-identical — see _core/subjectIdentity.
+   */
+  extras?: Record<string, string>;
 }
 
 /**
@@ -89,7 +96,7 @@ export async function submitCampaigns(requests: SubmitRequest[]): Promise<Submit
     // must fail the submission rather than pretend.
     await recordPhaseState({
       runId,
-      subjectHint: `${req.handle}@${req.platform}`,
+      subjectHint: encodeSubject({ handle: req.handle, platform: req.platform, extras: req.extras }),
       phase: "capture",
       status: "pending",
       attemptCount: 0,
@@ -212,7 +219,7 @@ function shapeCampaign(
   }>,
 ): CampaignStatus | null {
   if (rows.length === 0) return null;
-  const [handle, platform] = (rows[0]!.subjectHint ?? "@").split("@");
+  const { handle, platform } = decodeSubject(rows[0]!.subjectHint);
   const phases = rows.map(r => ({
     phase: r.phase as PhaseName,
     status: r.status,
@@ -377,7 +384,7 @@ async function recordTerminalFailure(
  * mistaken for an abandoned one.
  */
 async function processCampaign(runId: string, subjectHint: string, deps: CreatorCampaignDeps): Promise<CampaignOutcome | null> {
-  const [handle, platform] = subjectHint.split("@");
+  const { handle, platform, extras } = decodeSubject(subjectHint);
   // The boot loop resumes from the ledger, which outlives any single release —
   // so it can meet a campaign for a platform that WAS supported when the row was
   // written and is not any more (YouTube). Skipping here is what keeps a

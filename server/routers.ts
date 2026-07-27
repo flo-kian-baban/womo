@@ -43,6 +43,7 @@ import { TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
 import { analyzeBrandTikTokChannel, formatBrandTikTokEvidenceBlock, type BrandTikTokMetadata, type MentionVideo } from "./brandTikTokAnalysis";
 import { analyzeBrandInstagramChannel, formatBrandInstagramEvidenceBlock, type BrandInstagramMetadata } from "./brandInstagramAnalysis";
 import { newRunId, withAnalysisRun, currentDeadlineAt } from "./_core/runContext";
+import { decodeSubject } from "./_core/subjectIdentity";
 import { canonicalizeHandle } from "./_core/handles";
 import type { DecodedSymbols } from "./symbolDecoder";
 // Run machinery (concurrency limiter, failure classification, timeout race,
@@ -1229,7 +1230,7 @@ export const appRouter = router({
             message: `Run ${input.runId} is not in the ledger — there is nothing to resume.`,
           });
         }
-        const [, platform] = (rows[0]!.subjectHint ?? "@").split("@");
+        const { platform } = decodeSubject(rows[0]!.subjectHint);
         if (platform !== "TikTok") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
