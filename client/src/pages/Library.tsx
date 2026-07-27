@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   BookOpen, Users, Building2, BarChart3, Search, Trash2,
   ExternalLink, FileJson, ChevronDown, Filter,
-  X, Zap, Star, MapPin, FileText, Clock, Activity,
+  X, Zap, Star, FileText, Clock, Activity,
   AlertTriangle, Eye, TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -241,9 +241,12 @@ function CreatorRow({ creator, onDelete, onExport }: {
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-medium text-foreground truncate">{creator.displayName ?? creator.handle}</span>
               {isPending && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-400/40 text-amber-400 text-[9px] font-semibold uppercase tracking-wider flex-shrink-0">
-                  <Clock className="w-2.5 h-2.5" />
-                  Pending Review
+                <span
+                  className="inline-flex items-center flex-shrink-0 text-amber-400"
+                  title="Pending review — this observation has not been accepted yet"
+                  aria-label="Pending review"
+                >
+                  <Clock className="w-3 h-3" />
                 </span>
               )}
             </div>
@@ -251,24 +254,12 @@ function CreatorRow({ creator, onDelete, onExport }: {
               <PlatformIcon platform={creator.platform} />
               <span className="text-[11px] text-muted-foreground/50">@{creator.handle}</span>
             </div>
-            {creator.primaryRegion && (
-              <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground/40 mt-0.5">
-                <MapPin className="w-2.5 h-2.5" />{creator.primaryRegion}
-              </div>
-            )}
           </div>
 
           {/* Archetype — anchor visual */}
           <div className="flex-shrink-0">
             <ArchBadge archetype={creator.archetype} />
           </div>
-
-          {/* Niche */}
-          {creator.nicheTopicNode && (
-            <div className="hidden xl:block flex-shrink-0 max-w-[220px]">
-              <div className="text-[10px] text-muted-foreground/60 truncate">{creator.nicheTopicNode}</div>
-            </div>
-          )}
 
           {/* ── Stat cluster ── */}
           <div className="flex items-center gap-5 ml-auto flex-shrink-0">
@@ -457,16 +448,6 @@ function BrandRow({ brand, onDelete, onExport }: {
           {/* Archetype — anchor visual */}
           <div className="flex-shrink-0">
             <ArchBadge archetype={brand.archetype} />
-          </div>
-
-          {/* Promise / Tone compact */}
-          <div className="hidden xl:block flex-shrink-0 max-w-[200px]">
-            {brand.emotionalPromise && (
-              <div className="text-[10px] text-muted-foreground/50 truncate">{brand.emotionalPromise}</div>
-            )}
-            {brand.audienceTribe && (
-              <div className="text-[10px] text-muted-foreground/40 truncate">{brand.audienceTribe}</div>
-            )}
           </div>
 
           {/* ── Metric cluster ── */}
