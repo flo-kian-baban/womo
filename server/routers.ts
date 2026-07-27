@@ -35,7 +35,7 @@ import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
 import type { BrandCampaignDeps } from "./phases/brandCampaign";
-import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow, type SubmitRequest } from "./queue/analysisQueue";
+import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow, isRunnableSubject, type SubmitRequest } from "./queue/analysisQueue";
 import type { CreatorResearchResult } from "./webResearch";
 import type { PhaseStateWrite } from "./db";
 import type { RunOutcomeStatus } from "./db";
@@ -1446,11 +1446,21 @@ export const appRouter = router({
             message: `Run ${input.runId} is not in the ledger — there is nothing to resume.`,
           });
         }
+        /**
+         * The guard here said "TikTok campaigns only … Instagram/YouTube land in
+         * S4". Instagram landed in S4 and brand in S5, so it had been refusing
+         * work the worker could run for two sessions — and it was a SECOND copy
+         * of a rule that belongs to the queue. It now asks the queue.
+         *
+         * The check is kept rather than dropped because requeueing a subject the
+         * worker will skip would report `requeued: true` for a campaign that can
+         * never advance.
+         */
         const { platform } = decodeSubject(rows[0]!.subjectHint);
-        if (platform !== "TikTok") {
+        if (!isRunnableSubject(platform)) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: `Resume currently supports TikTok campaigns only (this run is ${platform}). Instagram/YouTube land in S4.`,
+            message: `Run ${input.runId} is a ${platform} campaign, which has no registered phase toolset — resuming it would never advance.`,
           });
         }
         // Clear the backoff gate so the next drain picks it up immediately.

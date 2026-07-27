@@ -102,6 +102,25 @@ export interface SubmitRequest {
  */
 export type QueueablePlatform = "TikTok" | "Instagram" | "Brand";
 
+/**
+ * Can this subject actually be run by the worker?
+ *
+ * ONE rule, because it had become two. The boot loop resumes from the ledger,
+ * which outlives any single release, so it can meet a campaign for a platform
+ * that WAS supported when the row was written and is not any more (YouTube).
+ * Refusing it here is what keeps a disabled platform from being resurrected by
+ * resumption — and `creator.resumeRun` needs the identical answer, because an
+ * endpoint that reports `requeued: true` for work the worker will silently skip
+ * is telling the analyst something untrue.
+ *
+ * Brand passes without a toolset: it is not a platform, it brings its own phases
+ * and its own gate. See BRAND_PSEUDO_PLATFORM.
+ */
+export function isRunnableSubject(platform: string): boolean {
+  if (isPseudoPlatform(platform)) return true;
+  return platform === "TikTok" || platform === "Instagram";
+}
+
 export interface SubmittedCampaign {
   runId: string;
   handle: string;
@@ -452,15 +471,9 @@ async function processCampaign(
    * a different question entirely.
    */
   const isBrand = isPseudoPlatform(platform);
-  if (!isBrand) {
-    // The boot loop resumes from the ledger, which outlives any single release —
-    // so it can meet a campaign for a platform that WAS supported when the row was
-    // written and is not any more (YouTube). Skipping here is what keeps a
-    // disabled platform from being resurrected by resumption.
-    if (platform !== "TikTok" && platform !== "Instagram") {
-      console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
-      return null;
-    }
+  if (!isRunnableSubject(platform)) {
+    console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
+    return null;
   }
   _inFlight.add(runId);
 

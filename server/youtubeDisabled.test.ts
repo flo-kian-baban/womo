@@ -11,6 +11,7 @@
  * asserted rather than assumed.
  */
 import { describe, expect, it } from "vitest";
+import { isRunnableSubject } from "./queue/analysisQueue";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { registeredPlatforms, toolsetFor, YOUTUBE_TOOLSET } from "./phases/platformTools";
@@ -56,12 +57,32 @@ describe("YouTube cannot be submitted or resumed", () => {
     expect(routersSrc).not.toMatch(/lower === "youtube"/);
   });
 
-  it("the queue skips a ledger campaign whose platform is no longer supported", () => {
-    // THE RESUMPTION HOLE this guards: the ledger outlives a release, so the
-    // boot loop can meet a YouTube campaign enqueued when YouTube still worked.
-    const guard = queueSrc.match(/if \(platform !== "TikTok" && platform !== [^)]*\)/);
-    expect(guard, "processCampaign platform guard not found").not.toBeNull();
-    expect(guard![0]).not.toMatch(/YouTube/);
+  /**
+   * THE RESUMPTION HOLE this guards: the ledger outlives a release, so the boot
+   * loop can meet a YouTube campaign enqueued when YouTube still worked.
+   *
+   * This used to pattern-match the inline guard in processCampaign. That rule
+   * became two — the worker's and `creator.resumeRun`'s, which had drifted to
+   * "TikTok only" — so it was extracted into `isRunnableSubject` and both now
+   * ask it. The assertion moved with it, and EXECUTES the rule rather than
+   * reading its source, which is the stronger form.
+   */
+  it("the queue refuses a ledger campaign whose platform is no longer supported", () => {
+    expect(isRunnableSubject("YouTube"), "YouTube must never be runnable").toBe(false);
+    expect(isRunnableSubject("Vine"), "an unknown platform must not be runnable").toBe(false);
+    expect(isRunnableSubject(""), "an unparseable subject hint must not be runnable").toBe(false);
+    // …and the supported subjects still are.
+    expect(isRunnableSubject("TikTok")).toBe(true);
+    expect(isRunnableSubject("Instagram")).toBe(true);
+    expect(isRunnableSubject("Brand"), "brand runs without a toolset by design").toBe(true);
+  });
+
+  it("both the worker and resumeRun ask the SAME rule", () => {
+    // A second copy is how resumeRun came to refuse Instagram for two sessions
+    // after S4 shipped it.
+    expect(queueSrc).toContain("isRunnableSubject(platform)");
+    expect(routersSrc).toContain("isRunnableSubject(platform)");
+    expect(routersSrc, "resumeRun still hardcodes a platform").not.toMatch(/platform !== "TikTok"/);
   });
 
   it("no live server path names YouTube as a runnable platform", () => {
