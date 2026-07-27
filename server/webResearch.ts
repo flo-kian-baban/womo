@@ -57,6 +57,7 @@ import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
 import { assembleBrandEvidence, type BrandEvidenceParts } from "./phases/brandEvidence";
+import { encodeSubject } from "./_core/subjectIdentity";
 import type { CampaignState, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
@@ -2354,7 +2355,13 @@ export async function runCollection(
   initialPhases?: CampaignState["phases"],
 ): Promise<TikTokCollectionCampaign> {
   const handle = extractHandle(handleOrUrl);
-  const subjectHint = `${handle}@${platform}`;
+  /**
+   * ENCODED ONCE, by the module that owns the encoding — the twin of the fix
+   * already made in creatorCampaign. A hand-rolled hint agrees with the queue's
+   * only while every subject is a bare handle, and silently disagrees the
+   * moment one carries extras.
+   */
+  const subjectHint = encodeSubject({ handle, platform });
   const runId = currentRunId();
 
   const capturePhase = makeCapturePhase(platform);

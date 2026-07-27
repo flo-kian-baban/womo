@@ -134,7 +134,11 @@ describe("degrading, not throwing", () => {
  */
 describe("subject hints are never hand-rolled", () => {
   it("no live module rebuilds `handle@platform` with a template literal", () => {
-    const roots = ["server/phases/creatorCampaign.ts", "server/queue/analysisQueue.ts"];
+    const roots = [
+      "server/phases/creatorCampaign.ts",
+      "server/queue/analysisQueue.ts",
+      "server/webResearch.ts",
+    ];
     for (const rel of roots) {
       const src = readFileSync(path.join(import.meta.dirname, "..", rel), "utf8");
       expect(src, `${rel} rebuilds a subject hint by hand`)
