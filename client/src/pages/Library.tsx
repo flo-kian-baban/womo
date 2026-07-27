@@ -250,7 +250,7 @@ function CreatorRow({ creator, onDelete, onExport }: {
           {/* Archetype — anchor visual, with the pending mark immediately left
               of it so the review state reads in one column across the list
               rather than trailing names of varying length. */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0 w-[150px]">
             <span
               className={`inline-flex items-center text-amber-400 ${isPending ? "" : "invisible"}`}
               title={isPending ? "Pending review — this observation has not been accepted yet" : undefined}
@@ -262,8 +262,13 @@ function CreatorRow({ creator, onDelete, onExport }: {
             <ArchBadge archetype={creator.archetype} />
           </div>
 
-          {/* ── Stat cluster ── */}
-          <div className="flex items-center gap-5 ml-auto flex-shrink-0">
+          {/* ── Stat cluster ──
+              Sits directly after the archetype rather than being pushed to the
+              far right: the numbers are what the analyst reads across, and a
+              half-row of dead space between the label and its figures made
+              them a separate act of attention. The archetype column above is
+              fixed-width so every row's figures start at the same x. */}
+          <div className="flex items-center gap-9 flex-shrink-0">
             <Stat value={abbr(creator.followerCount)} label="Followers" />
             <Stat
               value={creator.engagementRate != null && Number(creator.engagementRate) > 0 ? `${Number(creator.engagementRate).toFixed(1)}%` : "—"}
@@ -271,15 +276,16 @@ function CreatorRow({ creator, onDelete, onExport }: {
             />
             <Stat value={abbr(creator.totalViews)} label="Views" />
             {creator.transcriptCount != null && (
-              <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50 ml-3">
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
                 <FileText className="w-3 h-3" />
-                <span>{creator.transcriptCount}</span>
+                <span className="tabular-nums">{creator.transcriptCount}</span>
               </div>
             )}
           </div>
 
-          {/* Actions (always-on) */}
-          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ml-6">
+          {/* Actions (always-on) — ml-auto now lives here, so the actions and
+              date hold the right edge that the stats used to. */}
+          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
             <Link href={`/creator/${creator.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="View Profile">
                 <ExternalLink className="w-3.5 h-3.5" />
