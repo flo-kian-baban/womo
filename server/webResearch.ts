@@ -58,7 +58,8 @@ import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
 import { assembleBrandEvidence, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { encodeSubject } from "./_core/subjectIdentity";
-import type { CampaignState, PlatformName, SampleBucket } from "./_core/analysisPhase";
+import type { AnalysisPhase, CampaignState, PhaseName, PlatformName, SampleBucket } from "./_core/analysisPhase";
+import { PHASE_NAMES } from "./_core/analysisPhase";
 import { flush as flushCollectionFixture } from "./phases/fixtureCapture";
 import {
   makeCapturePhase, makeAugmentPhase, makeTranscribePhase,
@@ -2433,18 +2434,28 @@ function assembleCreatorCollection(args: {
   return { research: result, phases: summary.state.phases };
 }
 
-export async function runCollection(
-  handleOrUrl: string,
-  platform: PlatformName,
+export async function runPhaseCollection<TOut>(args: {
+  handle: string;
+  platform: PlatformName;
+  /** The phases to run, in order. THE ONLY THING THAT VARIES BY SUBJECT. */
+  phases: Array<AnalysisPhase<never, unknown>>;
   /**
    * Banked state from a previous attempt (S3b). The runner skips any phase
    * already banked as usable, so a RESUMED campaign re-runs only what it has
    * to — without this, a resume would silently re-scrape everything it had
    * already collected, which is precisely the cost resumption exists to avoid.
    */
-  initialPhases?: CampaignState["phases"],
-): Promise<TikTokCollectionCampaign> {
-  const handle = extractHandle(handleOrUrl);
+  initialPhases?: CampaignState["phases"];
+  /** Turn the banked outputs into whatever this subject's result type is. */
+  assemble: (ctx: {
+    handle: string;
+    platform: PlatformName;
+    banked: Partial<Record<PhaseName, unknown>>;
+    summary: Awaited<ReturnType<typeof runPhases>>;
+    runId: string | null;
+  }) => TOut;
+}): Promise<TOut> {
+  const { handle, platform, phases, initialPhases, assemble } = args;
   /**
    * ENCODED ONCE, by the module that owns the encoding — the twin of the fix
    * already made in creatorCampaign. A hand-rolled hint agrees with the queue's
@@ -2454,19 +2465,11 @@ export async function runCollection(
   const subjectHint = encodeSubject({ handle, platform });
   const runId = currentRunId();
 
-  const capturePhase = makeCapturePhase(platform);
-  const augmentPhase = makeAugmentPhase(platform);
-  const transcribePhase = makeTranscribePhase(platform);
-  const derivePhase = makeDerivePhase(platform, {
-    translateKeywordsToThemes,
-    decodeCreatorSymbols: (i) => decodeCreatorSymbols(i),
-  });
-
   const summary = await runPhases({
     runId: runId ?? "no-run-context",
     handle,
     platform,
-    phases: [capturePhase, augmentPhase, transcribePhase, derivePhase] as never,
+    phases: phases as never,
     // Resumed campaigns skip whatever the ledger already holds as usable.
     initialPhases,
     // S3a: every phase now runs through the scheduler — admitted against its
@@ -2508,34 +2511,74 @@ export async function runCollection(
     },
   });
 
-  const capture = bankedOutput<CapturePhaseOutput>(summary, "capture");
-  const augment = bankedOutput<AugmentPhaseOutput>(summary, "augment");
-  const transcribe = bankedOutput<TranscribePhaseOutput>(summary, "transcribe");
-  const derived = bankedOutput<DerivePhaseOutput>(summary, "derive");
+  /**
+   * Every phase's banked output, keyed by name. The driver does not know what
+   * any of them CONTAIN — that is the subject's business, and the gate's.
+   */
+  const banked: Partial<Record<PhaseName, unknown>> = {};
+  for (const name of PHASE_NAMES) {
+    banked[name] = bankedOutput<unknown>(summary, name);
+  }
 
   // ── Evidence gate (S4) ──
   // The platform decides whether its evidence is fit to extract from, and words
   // that decision in its own FROZEN text. The driver only asks and throws.
   // Runs BETWEEN phase 4 and phase 5: a single five-phase pass would persist a
   // profile the min-data gate exists to refuse.
-  const verdict = toolsetFor(platform).gate({
-    handle,
-    banked: { capture, augment, transcribe, derive: derived },
-  });
+  const verdict = toolsetFor(platform).gate({ handle, banked });
   if (!verdict.ok) {
     throw new TRPCError({ code: verdict.code, message: verdict.message });
   }
-  if (!capture) {
-    // Unreachable once a gate refuses a null capture, but the assembly below
-    // dereferences it, so this keeps the type honest rather than asserting.
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: `No public content found for @${handle}.`,
-    });
-  }
 
-  return assembleCreatorCollection({
-    handle, platform, capture, augment, transcribe, derived, summary, runId,
+  return assemble({ handle, platform, banked, summary, runId });
+}
+
+/**
+ * The CREATOR collection — the four creator phases plus the creator assembly,
+ * handed to the generic driver above.
+ *
+ * Its signature is unchanged, so `creatorCampaign` and every other caller are
+ * untouched. What changed is that the pool, the merge order and the
+ * CreatorResearchResult all live on THIS side of the seam now; the driver keeps
+ * only what every subject shares.
+ */
+export async function runCollection(
+  handleOrUrl: string,
+  platform: PlatformName,
+  initialPhases?: CampaignState["phases"],
+): Promise<TikTokCollectionCampaign> {
+  const handle = extractHandle(handleOrUrl);
+  return runPhaseCollection<TikTokCollectionCampaign>({
+    handle,
+    platform,
+    initialPhases,
+    phases: [
+      makeCapturePhase(platform),
+      makeAugmentPhase(platform),
+      makeTranscribePhase(platform),
+      makeDerivePhase(platform, {
+        translateKeywordsToThemes,
+        decodeCreatorSymbols: (i) => decodeCreatorSymbols(i),
+      }),
+    ] as never,
+    assemble: ({ banked, summary, runId }) => {
+      const capture = banked.capture as CapturePhaseOutput | null;
+      const augment = banked.augment as AugmentPhaseOutput | null;
+      const transcribe = banked.transcribe as TranscribePhaseOutput | null;
+      const derived = banked.derive as DerivePhaseOutput | null;
+
+      if (!capture) {
+        // Unreachable once a gate refuses a null capture, but the assembly
+        // dereferences it, so this keeps the type honest rather than asserting.
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `No public content found for @${handle}.`,
+        });
+      }
+      return assembleCreatorCollection({
+        handle, platform, capture, augment, transcribe, derived, summary, runId,
+      });
+    },
   });
 }
 
