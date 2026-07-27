@@ -238,17 +238,8 @@ function CreatorRow({ creator, onDelete, onExport }: {
 
           {/* Name + Meta */}
           <div className="min-w-0 w-[200px] flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] font-medium text-foreground truncate">{creator.displayName ?? creator.handle}</span>
-              {isPending && (
-                <span
-                  className="inline-flex items-center flex-shrink-0 text-amber-400"
-                  title="Pending review — this observation has not been accepted yet"
-                  aria-label="Pending review"
-                >
-                  <Clock className="w-3 h-3" />
-                </span>
-              )}
+            <div className="text-[13px] font-medium text-foreground truncate">
+              {creator.displayName ?? creator.handle}
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <PlatformIcon platform={creator.platform} />
@@ -256,8 +247,18 @@ function CreatorRow({ creator, onDelete, onExport }: {
             </div>
           </div>
 
-          {/* Archetype — anchor visual */}
-          <div className="flex-shrink-0">
+          {/* Archetype — anchor visual, with the pending mark immediately left
+              of it so the review state reads in one column across the list
+              rather than trailing names of varying length. */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span
+              className={`inline-flex items-center text-amber-400 ${isPending ? "" : "invisible"}`}
+              title={isPending ? "Pending review — this observation has not been accepted yet" : undefined}
+              aria-label={isPending ? "Pending review" : undefined}
+              aria-hidden={isPending ? undefined : true}
+            >
+              <Clock className="w-3 h-3" />
+            </span>
             <ArchBadge archetype={creator.archetype} />
           </div>
 
