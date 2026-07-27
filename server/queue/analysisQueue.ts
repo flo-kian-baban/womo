@@ -319,7 +319,12 @@ function shapeCampaign(
   const commit = rows.find(r => r.phase === "extract_commit");
   const out = commit?.output as {
     subjectId?: string; observationId?: string;
-    persistence?: { error?: string | null };
+    persistence?: {
+      error?: string | null;
+      /** Which components failed, and each component's own account of why. */
+      failedComponents?: string[];
+      components?: Record<string, { status?: string; reason?: string | null }> | null;
+    };
     /** `recordTerminalFailure` banks the honest text here. */
     message?: string | null;
   } | null;
@@ -336,11 +341,36 @@ function shapeCampaign(
     subjectId: out?.subjectId ?? null,
     observationId: out?.observationId ?? null,
     // A partial-persistence error first (a campaign that committed but lost a
-    // component), then the terminal failure text. Before this fallback a
-    // terminally-failed campaign reported `null` while its own ledger row held
-    // the reason — the analyst saw "Failed" and nothing else.
-    message: out?.persistence?.error ?? out?.message ?? null,
+    // component), then the component map's own account, then the terminal
+    // failure text. Before the first fallback a terminally-failed campaign
+    // reported `null` while its own ledger row held the reason; before the
+    // second, a PARTIAL save could ship null too — vnillalondon in the corpus
+    // rebuild saved with failedComponents=["platform_handle"], a precise
+    // per-component reason in `components`, and error=null, so the analyst saw
+    // "partial save" and no why.
+    message: out?.persistence?.error
+      ?? firstFailedComponentReason(out?.persistence)
+      ?? out?.message
+      ?? null,
   };
+}
+
+/**
+ * The first failed component's own reason, from the persistence component map.
+ * Null when there is no failure to explain, or the map does not carry one.
+ */
+export function firstFailedComponentReason(
+  persistence: {
+    failedComponents?: string[];
+    components?: Record<string, { status?: string; reason?: string | null }> | null;
+  } | undefined,
+): string | null {
+  const failed = persistence?.failedComponents ?? [];
+  if (failed.length === 0) return null;
+  const name = failed[0]!;
+  const reason = persistence?.components?.[name]?.reason;
+  // The component name alone still beats silence when no reason was recorded.
+  return reason ? `${name}: ${reason}` : `component "${name}" failed to persist`;
 }
 
 export async function getCampaignStatus(runId: string): Promise<CampaignStatus | null> {

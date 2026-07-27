@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { deriveCampaignState } from "./queue/analysisQueue";
+import { deriveCampaignState, firstFailedComponentReason } from "./queue/analysisQueue";
 
 const routersSrc = readFileSync(path.join(import.meta.dirname, "routers.ts"), "utf8");
 
@@ -224,5 +224,37 @@ describe("brand admission — the runner is queue-only", () => {
     expect((brandRouterSrc.match(/brandSubmitRequest\(/g) ?? []).length).toBe(2);
     // And neither hand-rolls the descriptor beside it.
     expect(brandRouterSrc).not.toMatch(/platform:\s*"Brand"/);
+  });
+});
+
+describe("firstFailedComponentReason — a partial save must ship its why", () => {
+  /**
+   * CORPUS-REBUILD FINDING: vnillalondon saved with
+   * failedComponents=["platform_handle"], a precise per-component reason in the
+   * component map, and persistence.error=null — so the queue shipped `message:
+   * null` and the analyst saw "Committed · partial save" with no why. The
+   * component map was in the ledger the whole time; only `error` was read.
+   */
+  it("surfaces the first failed component's own reason", () => {
+    expect(firstFailedComponentReason({
+      failedComponents: ["platform_handle"],
+      components: {
+        identity_core: { status: "success", reason: null },
+        platform_handle: {
+          status: "failed",
+          reason: "@vnillalondon on Instagram is already owned by subject fb6716a2 — handles are globally unique per platform",
+        },
+      },
+    })).toBe("platform_handle: @vnillalondon on Instagram is already owned by subject fb6716a2 — handles are globally unique per platform");
+  });
+
+  it("names the component even when the map carries no reason — a name beats silence", () => {
+    expect(firstFailedComponentReason({ failedComponents: ["decoded_signals"], components: null }))
+      .toBe('component "decoded_signals" failed to persist');
+  });
+
+  it("a clean save explains nothing", () => {
+    expect(firstFailedComponentReason({ failedComponents: [], components: {} })).toBeNull();
+    expect(firstFailedComponentReason(undefined)).toBeNull();
   });
 });
