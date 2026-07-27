@@ -457,16 +457,24 @@ export async function getPhaseStateForRuns(runIds: string[]) {
      * reads output ONLY from extract_commit (subjectId / observationId /
      * message), so the rest is nulled in SQL rather than fetched and discarded.
      */
-    output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
-                     THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
     /**
-     * Two NARROW extractions from the same column. The queue needs to say WHY a
-     * phase parked and WHAT a campaign committed despite — both live in the
-     * phase output, which is otherwise far too large to ship per poll. Pulling
-     * just these keys keeps the read cheap and the answer honest.
+     * Ship `output` for the rows that actually need it: the commit row (subject
+     * / observation / message) and any row carrying a park reason or a blocked
+     * gap. Everything else is nulled in SQL — a phase's output holds its entire
+     * banked evidence, which is megabytes per poll.
+     *
+     * MATCHED AS TEXT, NOT JSON, AND THAT IS DELIBERATE. Postgres JSON
+     * operators re-parse the document, and some scraped captions contain a lone
+     * UTF-16 surrogate (an emoji clipped by a truncation boundary) that strict
+     * re-parsing rejects: `output::jsonb` errors with "Unicode low surrogate
+     * must follow a high surrogate" and takes the WHOLE queue view down with
+     * it. `LIKE` over the stored text parses nothing. The keys are extracted in
+     * JS instead, where JSON.parse tolerates the same input.
      */
-    parkReason: sql<string | null>`${analysisPhaseState.output}::jsonb ->> 'parkReason'`.as("park_reason"),
-    blockedGap: sql<unknown>`${analysisPhaseState.output}::jsonb -> 'blockedGap'`.as("blocked_gap"),
+    output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
+                       OR ${analysisPhaseState.output}::text LIKE '%"parkReason"%'
+                       OR ${analysisPhaseState.output}::text LIKE '%"blockedGap"%'
+                     THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
   })
     .from(analysisPhaseState)
     .where(inArray(analysisPhaseState.runId, runIds))

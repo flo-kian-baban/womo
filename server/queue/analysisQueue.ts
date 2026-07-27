@@ -186,6 +186,15 @@ export function deriveCampaignState(phases: CampaignStatus["phases"]): CampaignR
  * the by-runId read and the list read both go through here, so the list can be
  * batched without the two drifting apart.
  */
+/** The park/gap marks a phase's banked output may carry. */
+function phaseMarks(output: unknown): Pick<CampaignStatus["phases"][number], "parkReason" | "blockedGap"> {
+  const o = (output ?? null) as { parkReason?: string; blockedGap?: unknown } | null;
+  return {
+    parkReason: o?.parkReason ?? null,
+    blockedGap: (o?.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
+  };
+}
+
 function shapeCampaign(
   runId: string,
   // The fields this shape actually reads, declared structurally — so the full
@@ -200,10 +209,6 @@ function shapeCampaign(
     nextEarliestAt: Date | null;
     updatedAt: Date | null;
     output: unknown;
-    /** Why this phase parked, when it did. */
-    parkReason?: string | null;
-    /** What the campaign committed DESPITE, when retries were spent. */
-    blockedGap?: unknown;
   }>,
 ): CampaignStatus | null {
   if (rows.length === 0) return null;
@@ -215,8 +220,9 @@ function shapeCampaign(
     failureClass: r.failureClass,
     nextEarliestAt: r.nextEarliestAt,
     updatedAt: r.updatedAt,
-    parkReason: r.parkReason ?? null,
-    blockedGap: (r.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
+    // Read in JS, not SQL: see getPhaseStateForRuns — Postgres JSON operators
+    // reject the lone surrogates that live in some scraped captions.
+    ...phaseMarks(r.output),
   }));
   const commit = rows.find(r => r.phase === "extract_commit");
   const out = commit?.output as {
