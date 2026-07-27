@@ -268,7 +268,7 @@ function CreatorRow({ creator, onDelete, onExport }: {
               half-row of dead space between the label and its figures made
               them a separate act of attention. The archetype column above is
               fixed-width so every row's figures start at the same x. */}
-          <div className="flex items-center gap-9 flex-shrink-0">
+          <div className="flex items-center gap-9 flex-shrink-0 ml-8">
             <Stat value={abbr(creator.followerCount)} label="Followers" />
             <Stat
               value={creator.engagementRate != null && Number(creator.engagementRate) > 0 ? `${Number(creator.engagementRate).toFixed(1)}%` : "—"}
