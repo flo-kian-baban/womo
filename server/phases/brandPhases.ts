@@ -46,14 +46,18 @@ import { NOT_READY } from "../_core/analysisPhase";
 import { crawlBrandWebsite, deriveBrandSymbols, runPhaseCollection } from "../webResearch";
 import { searchWeb } from "../scraping/brand/searchFallback";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
-import { fetchBrandReviews } from "../reviewResearch";
+import {
+  fetchBrandReviews, selectBrandReviewFields,
+  EMPTY_BRAND_REVIEW_FIELDS, type BrandReviewFields,
+} from "../reviewResearch";
 import {
   fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData,
 } from "../brandTikTokAnalysis";
 import { formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "../brandSymbolDecoder";
 import { classifyPhaseError } from "./collectionPhases";
 import {
-  assembleBrandEvidence, buildBrandBaseEvidence, type BrandEvidenceParts,
+  assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
+  type BrandDecoderInputs, type BrandEvidenceParts,
 } from "./brandEvidence";
 
 // ─── Banked shapes ───────────────────────────────────────────────────────────
@@ -83,6 +87,17 @@ export interface BrandAugmentOutput {
     /** Feeds the BASE block as an input (constraint 4). */
     audiencePerceptionBlock: string | null;
     totalReviews: number;
+    /**
+     * CONSTRAINT 5 — the review fetch is banked, not summarised away.
+     *
+     * The phase used to keep only the formatted block and the count, which
+     * discarded the raw review text and the per-platform ratings/excerpts. Two
+     * consumers need what was thrown away: the symbol decoder reads
+     * `combinedReviewText` (and the excerpts, when the website corpus is too
+     * thin), and a brand observation records the ratings and excerpts as
+     * columns. A formatted block cannot be parsed back into either.
+     */
+    review: BrandReviewFields;
     /** Becomes a separately APPENDED block (constraint 4). */
     mentionEvidenceBlock: string | null;
     totalMentions: number;
@@ -237,13 +252,14 @@ export function makeBrandAugmentPhase(
         }
       }
 
-      // ── Perception A: reviews. Feeds the BASE block (constraint 4). ──
+      // ── Perception A: reviews. Feeds the BASE block (constraint 4) AND the
+      //    decoder's rescue corpus (constraint 5). ──
       let audiencePerceptionBlock: string | null = null;
-      let totalReviews = 0;
+      let review: BrandReviewFields = EMPTY_BRAND_REVIEW_FIELDS;
       try {
         const reviews = await fetchBrandReviews(capture.brandName, capture.websiteUrl ?? "", googleMapsUrl);
         audiencePerceptionBlock = reviews.audiencePerceptionBlock || null;
-        totalReviews = reviews.totalReviews;
+        review = selectBrandReviewFields(reviews);
       } catch (err) {
         console.warn("[brandPhases] Review fetch failed (non-fatal):", err);
       }
@@ -262,7 +278,10 @@ export function makeBrandAugmentPhase(
           rescue: { description, snippets, googleFallbackRan, youtubeFallbackRan },
           perception: {
             audiencePerceptionBlock,
-            totalReviews,
+            // Unchanged in meaning: the monolith's `totalReviews` is the review
+            // fetch's own count, which is what `review` carries.
+            totalReviews: review.totalReviews,
+            review,
             mentionEvidenceBlock: mentions ? formatAudienceMentionEvidenceBlock(mentions) : null,
             totalMentions: mentions?.totalMentions ?? 0,
             mentions,
@@ -317,6 +336,24 @@ export function makeBrandTranscribePhase(
 
 // ─── Phase 4 — derive: the brand symbol decoder ──────────────────────────────
 
+/**
+ * Route a banked augment output into the shared decoder-input builder.
+ *
+ * Exported so the harness can assert on the decoder's inputs WITHOUT running the
+ * decoder — which is precisely the blind spot that let the S5 step 3 divergence
+ * through. Every field the builder reads comes from `augment`; nothing here
+ * reformats or re-derives.
+ */
+export function brandDecoderInputsFrom(augment: BrandAugmentOutput): BrandDecoderInputs {
+  return buildBrandDecoderInputs({
+    description: augment.rescue.description,
+    snippets: augment.rescue.snippets,
+    yelpReviewExcerpts: augment.perception.review.yelpReviewExcerpts,
+    googleReviewExcerpts: augment.perception.review.googleReviewExcerpts,
+    combinedReviewText: augment.perception.review.combinedReviewText,
+  });
+}
+
 export function makeBrandDerivePhase(): AnalysisPhase<
   { capture: BrandCaptureOutput; augment: BrandAugmentOutput }, BrandDeriveOutput
 > {
@@ -331,13 +368,25 @@ export function makeBrandDerivePhase(): AnalysisPhase<
     },
     async run(input, _ctx: PhaseRunContext): Promise<PhaseResult<BrandDeriveOutput>> {
       const started = Date.now();
-      // VERBATIM inputs: the monolith passed websiteText (the rescued
-      // description) and the combined review text, with the 80-char floor and
-      // the non-fatal catch living inside deriveBrandSymbols itself.
+      /**
+       * THE DECODER'S INPUTS, THROUGH THE SHARED BUILDER.
+       *
+       * This phase previously passed `rescue.description` alone as the website
+       * corpus and the FORMATTED perception block as the review text. Both were
+       * wrong: the monolith's corpus is the description PLUS every snippet (plus
+       * a review-excerpt rescue when that runs under 150 chars), and its review
+       * text is the RAW combined review text. Different inputs, different
+       * symbols, a different extraction prompt — a WHAT change, not a HOW one.
+       *
+       * There is now one construction, called from here and from `researchBrand`,
+       * so the two cannot diverge again. The 80-char floor and the non-fatal
+       * catch still live inside `deriveBrandSymbols` itself.
+       */
+      const { websiteText, reviewText } = brandDecoderInputsFrom(input.augment);
       const decodedSymbols = await deriveBrandSymbols({
         brandName: input.capture.brandName,
-        websiteText: input.augment.rescue.description,
-        reviewText: input.augment.perception.audiencePerceptionBlock ?? "",
+        websiteText,
+        reviewText,
         audienceMentionData: input.augment.perception.mentions,
       });
       return {

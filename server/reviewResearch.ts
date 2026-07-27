@@ -42,6 +42,60 @@ export interface AudiencePerceptionResult {
   audiencePerceptionBlock: string; // Formatted evidence block for AI prompt
 }
 
+/**
+ * The flat per-platform view of a review fetch — what a brand OBSERVATION
+ * records and what the symbol decoder's rescue corpus is built from.
+ *
+ * Lifted out of `researchBrand` so there is exactly one derivation. The excerpt
+ * strings are used in two places with different fates — persisted as columns,
+ * and fed to the decoder when the website corpus is too thin — and computing
+ * them twice is how the persisted text and the decoded text quietly stop
+ * matching.
+ */
+export interface BrandReviewFields {
+  yelpRating: number | null;
+  yelpReviewCount: number | null;
+  yelpReviewExcerpts: string;
+  googleRating: number | null;
+  googleReviewCount: number | null;
+  googleReviewExcerpts: string;
+  combinedReviewText: string;
+  overallRating: number | null;
+  totalReviews: number;
+}
+
+/** `[5★] Author: "…"` — the excerpt line format, frozen at 300 chars of body. */
+function formatReviewExcerpts(source: ReviewSource | null): string {
+  return source?.reviews
+    .map(r => `[${r.rating}★] ${r.author}: "${r.text.slice(0, 300)}"`)
+    .join("\n\n") ?? "";
+}
+
+/** VERBATIM from `researchBrand` — the per-platform split and the excerpt format. */
+export function selectBrandReviewFields(result: AudiencePerceptionResult): BrandReviewFields {
+  const yelpSource = result.sources.find(s => s.platform === "Yelp") ?? null;
+  const googleSource = result.sources.find(s => s.platform === "Google Maps") ?? null;
+
+  return {
+    yelpRating: yelpSource?.rating ?? null,
+    yelpReviewCount: yelpSource?.reviewCount ?? null,
+    yelpReviewExcerpts: formatReviewExcerpts(yelpSource),
+    googleRating: googleSource?.rating ?? null,
+    googleReviewCount: googleSource?.reviewCount ?? null,
+    googleReviewExcerpts: formatReviewExcerpts(googleSource),
+    combinedReviewText: result.combinedReviewText,
+    overallRating: result.overallRating,
+    totalReviews: result.totalReviews,
+  };
+}
+
+/** An empty review fetch — the shape a failed, non-fatal fetch degrades to. */
+export const EMPTY_BRAND_REVIEW_FIELDS: BrandReviewFields = {
+  yelpRating: null, yelpReviewCount: null, yelpReviewExcerpts: "",
+  googleRating: null, googleReviewCount: null, googleReviewExcerpts: "",
+  combinedReviewText: "", overallRating: null, totalReviews: 0,
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Extract city/location hint from a website URL or brand name */

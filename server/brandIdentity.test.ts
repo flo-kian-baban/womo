@@ -24,8 +24,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { assembleBrandEvidence, buildBrandBaseEvidence, type BrandMonolithBaseline } from "./phases/brandEvidence";
-import { assembleBrandCollection } from "./phases/brandPhases";
+import {
+  assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs,
+  type BrandMonolithBaseline,
+} from "./phases/brandEvidence";
+import { assembleBrandCollection, brandDecoderInputsFrom } from "./phases/brandPhases";
+import { EMPTY_BRAND_REVIEW_FIELDS, type BrandReviewFields } from "./reviewResearch";
 
 const FIXTURE = path.join(import.meta.dirname, "__fixtures__", "brandBaseline.json");
 const bl: BrandMonolithBaseline | null = existsSync(FIXTURE)
@@ -253,6 +257,7 @@ describe("assembleBrandCollection rebuilds from banked phase outputs", () => {
         perception: {
           audiencePerceptionBlock: i.audiencePerceptionBlock,
           totalReviews: bl!.observed.totalReviews,
+          review: { ...EMPTY_BRAND_REVIEW_FIELDS, totalReviews: bl!.observed.totalReviews },
           mentionEvidenceBlock: bl!.parts.mentionEvidenceBlock ?? null,
           totalMentions: bl!.observed.totalMentions,
           mentions: null,
@@ -302,4 +307,190 @@ describe("assembleBrandCollection rebuilds from banked phase outputs", () => {
     if (bl!.parts.tiktokBlock) expect(s).not.toContain(bl!.parts.tiktokBlock);
     if (bl!.parts.instagramBlock) expect(s).not.toContain(bl!.parts.instagramBlock);
   });
+});
+
+/**
+ * THE DECODER'S INPUTS — the blind spot, now covered.
+ *
+ * ─── What this harness could not see ────────────────────────────────────────
+ * Everything above replays RECORDED parts through the assembly. That pins the
+ * string handed to the EXTRACTION model, and it is genuinely byte-exact — but
+ * every one of those parts is an INPUT to the harness, never an output of the
+ * code under test. `decodedSymbolsBlock` in particular is read straight from the
+ * fixture, so whatever produced it was never exercised.
+ *
+ * The symbol decoder sits upstream of that block and reads two different strings
+ * built from the same raw material. When `decodeBrandSymbols` moved into a
+ * derive phase (4a36492), those two strings were rebuilt from a narrower slice
+ * of the banked evidence — the description WITHOUT its 63 snippets, and the
+ * formatted perception block in place of the raw review text. Different corpus,
+ * different symbols, different symbols block, different extraction prompt.
+ * Twenty-two green assertions and not one of them could fail.
+ *
+ * ─── What is pinned now ─────────────────────────────────────────────────────
+ * The construction is one shared function; these prove it is the MONOLITH's
+ * construction, and that the phase routes the banked pieces into it intact. The
+ * expected values are transcribed literally from `researchBrand` rather than
+ * computed by calling the builder — a second statement of the rule, so this is
+ * an arbiter and not a tautology.
+ */
+describe("the symbol decoder receives the monolith's inputs, byte for byte", () => {
+  /**
+   * `researchBrand`'s decoder-input construction as it stood before it was
+   * lifted. Deliberately duplicated here — a harness that calls the function it
+   * is pinning proves only that the function equals itself.
+   */
+  function monolithDecoderInputs(i: {
+    description: string;
+    snippets: string[];
+    yelpReviewExcerpts: string;
+    googleReviewExcerpts: string;
+    combinedReviewText: string;
+  }): { websiteText: string; reviewText: string } {
+    const websiteTextParts = [i.description, ...i.snippets].filter(Boolean);
+    const directWebTextLength = websiteTextParts.join(" ").length;
+    if (directWebTextLength < 150) {
+      if (i.yelpReviewExcerpts) websiteTextParts.push(`Yelp customer reviews: ${i.yelpReviewExcerpts.slice(0, 800)}`);
+      if (i.googleReviewExcerpts) websiteTextParts.push(`Google Maps customer reviews: ${i.googleReviewExcerpts.slice(0, 800)}`);
+    }
+    return { websiteText: websiteTextParts.join("\n"), reviewText: i.combinedReviewText };
+  }
+
+  /**
+   * Review values the baseline does not record, chosen to be mutually
+   * distinguishable: if the phase substitutes one for another — which is exactly
+   * the defect — the assertion names which substitution happened.
+   */
+  const REVIEW: BrandReviewFields = {
+    yelpRating: 4.5,
+    yelpReviewCount: 120,
+    yelpReviewExcerpts: `[5★] Ada: "${"y".repeat(900)}"`,
+    googleRating: 4.2,
+    googleReviewCount: 128,
+    googleReviewExcerpts: `[4★] Grace: "${"g".repeat(900)}"`,
+    combinedReviewText: "RAW-COMBINED-REVIEW-TEXT",
+    overallRating: 4.35,
+    totalReviews: 248,
+  };
+
+  /** A banked augment output carrying the baseline's real rescued evidence. */
+  function bankedAugment(over: Partial<BrandReviewFields> = {}) {
+    const i = bl!.baseInputs!;
+    return {
+      rescue: {
+        description: i.description,
+        snippets: i.snippets,
+        googleFallbackRan: false,
+        youtubeFallbackRan: false,
+      },
+      perception: {
+        audiencePerceptionBlock: i.audiencePerceptionBlock,
+        totalReviews: REVIEW.totalReviews,
+        review: { ...REVIEW, ...over },
+        mentionEvidenceBlock: bl!.parts.mentionEvidenceBlock ?? null,
+        totalMentions: bl!.observed.totalMentions,
+        mentions: null,
+      },
+    };
+  }
+
+  it("BYTE-IDENTICAL: the phase's decoder inputs equal the monolith's, from the recorded baseline", () => {
+    const i = bl!.baseInputs!;
+    const expected = monolithDecoderInputs({
+      description: i.description,
+      snippets: i.snippets,
+      yelpReviewExcerpts: REVIEW.yelpReviewExcerpts,
+      googleReviewExcerpts: REVIEW.googleReviewExcerpts,
+      combinedReviewText: REVIEW.combinedReviewText,
+    });
+    expect(brandDecoderInputsFrom(bankedAugment() as never)).toEqual(expected);
+  });
+
+  /**
+   * THE REGRESSION, NAMED. Both halves of 4a36492's divergence, each asserted
+   * against the specific wrong value it used to carry — so a re-introduction
+   * fails loudly rather than shifting a string nobody is watching.
+   */
+  it("the corpus carries the SNIPPETS, not the description alone", () => {
+    const { websiteText } = brandDecoderInputsFrom(bankedAugment() as never);
+    const snippets = bl!.baseInputs!.snippets;
+    expect(snippets.length, "fixture has too few snippets to prove this").toBeGreaterThan(10);
+    for (const s of snippets) expect(websiteText).toContain(s);
+    expect(websiteText).not.toBe(bl!.baseInputs!.description);
+  });
+
+  it("the review text is the RAW combined text, not the formatted perception block", () => {
+    const { reviewText } = brandDecoderInputsFrom(bankedAugment() as never);
+    expect(reviewText).toBe(REVIEW.combinedReviewText);
+    expect(reviewText).not.toBe(bl!.baseInputs!.audiencePerceptionBlock);
+  });
+
+  it("a thin website corpus is rescued by review excerpts — Yelp first, each capped at 800", () => {
+    const thin = buildBrandDecoderInputs({
+      description: "tiny",
+      snippets: [],
+      yelpReviewExcerpts: REVIEW.yelpReviewExcerpts,
+      googleReviewExcerpts: REVIEW.googleReviewExcerpts,
+      combinedReviewText: REVIEW.combinedReviewText,
+    });
+    expect(thin.websiteText).toBe([
+      "tiny",
+      `Yelp customer reviews: ${REVIEW.yelpReviewExcerpts.slice(0, 800)}`,
+      `Google Maps customer reviews: ${REVIEW.googleReviewExcerpts.slice(0, 800)}`,
+    ].join("\n"));
+    // The cap is a slice, not a truncation marker — 800 chars of a 900-char body.
+    expect(thin.websiteText).toContain("y".repeat(777));
+    expect(thin.websiteText).not.toContain("y".repeat(900));
+  });
+
+  it("the rescue does NOT run once the corpus reaches 150 chars", () => {
+    const at150 = buildBrandDecoderInputs({
+      description: "d".repeat(150),
+      snippets: [],
+      ...REVIEW,
+    });
+    expect(at150.websiteText).toBe("d".repeat(150));
+
+    const under = buildBrandDecoderInputs({
+      description: "d".repeat(149),
+      snippets: [],
+      ...REVIEW,
+    });
+    expect(under.websiteText).toContain("Yelp customer reviews:");
+  });
+
+  it("the length probe joins with a SPACE while the corpus joins with a NEWLINE", () => {
+    // Equal lengths, different strings. Transcribed as the monolith wrote it;
+    // unifying the two separators would be a silent rewrite of the corpus.
+    const out = buildBrandDecoderInputs({
+      description: "a", snippets: ["b", "c"], ...EMPTY_BRAND_REVIEW_FIELDS,
+    });
+    expect(out.websiteText).toBe("a\nb\nc");
+  });
+
+  it("blank elements contribute nothing — filter(Boolean) runs before the probe", () => {
+    const out = buildBrandDecoderInputs({
+      description: "", snippets: ["", "kept", ""], ...EMPTY_BRAND_REVIEW_FIELDS,
+    });
+    expect(out.websiteText).toBe("kept");
+  });
+
+  /**
+   * The strongest form of the claim, available only once a baseline is recorded
+   * against the repaired code: the decoder inputs a REAL monolith run produced,
+   * reproduced from that same run's banked evidence. Skipped — visibly — on a
+   * fixture that predates the field, rather than passing on nothing.
+   */
+  it.skipIf(!bl?.decoderInputs)(
+    "BYTE-IDENTICAL against the decoder inputs a real run recorded",
+    () => {
+      const recorded = bl!.decoderInputs!;
+      expect(brandDecoderInputsFrom(bankedAugment({
+        combinedReviewText: recorded.reviewText,
+      }) as never).websiteText).toBe(recorded.websiteText);
+      expect(brandDecoderInputsFrom(bankedAugment({
+        combinedReviewText: recorded.reviewText,
+      }) as never).reviewText).toBe(recorded.reviewText);
+    },
+  );
 });

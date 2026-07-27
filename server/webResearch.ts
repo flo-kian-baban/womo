@@ -47,7 +47,7 @@ import { supplementPostsViaOEmbed } from "./scraping/instagram/postScraper";
 import { invokeLLM } from "./_core/llm";
 import { TRPCError } from "@trpc/server";
 import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder";
-import { fetchBrandReviews } from "./reviewResearch";
+import { fetchBrandReviews, selectBrandReviewFields } from "./reviewResearch";
 import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
 import { transcribeAudio } from "./_core/voiceTranscription";
@@ -56,7 +56,7 @@ import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
 import { toolsetFor } from "./phases/platformTools";
 import { makeSchedulerExecute } from "./phases/phaseScheduler";
-import { assembleBrandEvidence, buildBrandBaseEvidence, type BrandBaseEvidenceInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
+import { assembleBrandEvidence, buildBrandBaseEvidence, buildBrandDecoderInputs, type BrandBaseEvidenceInputs, type BrandDecoderInputs, type BrandEvidenceParts } from "./phases/brandEvidence";
 import { encodeSubject } from "./_core/subjectIdentity";
 import type { AnalysisPhase, CampaignState, PhaseName, PlatformName, SampleBucket } from "./_core/analysisPhase";
 import { PHASE_NAMES } from "./_core/analysisPhase";
@@ -161,6 +161,14 @@ export interface BrandResearchResult {
   evidenceParts: BrandEvidenceParts;
   /** What the base block was built from, for the identity harness. */
   brandBaseInputs: BrandBaseEvidenceInputs;
+  /**
+   * The exact two strings the symbol decoder received, for the identity harness.
+   *
+   * The recorded parts pin the EXTRACTION prompt; these pin the DERIVATION
+   * prompt, which is the input the harness was blind to when the phased split
+   * changed it.
+   */
+  brandDecoderInputs: BrandDecoderInputs;
   // Review data
   yelpRating: number | null;
   yelpReviewCount: number | null;
@@ -3435,20 +3443,13 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
     console.warn("[webResearch] Review fetch failed (non-fatal):", err);
   }
 
-  // Extract per-platform data
-  const yelpSource = reviewResult.sources.find(s => s.platform === "Yelp") ?? null;
-  const googleSource = reviewResult.sources.find(s => s.platform === "Google Maps") ?? null;
-
-  const yelpRating = yelpSource?.rating ?? null;
-  const yelpReviewCount = yelpSource?.reviewCount ?? null;
-  const yelpReviewExcerpts = yelpSource?.reviews
-    .map(r => `[${r.rating}\u2605] ${r.author}: "${r.text.slice(0, 300)}"`)
-    .join("\n\n") ?? "";
-  const googleRating = googleSource?.rating ?? null;
-  const googleReviewCount = googleSource?.reviewCount ?? null;
-  const googleReviewExcerpts = googleSource?.reviews
-    .map(r => `[${r.rating}\u2605] ${r.author}: "${r.text.slice(0, 300)}"`)
-    .join("\n\n") ?? "";
+  // Extract per-platform data. The derivation is shared with the brand augment
+  // phase, so the persisted excerpts and the decoder's rescue corpus cannot
+  // drift apart \u2014 see selectBrandReviewFields.
+  const {
+    yelpRating, yelpReviewCount, yelpReviewExcerpts,
+    googleRating, googleReviewCount, googleReviewExcerpts,
+  } = selectBrandReviewFields(reviewResult);
 
   const brandBaseInputs = {
     brandName,
@@ -3473,24 +3474,18 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
   // Run Brand Symbol Decoder on website text + review text (non-fatal)
   // websiteText corpus: always include all available text sources (description, snippets, Yelp excerpts, Google excerpts)
   // This ensures the decoder runs even when the direct HTML fetch is blocked by Cloudflare or other protection
+  //
+  // The construction now lives in ONE place, called by this monolith and by the
+  // brand derive phase alike, so the phased path cannot hand the decoder a
+  // different corpus than this one — which is exactly what it was doing.
   let brandDecodedSymbols: BrandDecodedSymbols | null = null;
-  const websiteTextParts = [
+  const { websiteText, reviewText } = buildBrandDecoderInputs({
     description,
-    ...snippets,
-  ].filter(Boolean);
-
-  // If direct website fetch yielded very little text (<150 chars), supplement with review excerpts in the website corpus
-  // so the decoder has enough signal to work with
-  const directWebTextLength = websiteTextParts.join(" ").length;
-  if (directWebTextLength < 150) {
-    // Add Yelp and Google snippets as supplementary brand text
-    if (yelpReviewExcerpts) websiteTextParts.push(`Yelp customer reviews: ${yelpReviewExcerpts.slice(0, 800)}`);
-    if (googleReviewExcerpts) websiteTextParts.push(`Google Maps customer reviews: ${googleReviewExcerpts.slice(0, 800)}`);
-    console.log(`[webResearch] Direct web text too short (${directWebTextLength} chars) — using review text as website corpus fallback for Symbol Decoder`);
-  }
-
-  const websiteText = websiteTextParts.join("\n");
-  const reviewText = reviewResult.combinedReviewText;
+    snippets,
+    yelpReviewExcerpts,
+    googleReviewExcerpts,
+    combinedReviewText: reviewResult.combinedReviewText,
+  });
 
   brandDecodedSymbols = await deriveBrandSymbols({
     brandName, websiteText, reviewText, audienceMentionData,
@@ -3592,6 +3587,7 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
     evidenceSummary: evidenceSummaryWithSymbols,
     evidenceParts,
     brandBaseInputs,
+    brandDecoderInputs: { websiteText, reviewText },
     yelpRating,
     yelpReviewCount,
     yelpReviewExcerpts,

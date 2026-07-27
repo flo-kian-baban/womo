@@ -71,6 +71,84 @@ export function buildBrandBaseEvidence(i: BrandBaseEvidenceInputs): string {
   ].filter(Boolean).join("\n").trim();
 }
 
+// ─── The symbol decoder's inputs ─────────────────────────────────────────────
+
+/**
+ * THE OTHER THING THAT MUST BE BYTE-IDENTICAL, and was not.
+ *
+ * `assembleBrandEvidence` pins the string the EXTRACTION model reads. The symbol
+ * decoder reads a different pair of strings entirely, built earlier from the same
+ * raw material — and when `decodeBrandSymbols` moved into a derive phase (S5 step
+ * 3) those two strings were rebuilt from a narrower slice of the banked evidence:
+ * the description without its snippets, and the FORMATTED perception block in
+ * place of the raw review text. Different decoder inputs mean different symbols,
+ * a different symbols block, and so a different extraction prompt — a change to
+ * WHAT is gathered, wearing the clothes of a refactor.
+ *
+ * The evidence harness could not see it: it replays RECORDED parts through the
+ * assembly and never runs the decoder, so the inputs that produced those parts
+ * were outside its reach. So the construction is lifted here, both the monolith
+ * and the phase call it, and the harness pins it directly.
+ *
+ * ─── Details that are load-bearing ──────────────────────────────────────────
+ *  - The length probe joins with a SPACE; the emitted corpus joins with a
+ *    NEWLINE. Equal lengths, different strings — transcribed as the monolith
+ *    wrote them rather than unified.
+ *  - `.filter(Boolean)` runs BEFORE the rescue, so an empty description or a
+ *    blank snippet contributes nothing to the 150-char probe.
+ *  - The rescue appends Yelp BEFORE Google Maps, each capped at 800 chars.
+ *  - `reviewText` is the RAW combined review text — never the formatted
+ *    perception block, which is what the phased split substituted.
+ */
+export interface BrandDecoderInputSources {
+  /** The RESCUED description — capture's, widened by augment's fallbacks. */
+  description: string;
+  /** The EXTENDED snippets, in order. Dropping these was the S5 step 3 defect. */
+  snippets: string[];
+  /** `[5★] Author: "…"` lines, or "" when there is no Yelp source. */
+  yelpReviewExcerpts: string;
+  /** Same, for Google Maps. */
+  googleReviewExcerpts: string;
+  /** Every review's text concatenated — `fetchBrandReviews`'s own field. */
+  combinedReviewText: string;
+}
+
+/** Exactly the two strings `deriveBrandSymbols` receives. */
+export interface BrandDecoderInputs {
+  websiteText: string;
+  reviewText: string;
+}
+
+/**
+ * Build the symbol decoder's two inputs, VERBATIM from `researchBrand`.
+ *
+ * The rescue exists because a Cloudflare-blocked fetch leaves almost no brand
+ * text: rather than decode nothing, the reviews stand in as the brand corpus.
+ * That is a deliberate behaviour, not an accident of the old code, and it was
+ * lost in the phased split along with the snippets.
+ */
+export function buildBrandDecoderInputs(i: BrandDecoderInputSources): BrandDecoderInputs {
+  const websiteTextParts = [
+    i.description,
+    ...i.snippets,
+  ].filter(Boolean);
+
+  // If direct website fetch yielded very little text (<150 chars), supplement with review excerpts in the website corpus
+  // so the decoder has enough signal to work with
+  const directWebTextLength = websiteTextParts.join(" ").length;
+  if (directWebTextLength < 150) {
+    // Add Yelp and Google snippets as supplementary brand text
+    if (i.yelpReviewExcerpts) websiteTextParts.push(`Yelp customer reviews: ${i.yelpReviewExcerpts.slice(0, 800)}`);
+    if (i.googleReviewExcerpts) websiteTextParts.push(`Google Maps customer reviews: ${i.googleReviewExcerpts.slice(0, 800)}`);
+    console.log(`[webResearch] Direct web text too short (${directWebTextLength} chars) — using review text as website corpus fallback for Symbol Decoder`);
+  }
+
+  return {
+    websiteText: websiteTextParts.join("\n"),
+    reviewText: i.combinedReviewText,
+  };
+}
+
 /** The already-formatted blocks, in assembly order. Absent = omit entirely. */
 export interface BrandEvidenceParts {
   /** `researchBrand`'s summary BEFORE symbols and mentions were appended. */
@@ -116,6 +194,12 @@ export interface BrandMonolithBaseline {
   parts: BrandEvidenceParts;
   /** What the base block was built FROM — see BrandBaseEvidenceInputs. */
   baseInputs?: BrandBaseEvidenceInputs;
+  /**
+   * The two strings the SYMBOL DECODER received. Optional because fixtures
+   * recorded before this field existed do not carry it — the harness says so
+   * out loud rather than skipping quietly.
+   */
+  decoderInputs?: BrandDecoderInputs;
   /** The exact `brandEvidenceSummary` the monolith handed the model. */
   expectedEvidenceSummary: string;
   /** Coarse shape of the run, so a vacuous fixture can be refused by the harness. */
