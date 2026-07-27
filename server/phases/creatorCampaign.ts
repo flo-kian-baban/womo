@@ -73,7 +73,13 @@ export interface CampaignPersistenceSummary {
   components: Record<string, unknown> | null;
 }
 
-export interface CampaignOutcome {
+/**
+ * The DEFAULT type parameter is what keeps this additive: every existing
+ * reference to `CampaignOutcome` still means a creator outcome and compiles
+ * unchanged. A subject with a different research shape names it explicitly
+ * rather than the field widening to a union of every subject type.
+ */
+export interface CampaignOutcome<TResearch = CreatorResearchResult> {
   runId: string;
   handle: string;
   platform: PlatformName;
@@ -87,7 +93,7 @@ export interface CampaignOutcome {
   message: string | null;
   /** Which phase stopped it, when it stopped early. */
   stoppedAt: PhaseName | null;
-  research: CreatorResearchResult | null;
+  research: TResearch | null;
   /** The persistence summary extract_commit produced, when it ran. */
   persistence: CampaignPersistenceSummary | null;
 }
@@ -134,7 +140,23 @@ function classifyCollectionFailure(err: unknown): { status: CampaignOutcome["sta
  * of it. A refactor with no automatic arbiter gets done in the smallest
  * provable steps available.
  */
-async function runSubjectCampaign(
+export interface SubjectCampaignSpec<TResearch> {
+  /**
+   * Phases 1-4 plus the platform's FROZEN gates. Creator supplies
+   * `runCollection`; brand supplies `runBrandCollection`. The runner never
+   * learns which — it only needs banked phases back.
+   */
+  collect: (args: {
+    handle: string;
+    platform: PlatformName;
+    extras?: Record<string, string>;
+    initialPhases?: CampaignState["phases"];
+  }) => Promise<{ research: TResearch; phases: CampaignState["phases"] }>;
+  /** Map a thrown gate to a terminal outcome — the messages are FROZEN. */
+  classifyFailure: (err: unknown) => { status: CampaignOutcome["status"]; message: string };
+}
+
+async function runSubjectCampaign<TResearch>(
   args: {
     runId: string;
     handle: string;
@@ -144,7 +166,8 @@ async function runSubjectCampaign(
     initialPhases?: CampaignState["phases"];
   },
   deps: CreatorCampaignDeps,
-): Promise<CampaignOutcome> {
+  spec: SubjectCampaignSpec<TResearch>,
+): Promise<CampaignOutcome<TResearch>> {
   /**
    * ENCODED ONCE, by the module that owns the encoding.
    *
@@ -166,9 +189,12 @@ async function runSubjectCampaign(
   // ── Phases 1-4 + the FROZEN gates + the pure assembly ──
   let collected;
   try {
-    collected = await runCollection(args.handle, args.platform, args.initialPhases);
+    collected = await spec.collect({
+      handle: args.handle, platform: args.platform,
+      extras: args.extras, initialPhases: args.initialPhases,
+    });
   } catch (err) {
-    const { status, message } = classifyCollectionFailure(err);
+    const { status, message } = spec.classifyFailure(err);
     return { ...base, status, message };
   }
 
@@ -246,6 +272,10 @@ export async function runCreatorCampaign(
   },
   deps: CreatorCampaignDeps,
 ): Promise<CampaignOutcome> {
-  return runSubjectCampaign(args, deps);
+  return runSubjectCampaign(args, deps, {
+    // Creator's collection and its frozen gate classification, unchanged.
+    collect: ({ handle, platform, initialPhases }) => runCollection(handle, platform, initialPhases),
+    classifyFailure: classifyCollectionFailure,
+  });
 }
 
