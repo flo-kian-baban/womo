@@ -119,15 +119,26 @@ function classifyCollectionFailure(err: unknown): { status: CampaignOutcome["sta
  *   skipped by the runner — which is how a crash between extraction and commit
  *   costs one LLM call instead of a full re-scrape.
  */
-export async function runCreatorCampaign(
+/**
+ * THE SHARED CAMPAIGN ORCHESTRATION (S5 step A — extraction only, zero edits).
+ *
+ * Lifted VERBATIM out of `runCreatorCampaign`. Nothing about what it does
+ * changed; only that it is now a separate unit, so step B can parameterise the
+ * two creator-specific points inside it — the collection call and the research
+ * result — instead of a second copy of all of this being written for brand.
+ *
+ * WHY EXTRACTION FIRST, ON ITS OWN. Campaign-level behaviour has no identity
+ * harness: the evidence harnesses pin the assembled string, not the
+ * orchestration around it. So the arbiter here is the diff — every removed line
+ * must reappear — plus a live creator acceptance run before brand touches any
+ * of it. A refactor with no automatic arbiter gets done in the smallest
+ * provable steps available.
+ */
+async function runSubjectCampaign(
   args: {
     runId: string;
     handle: string;
     platform: PlatformName;
-    /**
-     * The subject's extra locators, carried through so this campaign banks
-     * under the SAME `subject_hint` the queue enqueued it as (S5).
-     */
     extras?: Record<string, string>;
     deadlineAt?: number;
     initialPhases?: CampaignState["phases"];
@@ -219,3 +230,22 @@ export async function runCreatorCampaign(
     message: saved === "full" ? null : (persistence?.error ?? `Persistence outcome: ${saved ?? "unknown"}`),
   };
 }
+
+export async function runCreatorCampaign(
+  args: {
+    runId: string;
+    handle: string;
+    platform: PlatformName;
+    /**
+     * The subject's extra locators, carried through so this campaign banks
+     * under the SAME `subject_hint` the queue enqueued it as (S5).
+     */
+    extras?: Record<string, string>;
+    deadlineAt?: number;
+    initialPhases?: CampaignState["phases"];
+  },
+  deps: CreatorCampaignDeps,
+): Promise<CampaignOutcome> {
+  return runSubjectCampaign(args, deps);
+}
+
