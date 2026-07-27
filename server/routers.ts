@@ -846,6 +846,12 @@ export async function persistBrandToV2(params: {
   tiktokRequested?: boolean;
   /** Whether an Instagram handle was supplied — distinguishes skipped_not_attempted from skipped_no_data */
   instagramRequested?: boolean;
+  /**
+   * Review recency/trajectory (S5). RECORDED, NOT READ — it lands in the
+   * reserved `_meta` key and reaches neither the evidence string nor scoring.
+   * Jason's question 20 decides whether it ever should.
+   */
+  reviewTrajectory?: unknown;
 }): Promise<PersistResult> {
   try {
     const { brandName, brandUrl, category, extracted, weights, reviewFields, tiktokMetadata, instagramMetadata, mentionFields, symbolFields } = params;
@@ -1153,8 +1159,16 @@ export async function persistBrandToV2(params: {
 
     // Record the outcome map on the observation row. Best-effort: a failure to
     // record status must not turn an otherwise-successful persist into an error.
+    //
+    // `_meta` is the reserved, non-component key (getRunDiagnostics skips it in
+    // its component loop). The review trajectory rides there because it is a
+    // FACT ABOUT THE EVIDENCE, not an enrichment outcome — and because putting
+    // it anywhere the model reads would be a ruling nobody has made.
+    const brandPersistenceWithMeta = params.reviewTrajectory
+      ? { ...persistence, _meta: { reviewTrajectory: params.reviewTrajectory } }
+      : persistence;
     try {
-      await updateObservationPersistenceStatus(observationId, persistence);
+      await updateObservationPersistenceStatus(observationId, brandPersistenceWithMeta);
     } catch (err) {
       console.error("[persist] Failed to write persistence_status (brand):", err);
     }

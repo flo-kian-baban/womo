@@ -3,7 +3,7 @@
  *
  * Multi-path scraper with fallback chain:
  *   Path A: Playwright mobile web (primary — highest data quality)
- *   Path B: Picuki fallback (no JS, no bot protection, reliable)
+ *   Path B: Playwright desktop (fallback when mobile yields nothing)
  *
  * oEmbed is used for post-level supplementation (see postScraper.ts),
  * not profile-level data.
@@ -493,167 +493,31 @@ async function scrapeViaPlaywrightDesktop(handle: string): Promise<InstagramScra
   }
 }
 
-// ─── Path B: Picuki Fallback ─────────────────────────────────────────────────
-
-async function scrapeViaPicuki(handle: string): Promise<InstagramScrapedProfile | null> {
-  try {
-    await requestGovernor("instagram");
-    const url = `https://picuki.com/profile/${handle}`;
-    const html = await fetchHtml(url, { timeout: 12000, maxRetries: 2 });
-
-    if (html.length < 1000 || html.includes("Page not found") || html.includes("404")) {
-      console.warn(`[instagramScraper] Picuki returned empty/404 for @${handle}`);
-      return null;
-    }
-
-    const profile = emptyProfile();
-    profile.username = handle;
-
-    // Extract profile metadata from Picuki HTML
-    // Full name
-    const nameMatch = html.match(/<h1[^>]*class="[^"]*profile-name[^"]*"[^>]*>([^<]+)<\/h1>/i)
-      ?? html.match(/<div[^>]*class="[^"]*profile-name[^"]*"[^>]*>([^<]+)<\/div>/i);
-    if (nameMatch) profile.full_name = nameMatch[1].trim();
-
-    // Bio
-    const bioMatch = html.match(/<div[^>]*class="[^"]*profile-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    if (bioMatch) {
-      profile.biography = bioMatch[1]
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&#39;/g, "'")
-        .replace(/&quot;/g, '"')
-        .trim();
-    }
-
-    // Stats: follower count, following count, media count
-    const statMatches = html.match(/<span[^>]*class="[^"]*total[^"]*"[^>]*>([\d,.KkMm]+)<\/span>/gi) ?? [];
-    const statValues = statMatches.map(m => {
-      const inner = m.match(/>([^<]+)</)?.[1] ?? "0";
-      return parseHumanCount(inner);
-    });
-    if (statValues.length >= 3) {
-      profile.media_count = statValues[0];
-      profile.follower_count = statValues[1];
-      profile.following_count = statValues[2];
-    } else if (statValues.length >= 1) {
-      // Try alternate patterns
-      const followerMatch = html.match(/(\d[\d,.]*[KkMm]?)\s*(?:followers|Followers)/);
-      if (followerMatch) profile.follower_count = parseHumanCount(followerMatch[1]);
-      const postMatch = html.match(/(\d[\d,.]*[KkMm]?)\s*(?:posts|Posts)/);
-      if (postMatch) profile.media_count = parseHumanCount(postMatch[1]);
-    }
-
-    // External URL
-    const urlMatch = html.match(/<a[^>]*class="[^"]*profile-url[^"]*"[^>]*href="([^"]+)"/i);
-    if (urlMatch) profile.external_url = urlMatch[1];
-
-    // Verified badge
-    if (html.includes("verified") || html.includes("is_verified")) {
-      profile.is_verified = true;
-    }
-
-    // Extract recent posts
-    const posts: InstagramPostData[] = [];
-    const postBlocks = html.match(/<div[^>]*class="[^"]*post-image[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi) ?? [];
-
-    for (const block of postBlocks.slice(0, 12)) {
-      // Extract shortcode from link
-      const linkMatch = block.match(/href="[^"]*\/p\/([^/"]+)/i)
-        ?? block.match(/data-s="([^"]+)"/i);
-      const shortcode = linkMatch?.[1] ?? "";
-      if (!shortcode) continue;
-
-      // Caption from alt text or data attribute
-      const captionMatch = block.match(/alt="([^"]*)"/)
-        ?? block.match(/data-caption="([^"]*)"/);
-      const caption = (captionMatch?.[1] ?? "")
-        .replace(/&amp;/g, "&")
-        .replace(/&#39;/g, "'")
-        .replace(/&quot;/g, '"');
-
-      // Like count
-      const likeMatch = block.match(/([\d,.]+[KkMm]?)\s*(?:likes?)/i);
-      const like_count = likeMatch ? parseHumanCount(likeMatch[1]) : 0;
-
-      // Comment count
-      const commentMatch = block.match(/([\d,.]+[KkMm]?)\s*(?:comments?)/i);
-      const comment_count = commentMatch ? parseHumanCount(commentMatch[1]) : 0;
-
-      // Media type
-      const isVideo = block.includes("video") || block.includes("reel");
-
-      posts.push({
-        id: shortcode,
-        shortcode,
-        timestamp: 0,
-        caption,
-        like_count,
-        comment_count,
-        view_count: 0,
-        media_type: isVideo ? "video" : "photo",
-      });
-    }
-
-    console.log(`[instagramScraper] @${handle}: Picuki extracted profile (${posts.length} posts)`);
-
-    return {
-      profile,
-      posts,
-      source: "picuki",
-      confidence: "medium",
-    };
-  } catch (err) {
-    console.warn(`[instagramScraper] Path B (Picuki) failed:`, (err as Error).message);
-    return null;
-  }
-}
-
 // ─── Multi-Path Orchestrator ─────────────────────────────────────────────────
 
 /**
- * Two-phase Instagram profile scrape (mirrors TikTok architecture):
- *   Phase 1: Picuki for fast profile data (bio, stats — HTTP only)
- *   Phase 2: ALWAYS Playwright for posts (GraphQL XHR interception)
+ * Instagram profile scrape: Playwright mobile, then desktop, then oEmbed.
  *
- * Playwright is the PRIMARY post source, not a fallback.
+ * ─── Picuki was removed (S5) ────────────────────────────────────────────────
+ * It used to run first, as a fast HTTP probe for profile stats before the
+ * Playwright pass. It never once worked: 16 attempts in `scrape_events`, 16
+ * HTTP 403s, zero successes — the host blocks us outright. It cost ~1.5s of
+ * guaranteed failure at the head of every Instagram scrape, creator and brand
+ * alike, and its only other role was donating follower counts to a merge that
+ * therefore never fired.
+ *
+ * Playwright was already the PRIMARY post source and never conditional on it,
+ * so removing the probe changes what is GATHERED not at all — only how long it
+ * takes to start gathering.
  */
 export async function scrapeInstagramProfile(handle: string): Promise<InstagramScrapedProfile> {
-  // ── Phase 1: Fast HTTP for profile data ──
-  let picukiResult: InstagramScrapedProfile | null = null;
-  try {
-    picukiResult = await scrapeViaPicuki(handle);
-    if (picukiResult) {
-      console.log(`[instagramScraper] @${handle}: Phase 1 — Picuki got profile (followers=${picukiResult.profile.follower_count}, posts=${picukiResult.posts.length})`);
-    }
-  } catch (err) {
-    console.log(`[instagramScraper] @${handle}: Phase 1 — Picuki failed: ${(err as Error).message}`);
-  }
-
-  // ── Phase 2: ALWAYS Playwright for posts (not a fallback) ──
-  console.log(`[instagramScraper] @${handle}: Phase 2 — Playwright for posts (always runs)`);
+  // ── Phase 1: Playwright mobile — the primary path ──
+  console.log(`[instagramScraper] @${handle}: Phase 1 — Playwright for profile and posts`);
   const playwrightResult = await scrapeViaPlaywright(handle);
 
   if (playwrightResult) {
     const postCount = playwrightResult.posts.length;
     console.log(`[instagramScraper] @${handle}: Phase 2 — Playwright mobile got ${postCount} posts`);
-
-    // If Playwright got posts but profile data is weak, merge with Picuki
-    if (picukiResult && playwrightResult.profile.follower_count === 0 && picukiResult.profile.follower_count > 0) {
-      // Use Picuki's profile data (better stats) with Playwright's posts
-      const merged = mergeProfiles(playwrightResult, picukiResult);
-      merged.posts = playwrightResult.posts.length > picukiResult.posts.length
-        ? playwrightResult.posts
-        : [...playwrightResult.posts, ...picukiResult.posts.filter(p => !playwrightResult.posts.some(pp => pp.shortcode === p.shortcode))];
-      merged.source = `picuki+${playwrightResult.source}`;
-      const confidence = merged.posts.length >= 6 ? "high" : merged.posts.length > 0 ? "medium" : "low";
-      merged.confidence = confidence;
-      console.log(`[instagramScraper] @${handle}: merged Picuki profile + Playwright posts (${merged.posts.length} posts, confidence=${confidence})`);
-      return merged;
-    }
 
     // If Playwright got both profile + posts, return it
     if (postCount > 0 || playwrightResult.profile.follower_count > 0 || playwrightResult.profile.biography.length > 0) {
@@ -681,23 +545,11 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
     }
   }
 
-  // ── Phase 2b: Desktop fallback if mobile failed ──
-  console.log(`[instagramScraper] @${handle}: Phase 2b — trying desktop Playwright`);
+  // ── Phase 2: Desktop fallback if mobile failed ──
+  console.log(`[instagramScraper] @${handle}: Phase 2 — trying desktop Playwright`);
   const desktopResult = await scrapeViaPlaywrightDesktop(handle);
   if (desktopResult && (desktopResult.posts.length > 0 || desktopResult.profile.follower_count > 0)) {
-    if (picukiResult && desktopResult.profile.follower_count === 0) {
-      const merged = mergeProfiles(desktopResult, picukiResult);
-      merged.posts = desktopResult.posts.length > 0 ? desktopResult.posts : picukiResult.posts;
-      merged.source = `picuki+${desktopResult.source}`;
-      return merged;
-    }
     return desktopResult;
-  }
-
-  // ── Fallback: Return Picuki data if available ──
-  if (picukiResult && (picukiResult.profile.follower_count > 0 || picukiResult.posts.length > 0)) {
-    console.log(`[instagramScraper] @${handle}: all Playwright paths failed — returning Picuki data`);
-    return picukiResult;
   }
 
   // ── Last resort: oEmbed metadata ──
@@ -1243,33 +1095,6 @@ function extractPostsFromEdges(user: Record<string, unknown>): InstagramPostData
   }
 
   return posts;
-}
-
-// ─── Merge Helper ─────────────────────────────────────────────────────────────
-
-function mergeProfiles(primary: InstagramScrapedProfile, secondary: InstagramScrapedProfile): InstagramScrapedProfile {
-  const merged = { ...primary };
-
-  // Fill in missing profile fields from secondary
-  const p = merged.profile;
-  const s = secondary.profile;
-  if (!p.full_name && s.full_name) p.full_name = s.full_name;
-  if (!p.biography && s.biography) p.biography = s.biography;
-  if (p.follower_count === 0 && s.follower_count > 0) p.follower_count = s.follower_count;
-  if (p.following_count === 0 && s.following_count > 0) p.following_count = s.following_count;
-  if (p.media_count === 0 && s.media_count > 0) p.media_count = s.media_count;
-  if (!p.external_url && s.external_url) p.external_url = s.external_url;
-  if (!p.category && s.category) p.category = s.category;
-
-  // Add posts from secondary if primary has none
-  if (merged.posts.length === 0) {
-    merged.posts = secondary.posts;
-  }
-
-  merged.source = `${primary.source}+${secondary.source}`;
-  merged.confidence = primary.confidence === "low" ? secondary.confidence : primary.confidence;
-
-  return merged;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -69,7 +69,34 @@ import {
 // ─── Banked shapes ───────────────────────────────────────────────────────────
 
 export interface BrandCaptureOutput {
+  /**
+   * The brand's IDENTITY string, unchanged: `glossier.com` for a URL subject.
+   *
+   * It reaches the model twice — the `Brand Name:` line of the base evidence and
+   * the symbol decoder's prompt — so it is deliberately NOT re-derived. What
+   * the model reads is frozen; only what we SEARCH with changed. See searchName.
+   */
   brandName: string;
+  /**
+   * The brand name a CUSTOMER would type, used for every off-site search.
+   *
+   * ─── The defect this exists to fix ──────────────────────────────────────
+   * Every off-site lookup used `brandName`, which for a URL subject keeps the
+   * TLD. So Yelp searched for a business called "glossier.com" and said so:
+   *
+   *     [yelp] No business results found for "glossier.com" in Canada
+   *
+   * and the four TikTok mention queries searched "glossier.com", "glossier.com
+   * haul", "glossier.com review", "glossier.com finds" — nine HTTP 200s across
+   * two brands, zero results. Both search fallbacks would have done the same.
+   * Every received-perception source that came back empty was searching a
+   * string no customer would ever type.
+   *
+   * Optional so a resumed campaign banked before this field existed still
+   * assembles; the reader falls back to `brandName`, which is what it used to
+   * pass anyway.
+   */
+  searchName?: string;
   /** Null when the subject was a NAME rather than a URL — `isUrl` in the monolith. */
   websiteUrl: string | null;
   description: string;
@@ -181,6 +208,41 @@ export interface BrandCollectionCampaign {
 
 // ─── Phase 1 — capture: the website crawl, and nothing else ──────────────────
 
+/**
+ * A hostname → the brand name a customer would type.
+ *
+ * Deliberately a small, statable rule rather than a public-suffix list:
+ *   1. drop trailing TLD-ish labels (≤3 chars, e.g. `com`, `uk`, `co`)
+ *   2. take the LAST remaining label — the registrable one, so a subdomain
+ *      like `shop.glossier.com` yields `glossier` and not `shop`
+ *   3. hyphens and underscores become spaces, because that is how the name is
+ *      written and searched
+ *
+ * Case is left alone: every search target here is case-insensitive, and
+ * title-casing would guess wrong on names like `lululemon`.
+ *
+ * Exported for the harness — this is the whole fix, and it is worth pinning
+ * directly rather than inferring it from a search result.
+ */
+export function brandSearchName(brandNameOrUrl: string): string {
+  const isUrl = brandNameOrUrl.startsWith("http");
+  // A plain name was already correct: someone typing "Glossier" got "Glossier",
+  // and only a URL subject ever carried a TLD into a search.
+  if (!isUrl) return brandNameOrUrl;
+
+  const host = brandNameOrUrl
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0]!
+    .split(":")[0]!;
+
+  const labels = host.split(".").filter(Boolean);
+  while (labels.length > 1 && labels[labels.length - 1]!.length <= 3) labels.pop();
+  const registrable = labels[labels.length - 1] ?? host;
+
+  return registrable.replace(/[-_]+/g, " ").trim() || host;
+}
+
 export function makeBrandCapturePhase(brandNameOrUrl: string): AnalysisPhase<{ subject: string }, BrandCaptureOutput> {
   return {
     name: "capture",
@@ -196,6 +258,7 @@ export function makeBrandCapturePhase(brandNameOrUrl: string): AnalysisPhase<{ s
 
       const base: BrandCaptureOutput = {
         brandName,
+        searchName: brandSearchName(input.subject),
         websiteUrl: isUrl ? input.subject : null,
         description: "",
         snippets: [],
@@ -258,6 +321,12 @@ export function makeBrandAugmentPhase(
       const started = Date.now();
       const { capture } = input;
       const isUrl = capture.websiteUrl !== null;
+      /**
+       * What every off-site search asks for. Falls back to `brandName` for a
+       * campaign banked before capture recorded it — that is exactly what those
+       * searches used to receive, so a resumed old run behaves as it did.
+       */
+      const searchName = capture.searchName ?? capture.brandName;
 
       // CONSTRAINT 1 + 2: extend what capture banked; never rebuild it.
       const snippets = [...capture.snippets];
@@ -270,7 +339,7 @@ export function makeBrandAugmentPhase(
       if (!isUrl || capture.semanticWordCount < 500) {
         googleFallbackRan = true;
         try {
-          const res = await searchWeb(`${capture.brandName} company about mission values`) as unknown as Record<string, unknown>;
+          const res = await searchWeb(`${searchName} company about mission values`) as unknown as Record<string, unknown>;
           for (const result of ((res?.results as unknown[]) ?? []).slice(0, 3)) {
             const item = result as Record<string, unknown>;
             const title = (item?.title as string) ?? "";
@@ -289,7 +358,7 @@ export function makeBrandAugmentPhase(
       if (!isUrl || (snippets.length < 3 && capture.semanticWordCount < 300)) {
         youtubeFallbackRan = true;
         try {
-          const yt = await searchYouTube(`${capture.brandName} brand about`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
+          const yt = await searchYouTube(`${searchName} brand about`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
           for (const item of ((yt?.contents as unknown[]) ?? []).slice(0, 5)) {
             const video = (item as Record<string, unknown>)?.video as Record<string, unknown>;
             if (!video) continue;
@@ -309,7 +378,7 @@ export function makeBrandAugmentPhase(
       let audiencePerceptionBlock: string | null = null;
       let review: BrandReviewFields = EMPTY_BRAND_REVIEW_FIELDS;
       try {
-        const reviews = await fetchBrandReviews(capture.brandName, capture.websiteUrl ?? "", googleMapsUrl);
+        const reviews = await fetchBrandReviews(searchName, capture.websiteUrl ?? "", googleMapsUrl);
         audiencePerceptionBlock = reviews.audiencePerceptionBlock || null;
         review = selectBrandReviewFields(reviews);
       } catch (err) {
@@ -319,7 +388,7 @@ export function makeBrandAugmentPhase(
       // ── Perception B: mentions. Becomes an APPENDED block (constraint 4). ──
       let mentions: AudienceMentionData | null = null;
       try {
-        mentions = await fetchBrandMentionData(capture.brandName);
+        mentions = await fetchBrandMentionData(searchName);
       } catch (err) {
         console.warn("[brandPhases] Mention fetch failed (non-fatal):", err);
       }
@@ -745,6 +814,9 @@ export function buildBrandPersistParams(args: {
     mentionFields,
     symbolFields,
     // TRAP 3 + 4: undefined under the discard, shared rule otherwise.
+    // Recorded, not read: travels to persistence_status._meta, never to the
+    // evidence string. See computeReviewTrajectory.
+    reviewTrajectory: researchDiscarded ? undefined : r.trajectory,
     dataConfidenceLevel: researchDiscarded
       ? undefined
       : brandDataConfidence(capture.semanticWordCount, augment.perception.totalReviews),

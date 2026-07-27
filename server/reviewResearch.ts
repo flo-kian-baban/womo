@@ -62,6 +62,92 @@ export interface BrandReviewFields {
   combinedReviewText: string;
   overallRating: number | null;
   totalReviews: number;
+  /**
+   * Recorded, NOT read by the model (S5). Derived here so it travels with the
+   * banked review fields and cannot be recomputed differently downstream.
+   */
+  trajectory: ReviewTrajectory;
+}
+
+/**
+ * REVIEW TRAJECTORY — recorded, not read (S5, for Jason's question 20).
+ *
+ * `ReviewEntry.date` has always been captured and has always been rendered per
+ * review inside the perception block. Nothing ever aggregated it, so "is this
+ * brand's reception improving or declining?" was present in the evidence as raw
+ * text and absent as a signal.
+ *
+ * ─── What this deliberately does NOT do ─────────────────────────────────────
+ * It does not touch the evidence string, the review block, or anything the model
+ * reads. It is computed alongside and stored in `persistence_status._meta`,
+ * which is the reserved non-component key already used for exactly this kind of
+ * recorded-but-not-scored fact. Feeding it to the model or to scoring is a
+ * ruling, not a refactor.
+ *
+ * ─── Honest about its own coverage ──────────────────────────────────────────
+ * Only Google Maps dates are reliably parseable — `fetchGoogleReviews` writes
+ * `new Date(r.time * 1000).toLocaleDateString("en-CA")`, an ISO-ish string.
+ * Yelp's are scraped free text ("3 months ago", locale-dependent) and are NOT
+ * parsed here rather than guessed at. So the result reports `datedReviews` out
+ * of `totalIngested`: a trajectory computed from 4 of 7 reviews says so, and a
+ * reader can discount it.
+ */
+export interface ReviewTrajectory {
+  /** How many ingested reviews had a date this could actually read. */
+  datedReviews: number;
+  totalIngested: number;
+  recentCount: number;
+  olderCount: number;
+  recentAvgRating: number | null;
+  olderAvgRating: number | null;
+  /** recent − older. Positive = reception improving. Null when either side is empty. */
+  ratingDelta: number | null;
+  trajectory: "improving" | "declining" | "stable" | "insufficient_data";
+}
+
+/** The recent/older boundary. Twelve months, stated once. */
+const TRAJECTORY_WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
+/** Below this the delta is noise, not a trend. */
+const TRAJECTORY_EPSILON = 0.25;
+
+export function computeReviewTrajectory(
+  reviews: ReviewEntry[],
+  now: number = Date.now(),
+): ReviewTrajectory {
+  const dated = reviews
+    .map(r => ({ r, t: r.date ? Date.parse(r.date) : NaN }))
+    .filter(x => Number.isFinite(x.t) && x.r.rating > 0);
+
+  const recent = dated.filter(x => now - x.t <= TRAJECTORY_WINDOW_MS).map(x => x.r);
+  const older = dated.filter(x => now - x.t > TRAJECTORY_WINDOW_MS).map(x => x.r);
+  const mean = (rs: ReviewEntry[]) =>
+    rs.length ? rs.reduce((s, r) => s + r.rating, 0) / rs.length : null;
+
+  const recentAvgRating = mean(recent);
+  const olderAvgRating = mean(older);
+  const ratingDelta = recentAvgRating !== null && olderAvgRating !== null
+    ? Math.round((recentAvgRating - olderAvgRating) * 100) / 100
+    : null;
+
+  // Both sides must be populated to claim a direction at all. One-sided data is
+  // a snapshot, not a trajectory, and saying otherwise would be the invented
+  // number this whole exercise exists to avoid.
+  const trajectory: ReviewTrajectory["trajectory"] =
+    ratingDelta === null ? "insufficient_data"
+      : ratingDelta > TRAJECTORY_EPSILON ? "improving"
+        : ratingDelta < -TRAJECTORY_EPSILON ? "declining"
+          : "stable";
+
+  return {
+    datedReviews: dated.length,
+    totalIngested: reviews.length,
+    recentCount: recent.length,
+    olderCount: older.length,
+    recentAvgRating: recentAvgRating === null ? null : Math.round(recentAvgRating * 100) / 100,
+    olderAvgRating: olderAvgRating === null ? null : Math.round(olderAvgRating * 100) / 100,
+    ratingDelta,
+    trajectory,
+  };
 }
 
 /** `[5★] Author: "…"` — the excerpt line format, frozen at 300 chars of body. */
@@ -86,6 +172,7 @@ export function selectBrandReviewFields(result: AudiencePerceptionResult): Brand
     combinedReviewText: result.combinedReviewText,
     overallRating: result.overallRating,
     totalReviews: result.totalReviews,
+    trajectory: computeReviewTrajectory(result.sources.flatMap(s => s.reviews)),
   };
 }
 
@@ -94,6 +181,11 @@ export const EMPTY_BRAND_REVIEW_FIELDS: BrandReviewFields = {
   yelpRating: null, yelpReviewCount: null, yelpReviewExcerpts: "",
   googleRating: null, googleReviewCount: null, googleReviewExcerpts: "",
   combinedReviewText: "", overallRating: null, totalReviews: 0,
+  trajectory: {
+    datedReviews: 0, totalIngested: 0, recentCount: 0, olderCount: 0,
+    recentAvgRating: null, olderAvgRating: null, ratingDelta: null,
+    trajectory: "insufficient_data",
+  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
