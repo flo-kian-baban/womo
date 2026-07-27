@@ -851,10 +851,27 @@ async function fetchGoogleMapsReviews(brandName: string, cityHint: string, direc
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
+/**
+ * ─── The two review sources want DIFFERENT strings, measured ────────────────
+ * Yelp searches for a business a customer would name; Google Places resolves an
+ * ENTITY and matches on the domain. Probed directly against the live API:
+ *
+ *   "glossier.com"  → OK,           1 result: "Glossier LA", 248 reviews
+ *   "glossier"      → ZERO_RESULTS
+ *   "Glossier"      → ZERO_RESULTS
+ *
+ * So the search-name fix that unblocked TikTok mentions (0 → 91 videos) broke
+ * Places, which had been finding the listing precisely BECAUSE it was handed a
+ * domain. `placesQuery` keeps that caller on the form it actually wants while
+ * everything else gets the human name.
+ */
 export async function fetchBrandReviews(
   brandName: string,
   websiteUrl: string,
-  googleMapsUrl?: string
+  googleMapsUrl?: string,
+  /** What Google Places is asked for. Defaults to `brandName` for callers
+   *  that have no separate entity form. */
+  placesQuery: string = brandName,
 ): Promise<AudiencePerceptionResult> {
   const cityHint = extractCityHint(websiteUrl, brandName);
   const sources: ReviewSource[] = [];
@@ -914,7 +931,7 @@ export async function fetchBrandReviews(
 
     try {
       const startTime = Date.now();
-      const googleResult = await fetchGoogleMapsReviews(brandName, cityHint, directPlaceId ?? undefined);
+      const googleResult = await fetchGoogleMapsReviews(placesQuery, cityHint, directPlaceId ?? undefined);
       if (googleResult) sources.push(googleResult);
       try {
         await insertScrapeEvent({

@@ -378,7 +378,12 @@ export function makeBrandAugmentPhase(
       let audiencePerceptionBlock: string | null = null;
       let review: BrandReviewFields = EMPTY_BRAND_REVIEW_FIELDS;
       try {
-        const reviews = await fetchBrandReviews(searchName, capture.websiteUrl ?? "", googleMapsUrl);
+        // Yelp and the fallbacks want the human name; Google Places wants the
+        // ENTITY form, which for a URL subject is the domain — measured, see
+        // fetchBrandReviews. Handing both the same string breaks one of them.
+        const reviews = await fetchBrandReviews(
+          searchName, capture.websiteUrl ?? "", googleMapsUrl, capture.brandName,
+        );
         audiencePerceptionBlock = reviews.audiencePerceptionBlock || null;
         review = selectBrandReviewFields(reviews);
       } catch (err) {
