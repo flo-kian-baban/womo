@@ -153,6 +153,23 @@ export interface FetchHtmlOptions {
   jitter?: boolean;
   /** Response type: "text" | "json" (default: "text") */
   responseType?: "text" | "json";
+  /**
+   * Which per-item attempt CLASS this fetch belongs to, when it is one.
+   *
+   * The failure-accounting convention (deriveCaptureHealth,
+   * isAttemptOutcomeRecord) reads a reason prefix — "transcript " / "search " /
+   * "profile " — to tell per-item attempt outcomes apart from genuine path
+   * failures. Chain-level events carry it; the transport events THIS module
+   * records did not, so a per-video subtitle fetch that found a JS shell was
+   * counted as a broken tiktok_desktop_http path. Measured across the
+   * 20-creator rebuild batch: the method succeeded 305 times in the same runs
+   * that counted it "failed", and capture health read degraded on 20 of 20.
+   *
+   * Set by callers whose fetches are per-item attempts (the subtitle page
+   * fetch). Left unset by profile/page captures, whose failures are the real
+   * signal the accounting exists for.
+   */
+  attemptKind?: "transcript" | "search" | "profile";
 }
 
 export class HttpClientError extends Error {
@@ -192,6 +209,7 @@ export async function fetchHtml(
     timeout = 15000,
     maxRetries = 3,
     baseDelay = 1000,
+    attemptKind,
   } = options;
 
   let lastError: Error | null = null;
@@ -259,7 +277,7 @@ export async function fetchHtml(
         continue;
       }
 
-      logScrapeSuccess(url, body, Date.now() - fetchStartTime);
+      logScrapeSuccess(url, body, Date.now() - fetchStartTime, attemptKind);
       return body;
     } catch (err) {
       if (err instanceof HttpClientError) {
@@ -282,7 +300,7 @@ export async function fetchHtml(
   }
 
   const finalError = lastError ?? new Error(`fetchHtml failed for ${url} after ${maxRetries} attempts`);
-  logScrapeFailure(url, Date.now() - fetchStartTime, finalError);
+  logScrapeFailure(url, Date.now() - fetchStartTime, finalError, attemptKind);
   throw finalError;
 }
 
@@ -379,7 +397,12 @@ function inferScrapeContext(url: string): { platform: string; scrapeMethod: stri
  * pass undefined and the check is skipped (recorded false) rather than
  * defaulting to a false positive.
  */
-function logScrapeSuccess(url: string, body: string | undefined, durationMs: number): void {
+function logScrapeSuccess(
+  url: string,
+  body: string | undefined,
+  durationMs: number,
+  attemptKind?: FetchHtmlOptions["attemptKind"],
+): void {
   const ctx = inferScrapeContext(url);
   if (!ctx) return;
   try {
@@ -394,7 +417,11 @@ function logScrapeSuccess(url: string, body: string | undefined, durationMs: num
       httpStatus: 200,
       responseSizeBytes: body?.length,
       silentFailureDetected: silentFail.isFailed,
-      failureReason: silentFail.isFailed ? silentFail.reason : undefined,
+      // The class prefix marks a per-item attempt outcome (a video page with no
+      // rehydration data) apart from a genuine path failure — see attemptKind.
+      failureReason: silentFail.isFailed
+        ? (attemptKind ? `${attemptKind} ${silentFail.reason}` : silentFail.reason)
+        : undefined,
       durationMs,
     }, "fetch-success");
   } catch (err) {
@@ -403,7 +430,12 @@ function logScrapeSuccess(url: string, body: string | undefined, durationMs: num
 }
 
 /** Fire-and-forget: log a failed fetch as a scrape event */
-function logScrapeFailure(url: string, durationMs: number, error: Error): void {
+function logScrapeFailure(
+  url: string,
+  durationMs: number,
+  error: Error,
+  attemptKind?: FetchHtmlOptions["attemptKind"],
+): void {
   const ctx = inferScrapeContext(url);
   if (!ctx) return;
   try {
@@ -414,7 +446,9 @@ function logScrapeFailure(url: string, durationMs: number, error: Error): void {
       urlRequested: url.slice(0, 1000),
       httpStatus: statusCode,
       silentFailureDetected: false,
-      failureReason: error.message.slice(0, 500),
+      failureReason: attemptKind
+        ? `${attemptKind} ${error.message.slice(0, 480)}`
+        : error.message.slice(0, 500),
       durationMs,
     }, "fetch-failure");
   } catch (err) {

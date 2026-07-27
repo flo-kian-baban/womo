@@ -112,8 +112,11 @@ export async function transcribeAudio(
     scrapeMethod: "whisper_transcription",
     urlRequested: options.audioUrl?.slice(0, 1000),
     durationMs: Date.now() - start,
+    // "transcript "-classed: "No speech detected" in one reel is a fact about
+    // that video, not a broken transcription path. Unprefixed, these read as
+    // path failures and degraded every Instagram run's capture health.
     failureReason: "error" in result
-      ? `${result.code}: ${result.error}${result.details ? ` — ${result.details.slice(0, 300)}` : ""}`
+      ? `transcript whisper: ${result.code}: ${result.error}${result.details ? ` — ${result.details.slice(0, 300)}` : ""}`
       : undefined,
   }, "transcription");
   return result;

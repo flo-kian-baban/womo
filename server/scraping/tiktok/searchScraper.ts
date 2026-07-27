@@ -346,7 +346,12 @@ export async function searchTikTokVideos(
       platform: "tiktok", scrapeMethod: "tiktok_search_xhr",
       urlRequested: `${searchUrlForLog}${fragment}`,
       httpStatus: final.navStatus, silentFailureDetected: true,
-      failureReason: "no results via XHR capture",
+      // "outcome "-classed: the XHR ran and answered — zero items for a niche
+      // query is a result, not a failed query. Unprefixed, this counted toward
+      // failedSearchQueries and flipped capture health to degraded on 12 of 20
+      // batch runs. Genuine search failures take the error branch below and
+      // stay unclassed (counted), which is what the accounting is for.
+      failureReason: "outcome no results via XHR capture",
       durationMs: final.durationMs,
     });
     console.warn(`[searchScraper] All search attempts exhausted for "${keyword}"`);

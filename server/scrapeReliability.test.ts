@@ -88,6 +88,34 @@ describe("deriveCaptureHealth — reporting-only per-run assessment", () => {
     expect(h.status).toBe("clean");
   });
 
+  /**
+   * CORPUS-REBUILD FINDING (20-creator batch): the transport layer BENEATH the
+   * chains — per-video page fetches, WEBVTT downloads, whisper per-reel results
+   * — recorded unprefixed reasons, so a video without subtitles counted as a
+   * broken tiktok_desktop_http path and health read degraded on 20 of 20 runs
+   * while the method succeeded 305 times in the same batch. The emitters now
+   * class those events; classed transport rows must not count as path failures.
+   */
+  it("transcript-classed TRANSPORT rows (silent-failure fetches, whisper no-speech) do not degrade", () => {
+    const h = deriveCaptureHealth([
+      ev({}),
+      ev({ failureReason: "transcript TikTok response too small and missing rehydration data", silentFailure: true, method: "tiktok_desktop_http" }),
+      ev({ failureReason: "transcript webvtt: downloaded but parsed to empty/too-short transcript", method: "tiktok_desktop_http" }),
+      ev({ failureReason: "transcript whisper: TRANSCRIPTION_FAILED: No speech detected — Gemini detected no spoken words", method: "whisper_transcription" }),
+    ]);
+    expect(h.status).toBe("clean");
+    expect(h.failedPathMethods).toEqual([]);
+  });
+
+  it("outcome-classed rows (a search that ran and found nothing) do not degrade", () => {
+    const h = deriveCaptureHealth([
+      ev({}),
+      ev({ method: "tiktok_search_xhr", silentFailure: true, failureReason: "outcome no results via XHR capture" }),
+    ]);
+    expect(h.status).toBe("clean");
+    expect(h.failedSearchQueries).toBe(0);
+  });
+
   it("a superseded (retried) attempt marks the run degraded", () => {
     const h = deriveCaptureHealth([
       ev({ failureReason: "search search_xhr_scroll: transient — Target closed", method: "tiktok_search_xhr" }),
@@ -98,7 +126,12 @@ describe("deriveCaptureHealth — reporting-only per-run assessment", () => {
     expect(h.retryOutcomes).toBe(1);
   });
 
-  it("an ultimately-failed search query marks the run degraded and is counted", () => {
+  /**
+   * HISTORICAL rows predate the outcome/transport classing and arrive
+   * unprefixed. They must keep counting exactly as they always did — the
+   * classification changed what new emitters WRITE, never how old rows READ.
+   */
+  it("an unclassed (historical) failed search query still marks the run degraded", () => {
     const h = deriveCaptureHealth([
       ev({}),
       ev({ method: "tiktok_search_xhr", silentFailure: true, failureReason: "no results via XHR capture" }),
@@ -108,7 +141,7 @@ describe("deriveCaptureHealth — reporting-only per-run assessment", () => {
     expect(h.failedPathMethods).toEqual([]);
   });
 
-  it("a non-search path failure lands in failedPathMethods", () => {
+  it("an unclassed non-search path failure still lands in failedPathMethods", () => {
     const h = deriveCaptureHealth([
       ev({ failureReason: "TikTok response too small and missing rehydration data", silentFailure: true, method: "tiktok_desktop_http" }),
       ev({}),

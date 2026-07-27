@@ -126,7 +126,9 @@ export async function downloadWebVTT(url: string): Promise<{ transcript: string;
       platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
       httpStatus: subResponse.status, responseSizeBytes: vttText?.length,
       durationMs: Date.now() - dlStart,
-      failureReason: !transcript || transcript.length < 10 ? "WEBVTT downloaded but parsed to empty/too-short transcript" : undefined,
+      // "transcript "-classed: an empty WEBVTT is a fact about one video's
+      // subtitles, not a failure of the download path.
+      failureReason: !transcript || transcript.length < 10 ? "transcript webvtt: downloaded but parsed to empty/too-short transcript" : undefined,
     });
 
     if (!transcript || transcript.length < 10) return null;
@@ -138,7 +140,8 @@ export async function downloadWebVTT(url: string): Promise<{ transcript: string;
     recordScrapeEvent({
       platform: "tiktok", scrapeMethod: "tiktok_desktop_http", urlRequested: url,
       httpStatus: (err as { response?: { status?: number } }).response?.status,
-      failureReason: (err as Error).message.slice(0, 500),
+      // Same class as above: a failed subtitle download is per-video telemetry.
+      failureReason: `transcript webvtt: ${(err as Error).message.slice(0, 480)}`,
       durationMs: Date.now() - dlStart,
     });
     return null;
@@ -208,6 +211,11 @@ export function makeSubtitleHttpStrategy(opts?: StrategyOptions): TranscriptStra
       try {
         const html = await fetchHtml(input.videoUrl, {
           extraHeaders: { Referer: "https://www.tiktok.com/" },
+          // This is a PER-VIDEO transcript attempt: a JS-shell video page is
+          // "this video yields no subtitles", not "the HTTP path is broken".
+          // The class prefix keeps it out of the path-failure accounting that
+          // read capture health as degraded on 20 of 20 batch runs.
+          attemptKind: "transcript",
           ...(opts?.httpFetch ?? {}),
         });
         const { found, subtitleInfos } = extractSubtitleInfos(html);

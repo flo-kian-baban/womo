@@ -632,8 +632,24 @@ export function deriveCaptureHealth(
   events: CaptureHealthEventInput[],
   evidence?: { transcripts: number; titles: number },
 ): CaptureHealth {
+  /**
+   * The reason-prefix convention, one class wider (corpus-rebuild findings):
+   *   "transcript " — per-video attempt outcomes, INCLUDING the transport-layer
+   *                   events beneath the chains (subtitle page fetches, WEBVTT
+   *                   downloads, whisper per-reel results), which previously
+   *                   recorded unprefixed and were counted as path failures.
+   *                   Measured: tiktok_desktop_http succeeded 305 times in the
+   *                   same batch that counted it "failed" on every run.
+   *   "outcome "    — a query/item that RAN and answered empty (zero-result
+   *                   search). A result, not a failure.
+   * Historical rows predating the classification keep counting exactly as they
+   * did — only newly-classed emitters change what arrives here.
+   */
   const isAttempt = (fr: string | null) =>
-    Boolean(fr?.startsWith("transcript ") || fr?.startsWith("search ") || fr?.startsWith("profile "));
+    Boolean(
+      fr?.startsWith("transcript ") || fr?.startsWith("search ") ||
+      fr?.startsWith("profile ") || fr?.startsWith("outcome "),
+    );
   let supersededAttempts = 0;
   let retryOutcomes = 0;
   let failedSearchQueries = 0;
@@ -2480,7 +2496,11 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     Boolean(
       e.failureReason?.startsWith("transcript ") ||
       e.failureReason?.startsWith("search ") ||
-      e.failureReason?.startsWith("profile "),
+      e.failureReason?.startsWith("profile ") ||
+      // "outcome " — a query/item that ran and answered empty (e.g. a search
+      // with zero results). Corpus-rebuild finding: these counted as failed
+      // scrapes here and as failed queries in capture health.
+      e.failureReason?.startsWith("outcome "),
     );
   const isFailedScrape = (e: typeof scrapeRows[number]) =>
     !isAttemptOutcomeRecord(e) &&
