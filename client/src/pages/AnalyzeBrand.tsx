@@ -24,19 +24,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, Loader2, Sparkles, Inbox } from "lucide-react";
+import { Building2, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { ApiStatusPanel } from "@/components/ApiStatusPanel";
-import { CampaignCard, type Campaign } from "@/components/CampaignCard";
-
-/** In flight = the queue still owes you something. */
-const ACTIVE_STATES = new Set(["queued", "running", "parked"]);
-
-/** Brand campaigns are the ones this page submitted; creators have their own. */
-const isBrand = (c: Campaign) => c.platform.trim().toLowerCase() === "brand";
+import { CampaignQueue, pollIntervalFor } from "@/components/CampaignQueue";
+import { isBrandCampaign, type Campaign } from "@/lib/campaignState";
 
 const validateTikTokHandle = (value: string | undefined): true | string => {
   if (!value || value.trim() === "") return true; // Optional field
@@ -130,7 +125,11 @@ export default function AnalyzeBrand() {
    */
   const queue = trpc.creator.queueStatus.useQuery(
     { includeTerminal: true, limit: 50 },
-    { refetchInterval: 3000, refetchOnWindowFocus: true },
+    {
+      // Paced by whether anything is actually moving — see pollIntervalFor.
+      refetchInterval: (q) => pollIntervalFor(q.state.data?.campaigns),
+      refetchOnWindowFocus: true,
+    },
   );
 
   const submit = trpc.brand.submit.useMutation({
@@ -142,14 +141,13 @@ export default function AnalyzeBrand() {
     onError: (error) => toast.error(error.message),
   });
 
-  const campaigns: Campaign[] = (queue.data?.campaigns ?? []).filter(isBrand);
-  const active = campaigns.filter(c => ACTIVE_STATES.has(c.state));
-  const settled = campaigns.filter(c => !ACTIVE_STATES.has(c.state));
-  const failed = settled.filter(c => c.state === "failed");
+  /** Brand campaigns are the ones this page submitted; creators have their own. */
+  const campaigns: Campaign[] = (queue.data?.campaigns ?? []).filter(isBrandCampaign);
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-10 space-y-6">
-      <div>
+    /* Wide for the queue, narrow for the form — see AnalyzeCreator. */
+    <div className="max-w-6xl mx-auto px-6 py-10 space-y-6">
+      <div className="max-w-3xl">
         <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
           <Building2 className="w-3.5 h-3.5" /> Analyze brands
         </div>
@@ -161,7 +159,7 @@ export default function AnalyzeBrand() {
 
       <form
         onSubmit={handleSubmit(values => submit.mutate(values))}
-        className="fit-card rounded-xl p-5 space-y-4"
+        className="fit-card rounded-xl p-5 space-y-4 max-w-3xl"
       >
         <div className="space-y-2">
           <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
@@ -245,53 +243,12 @@ export default function AnalyzeBrand() {
         </Button>
       </form>
 
-      {/* ─── In flight ─────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-            In flight
-          </div>
-          <div className="text-xs text-muted-foreground/60">
-            {queue.isLoading
-              ? "loading…"
-              : active.length > 0
-                ? `${active.length} running or queued`
-                : "nothing running"}
-          </div>
-        </div>
+      <CampaignQueue
+        campaigns={campaigns}
+        isLoading={queue.isLoading}
+        emptyLabel="No brand analyses yet."
+      />
 
-        {active.length > 0
-          ? active.map(c => <CampaignCard key={c.runId} campaign={c} />)
-          : (
-            <div className="fit-card rounded-xl p-8 text-center">
-              <Inbox className="w-5 h-5 mx-auto text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground/60 mt-2">
-                {queue.isLoading ? "Loading the queue…" : "No brand analyses in flight."}
-              </p>
-              {!queue.isLoading && settled.length > 0 && (
-                <p className="text-xs text-muted-foreground/40 mt-1">
-                  {settled.length} finished {settled.length === 1 ? "campaign" : "campaigns"} below.
-                </p>
-              )}
-            </div>
-          )}
-      </section>
-
-      {/* ─── Finished ──────────────────────────────────────────────────────── */}
-      {settled.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-              Finished
-            </div>
-            <div className="text-xs text-muted-foreground/60">
-              {settled.length - failed.length} complete
-              {failed.length > 0 && <span className="text-destructive/80"> · {failed.length} failed</span>}
-            </div>
-          </div>
-          {settled.map(c => <CampaignCard key={c.runId} campaign={c} />)}
-        </section>
-      )}
 
       <ApiStatusPanel />
     </div>

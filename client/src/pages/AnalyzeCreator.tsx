@@ -15,7 +15,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Users, Loader2, Sparkles, AlertTriangle, Inbox, ClipboardPaste } from "lucide-react";
+import { Users, Loader2, Sparkles, AlertTriangle, ClipboardPaste } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -24,11 +24,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { CampaignCard, type Campaign } from "@/components/CampaignCard";
+import { CampaignQueue, pollIntervalFor } from "@/components/CampaignQueue";
+import { isBrandCampaign, type Campaign } from "@/lib/campaignState";
 import { PlatformMark, SUPPORTED_PLATFORMS, type SupportedPlatform } from "@/components/PlatformMark";
-
-/** In flight = the queue still owes you something. */
-const ACTIVE_STATES = new Set(["queued", "running", "parked"]);
 
 /**
  * "@name", "name", or a pasted profile URL → "name".
@@ -62,7 +60,11 @@ export default function AnalyzeCreator() {
    */
   const queue = trpc.creator.queueStatus.useQuery(
     { includeTerminal: true, limit: 50 },
-    { refetchInterval: 3000, refetchOnWindowFocus: true },
+    {
+      // Paced by whether anything is actually moving — see pollIntervalFor.
+      refetchInterval: (q) => pollIntervalFor(q.state.data?.campaigns),
+      refetchOnWindowFocus: true,
+    },
   );
 
   const submit = trpc.creator.submit.useMutation({
@@ -110,14 +112,22 @@ export default function AnalyzeCreator() {
     }
   };
 
-  const campaigns: Campaign[] = queue.data?.campaigns ?? [];
-  const active = campaigns.filter(c => ACTIVE_STATES.has(c.state));
-  const settled = campaigns.filter(c => !ACTIVE_STATES.has(c.state));
-  const failed = settled.filter(c => c.state === "failed");
+  /**
+   * CREATORS ONLY. This page used to list every campaign in the ledger,
+   * brands included, because only the brand page filtered — so a brand run
+   * appeared under "Analyze creators" with a storefront glyph beside it.
+   */
+  const campaigns: Campaign[] = (queue.data?.campaigns ?? []).filter(c => !isBrandCampaign(c));
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-10 space-y-6">
-      <div>
+    /*
+      The page is wide because the QUEUE is: a dense row has to hold state,
+      subject, six phase marks, capture health and timing side by side, and at
+      twenty campaigns that has to be scannable without horizontal squeeze. The
+      submit form stays narrow — it is one field and does not want the width.
+    */
+    <div className="max-w-6xl mx-auto px-6 py-10 space-y-6">
+      <div className="max-w-3xl">
         <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
           <Users className="w-3.5 h-3.5" /> Analyze creators
         </div>
@@ -127,7 +137,7 @@ export default function AnalyzeCreator() {
         </p>
       </div>
 
-      <div className="fit-card rounded-xl p-5 space-y-4">
+      <div className="fit-card rounded-xl p-5 space-y-4 max-w-3xl">
         <div className="space-y-2">
           <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
             Platform
@@ -194,58 +204,12 @@ export default function AnalyzeCreator() {
         </Button>
       </div>
 
-      {/* ─── In flight ─────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-            In flight
-          </div>
-          {/*
-            NOT "idle". The old counter said idle whenever nothing was running,
-            which described the WORKER, not the system — "39 completed, nothing
-            running" is not an idle system. State what is actually true.
-          */}
-          <div className="text-xs text-muted-foreground/60">
-            {queue.isLoading
-              ? "loading…"
-              : active.length > 0
-                ? `${active.length} running or queued`
-                : "nothing running"}
-          </div>
-        </div>
+      <CampaignQueue
+        campaigns={campaigns}
+        isLoading={queue.isLoading}
+        emptyLabel="No creator analyses yet."
+      />
 
-        {active.length > 0
-          ? active.map(c => <CampaignCard key={c.runId} campaign={c} />)
-          : (
-            <div className="fit-card rounded-xl p-8 text-center">
-              <Inbox className="w-5 h-5 mx-auto text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground/60 mt-2">
-                {queue.isLoading ? "Loading the queue…" : "No analyses in flight."}
-              </p>
-              {!queue.isLoading && settled.length > 0 && (
-                <p className="text-xs text-muted-foreground/40 mt-1">
-                  {settled.length} finished {settled.length === 1 ? "campaign" : "campaigns"} below.
-                </p>
-              )}
-            </div>
-          )}
-      </section>
-
-      {/* ─── Finished ──────────────────────────────────────────────────────── */}
-      {settled.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-              Finished
-            </div>
-            <div className="text-xs text-muted-foreground/60">
-              {settled.length - failed.length} complete
-              {failed.length > 0 && <span className="text-destructive/80"> · {failed.length} failed</span>}
-            </div>
-          </div>
-          {settled.map(c => <CampaignCard key={c.runId} campaign={c} />)}
-        </section>
-      )}
 
       <AlertDialog open={duplicateWarning !== null} onOpenChange={(o) => !o && setDuplicateWarning(null)}>
         <AlertDialogContent>
