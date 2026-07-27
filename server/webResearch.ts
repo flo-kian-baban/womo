@@ -3099,7 +3099,7 @@ function extractSemanticLinks(html: string, baseUrl: string): string[] {
  * Recursively crawl a brand website to collect 2,000+ words of semantic content.
  * Follows internal links to About, Story, Blog, Mission pages.
  */
-async function crawlBrandWebsite(startUrl: string): Promise<{
+export async function crawlBrandWebsite(startUrl: string): Promise<{
   allText: string;
   snippets: string[];
   crawledPages: string[];

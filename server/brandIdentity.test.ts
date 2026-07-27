@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { assembleBrandEvidence, buildBrandBaseEvidence, type BrandMonolithBaseline } from "./phases/brandEvidence";
+import { assembleBrandCollection } from "./phases/brandPhases";
 
 const FIXTURE = path.join(import.meta.dirname, "__fixtures__", "brandBaseline.json");
 const bl: BrandMonolithBaseline | null = existsSync(FIXTURE)
@@ -210,5 +211,95 @@ describe("the assembly rule itself — order, and the absent-block asymmetry", (
 
   it("the base is never prefixed, even when it is empty", () => {
     expect(assembleBrandEvidence({ base: "", decodedSymbolsBlock: "S" })).toBe("\n\nS");
+  });
+});
+
+/**
+ * THE PHASED ASSEMBLY, ARBITRATED (S5 step 3).
+ *
+ * `assembleBrandCollection` is where a phased brand run either reproduces the
+ * monolith's string byte-for-byte or silently does not. These drive it with
+ * BANKED-PHASE-SHAPED inputs reconstructed from the recorded baseline, so the
+ * thing under test is the routing of banked pieces into the two pinned
+ * builders — not the builders themselves, which are already pinned above.
+ *
+ * The TikTok and Instagram blocks are deliberately excluded: the router still
+ * owns those inputs until step 4, so collection's string is the recorded one
+ * MINUS those two blocks.
+ */
+describe("assembleBrandCollection rebuilds from banked phase outputs", () => {
+  /** The baseline's parts, rearranged into what the four phases would bank. */
+  function bankedFromBaseline() {
+    const i = bl!.baseInputs!;
+    return {
+      capture: {
+        brandName: i.brandName,
+        websiteUrl: i.websiteUrl,
+        // Capture's own values are irrelevant here — augment's rescue carries
+        // the final description and the EXTENDED snippets, which is exactly the
+        // ordering constraint the phases encode.
+        description: "",
+        snippets: [],
+        semanticWordCount: 0,
+        crawledPages: [],
+      },
+      augment: {
+        rescue: {
+          description: i.description,
+          snippets: i.snippets,
+          googleFallbackRan: false,
+          youtubeFallbackRan: false,
+        },
+        perception: {
+          audiencePerceptionBlock: i.audiencePerceptionBlock,
+          totalReviews: bl!.observed.totalReviews,
+          mentionEvidenceBlock: bl!.parts.mentionEvidenceBlock ?? null,
+          totalMentions: bl!.observed.totalMentions,
+          mentions: null,
+        },
+      },
+      derive: {
+        decodedSymbols: null,
+        decodedSymbolsBlock: bl!.parts.decodedSymbolsBlock ?? null,
+      },
+    };
+  }
+
+  it("BYTE-IDENTICAL: the base it builds equals the recorded base", () => {
+    expect(assembleBrandCollection(bankedFromBaseline()).evidenceParts.base)
+      .toBe(bl!.parts.base);
+  });
+
+  it("BYTE-IDENTICAL: the collection string equals the recorded string minus the router's blocks", () => {
+    // What the monolith produced, with the two router-owned blocks removed —
+    // built through the SAME pinned assembly, so this is not a second
+    // implementation of the rule.
+    const expectedWithoutRouterBlocks = assembleBrandEvidence({
+      ...bl!.parts, tiktokBlock: null, instagramBlock: null,
+    });
+    expect(assembleBrandCollection(bankedFromBaseline()).evidenceSummary)
+      .toBe(expectedWithoutRouterBlocks);
+  });
+
+  it("the symbols block still precedes the mention block", () => {
+    const s = assembleBrandCollection(bankedFromBaseline()).evidenceSummary;
+    if (bl!.parts.decodedSymbolsBlock && bl!.parts.mentionEvidenceBlock) {
+      expect(s.indexOf(bl!.parts.decodedSymbolsBlock))
+        .toBeLessThan(s.indexOf(bl!.parts.mentionEvidenceBlock));
+    }
+    expect(s).toContain(bl!.parts.decodedSymbolsBlock!);
+  });
+
+  it("a derive phase that produced nothing yields the string without symbols", () => {
+    const banked = bankedFromBaseline();
+    const out = assembleBrandCollection({ ...banked, derive: null });
+    expect(out.evidenceSummary).not.toContain(bl!.parts.decodedSymbolsBlock!);
+    expect(out.evidenceSummary).toContain(bl!.parts.base);
+  });
+
+  it("it never emits the router's blocks — those are step 4's business", () => {
+    const s = assembleBrandCollection(bankedFromBaseline()).evidenceSummary;
+    if (bl!.parts.tiktokBlock) expect(s).not.toContain(bl!.parts.tiktokBlock);
+    if (bl!.parts.instagramBlock) expect(s).not.toContain(bl!.parts.instagramBlock);
   });
 });
