@@ -83,6 +83,55 @@ describe("brand evidence identity — the phased assembly reproduces the monolit
   });
 });
 
+/**
+ * THE DERIVE SPLIT, ARBITRATED.
+ *
+ * `decodeBrandSymbols` used to run INSIDE `researchBrand`, so the symbols block
+ * was already present when the base summary was built. Split out, collection
+ * produces its parts WITHOUT symbols and a later derive phase supplies them —
+ * a different producer, a different moment, the same slot.
+ *
+ * These replay the recorded baseline through that new ordering and require the
+ * result to equal the recorded string byte-for-byte. If the split cannot
+ * preserve it, these fail; the harness is the arbiter, not the implementation.
+ */
+describe("the derive split preserves the recorded string exactly", () => {
+  it("collection-without-symbols, then derive-supplies-symbols, reassembles identically", () => {
+    // 1. What collection now returns: every block EXCEPT the symbols one.
+    const fromCollection = {
+      base: bl!.parts.base,
+      mentionEvidenceBlock: bl!.parts.mentionEvidenceBlock,
+      tiktokBlock: bl!.parts.tiktokBlock,
+      instagramBlock: bl!.parts.instagramBlock,
+    };
+    // 2. What the derive phase later contributes, into the same slot.
+    const afterDerive = { ...fromCollection, decodedSymbolsBlock: bl!.parts.decodedSymbolsBlock };
+
+    expect(assembleBrandEvidence(afterDerive)).toBe(bl!.expectedEvidenceSummary);
+  });
+
+  it("the symbols block still lands BEFORE mentions, tiktok and instagram", () => {
+    // The split's real hazard is not omission but REORDERING — appending the
+    // late-arriving block at the end would still contain every block and still
+    // look plausible, while handing the model a differently-ordered prompt.
+    const s = bl!.expectedEvidenceSummary;
+    const symbolsAt = s.indexOf(bl!.parts.decodedSymbolsBlock!);
+    expect(symbolsAt).toBeGreaterThan(0);
+    for (const later of [bl!.parts.tiktokBlock, bl!.parts.instagramBlock]) {
+      if (later) expect(symbolsAt).toBeLessThan(s.indexOf(later));
+    }
+  });
+
+  it("a derive phase that produces NOTHING degrades to the no-symbols string", () => {
+    // deriveBrandSymbols is non-fatal by design: a failed decoder must yield a
+    // brand analysis without symbols, not no brand analysis.
+    const withoutSymbols = assembleBrandEvidence({ ...bl!.parts, decodedSymbolsBlock: null });
+    expect(withoutSymbols).not.toContain(bl!.parts.decodedSymbolsBlock!);
+    expect(withoutSymbols).toContain(bl!.parts.base);
+    if (bl!.parts.tiktokBlock) expect(withoutSymbols).toContain(bl!.parts.tiktokBlock);
+  });
+});
+
 describe("the assembly rule itself — order, and the absent-block asymmetry", () => {
   const parts = {
     base: "BASE",

@@ -3184,6 +3184,65 @@ function extractMetadataKeywords(websiteText: string): string[] {
   return Array.from(keywords).slice(0, 25);
 }
 
+/**
+ * BRAND SYMBOL DECODING, AS ITS OWN UNIT (S5 Part 2 — the derive split).
+ *
+ * Lifted VERBATIM out of `researchBrand`: same 80-character floor, same
+ * metadata-keyword extraction, same sentiment mapping, same non-fatal catch.
+ * Nothing about what it computes changed — only that it is now callable on its
+ * own, which is what lets a derive PHASE run it instead of the collection step.
+ *
+ * Non-fatal by design, and that is load-bearing: a brand whose decoder fails
+ * still produces evidence, just without the symbols block. Making this throw
+ * would turn a degraded brand analysis into no brand analysis.
+ */
+export async function deriveBrandSymbols(input: {
+  brandName: string;
+  websiteText: string;
+  reviewText: string;
+  audienceMentionData: AudienceMentionData | null;
+}): Promise<BrandDecodedSymbols | null> {
+  const { brandName, websiteText, reviewText, audienceMentionData } = input;
+  // Minimum viable text: need at least 80 chars combined to run the decoder meaningfully
+  const combinedTextLength = websiteText.length + reviewText.length;
+  try {
+    if (combinedTextLength >= 80) {
+      // Extract metadata keywords from website text (meta tags, Open Graph, JSON-LD)
+      const metadataKeywords = extractMetadataKeywords(websiteText);
+
+      // Mention keywords and sentiment from TikTok audience mention analysis
+      let mentionKeywords: string[] | undefined;
+      let mentionSentiment: "positive" | "mixed" | "negative" | undefined;
+
+      if (audienceMentionData) {
+        // Extract hashtags from mention data
+        mentionKeywords = audienceMentionData.mentionHashtags || [];
+        // Map sentiment signal to the expected type
+        if (audienceMentionData.sentimentSignal === "positive") {
+          mentionSentiment = "positive";
+        } else if (audienceMentionData.sentimentSignal === "negative") {
+          mentionSentiment = "negative";
+        } else {
+          mentionSentiment = "mixed";
+        }
+      }
+
+      return await decodeBrandSymbols({
+        brandName,
+        websiteText,
+        reviewText,
+        metadataKeywords,
+        mentionKeywords,
+        mentionSentiment,
+      });
+    }
+    console.warn(`[webResearch] Brand Symbol Decoder skipped — insufficient text (${combinedTextLength} chars) for ${brandName}`);
+  } catch (err) {
+    console.warn("[webResearch] Brand Symbol Decoder failed (non-fatal):", err);
+  }
+  return null;
+}
+
 export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: string): Promise<BrandResearchResult> {
   const isUrl = brandNameOrUrl.startsWith("http");
   const brandName = isUrl
@@ -3353,44 +3412,9 @@ export async function researchBrand(brandNameOrUrl: string, googleMapsUrl?: stri
   const websiteText = websiteTextParts.join("\n");
   const reviewText = reviewResult.combinedReviewText;
 
-  // Minimum viable text: need at least 80 chars combined to run the decoder meaningfully
-  const combinedTextLength = websiteText.length + reviewText.length;
-  try {
-    if (combinedTextLength >= 80) {
-      // Extract metadata keywords from website text (meta tags, Open Graph, JSON-LD)
-      const metadataKeywords = extractMetadataKeywords(websiteText);
-
-      // Mention keywords and sentiment from TikTok audience mention analysis
-      let mentionKeywords: string[] | undefined;
-      let mentionSentiment: "positive" | "mixed" | "negative" | undefined;
-
-      if (audienceMentionData) {
-        // Extract hashtags from mention data
-        mentionKeywords = audienceMentionData.mentionHashtags || [];
-        // Map sentiment signal to the expected type
-        if (audienceMentionData.sentimentSignal === "positive") {
-          mentionSentiment = "positive";
-        } else if (audienceMentionData.sentimentSignal === "negative") {
-          mentionSentiment = "negative";
-        } else {
-          mentionSentiment = "mixed";
-        }
-      }
-
-      brandDecodedSymbols = await decodeBrandSymbols({
-        brandName,
-        websiteText,
-        reviewText,
-        metadataKeywords,
-        mentionKeywords,
-        mentionSentiment,
-      });
-    } else {
-      console.warn(`[webResearch] Brand Symbol Decoder skipped — insufficient text (${combinedTextLength} chars) for ${brandName}`);
-    }
-  } catch (err) {
-    console.warn("[webResearch] Brand Symbol Decoder failed (non-fatal):", err);
-  }
+  brandDecodedSymbols = await deriveBrandSymbols({
+    brandName, websiteText, reviewText, audienceMentionData,
+  });
 
   // Inject decoded symbols block into evidence summary for AI extraction
   /**
