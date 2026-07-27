@@ -48,16 +48,58 @@ import { capturing, draftFor } from "./fixtureCapture";
  * attempt plausibly succeeds); everything else is structural until proven
  * otherwise, so a dead path parks for a human instead of looping.
  */
+/**
+ * Substrings that mean "plumbing died; a fresh attempt plausibly succeeds".
+ *
+ * ─── Why this is a table and not a condition ────────────────────────────────
+ * The old condition tested `"timeout"`. NOTHING THIS SYSTEM THROWS CONTAINS IT.
+ * All three of our own timeouts say "timed out":
+ *
+ *   _core/llm.ts          `Gemini API request timed out after 60000ms`
+ *   scraping/httpClient   `Request timed out after 15000ms for <url>`
+ *   scraping/browserClient `[browserClient] Browser launch timed out`
+ *
+ * so every one of them was classified `structural` — parked for a human, never
+ * retried. Found live twice in `llm_invocations`: once on a brand extraction and
+ * once on `creator_symbol_decoding`, so creators were already losing campaigns
+ * to it. `"timeout"` is KEPT because Playwright's own errors do use it
+ * ("Timeout 30000ms exceeded"); it was never wrong, only insufficient.
+ *
+ * The rest of the table was audited the same way — against the messages this
+ * codebase actually constructs, not against imagined ones.
+ */
+const TRANSIENT_PATTERNS: readonly string[] = [
+  // Capacity, from the LLM and from scraped hosts alike.
+  "quota", "rate limit", "too many requests", "usage exhausted",
+  // Timeouts. "timeout" catches Playwright; "timed out" catches ours.
+  "timeout", "timed out",
+  // Socket-level faults. ECONNRESET and "socket hang up" were already here;
+  // ETIMEDOUT is NOT a superstring of "timeout" (e-t-i-m-e-d-o-u-t) and was
+  // slipping through, and EAI_AGAIN is a temporary DNS failure by definition.
+  "econnreset", "socket hang up", "etimedout", "eai_again",
+  "econnaborted", "enetunreach", "epipe",
+];
+
+/**
+ * Upstream statuses that are the server telling us to come back later.
+ *
+ * Matches the `HTTP <status> <statusText> for <url>` shape httpClient throws.
+ * 429 is already covered by "too many requests" via its status text, but only
+ * when the host sends a conventional one — the code is the reliable signal.
+ */
+const TRANSIENT_HTTP_STATUS = /\bhttp (429|5\d\d)\b/;
+
 export function classifyPhaseError(err: unknown): PhaseFailureClass {
   if (isBrowserDeadError(err)) return "transient";
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  if (
-    msg.includes("quota") || msg.includes("rate limit") ||
-    msg.includes("too many requests") || msg.includes("usage exhausted") ||
-    msg.includes("timeout") || msg.includes("econnreset") || msg.includes("socket hang up")
-  ) {
-    return "transient";
-  }
+  if (TRANSIENT_PATTERNS.some(p => msg.includes(p))) return "transient";
+  if (TRANSIENT_HTTP_STATUS.test(msg)) return "transient";
+  /**
+   * Everything else is structural — including 401/403 credential failures,
+   * which is DELIBERATE and unchanged. A dead or rotated API key does not heal
+   * on a 30-second backoff; parking it for a human is the correct outcome, and
+   * it is what the live 401 incident (six invocations, one day) needed.
+   */
   return "structural";
 }
 

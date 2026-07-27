@@ -1,4 +1,41 @@
-# Brand pipeline — open questions for Jason
+# Brand pipeline — open questions and logged findings
+
+## Logged, not fixed — observability and identity (from the live acceptance run)
+
+These were found running Glossier through the queue end to end
+(`8ccc74a0-a3f6-47d2-9368-b477abcc9372`, 2026-07-27). They are recorded here so
+they are not rediscovered; none is scheduled.
+
+### F4 — the brand website crawl records no `scrape_event`
+
+`researchBrand` called `insertScrapeEvent({scrapeMethod: "website_crawl", …})`
+around its crawl. `makeBrandCapturePhase` calls `crawlBrandWebsite` directly and
+does not. In the live run the crawl fetched **5 pages / 2411 words** and produced
+**zero** scrape events, so capture-health and the run diagnostics panel lose the
+single most important brand source entirely. Every other source was recorded
+(TikTok profile + videos, mention searches, Instagram, Google Maps, Yelp).
+
+### F5 — Yelp logs under `scrape_method: website_crawl` (pre-existing)
+
+`reviewResearch`'s Yelp fetch records itself as `website_crawl`. In the live run
+the only `website_crawl` row pointed at
+`https://www.yelp.com/search?find_desc=…` with HTTP 403 — so the one event that
+looks like the brand's own crawl is in fact the Yelp attempt. F4 and F5 compound:
+the method is simultaneously missing its real user and occupied by another.
+
+### F6 — two Glossier brand subjects
+
+The inline `brand.analyze` endpoint created subject `bf39c035` (`glossier.com`);
+the queued path created `db6770ae` (`Glossier`). Both are brand subjects for the
+same brand. `upsertSubject` dedupes on `(lower(primaryHandle), primaryPlatform,
+subjectType)` and brand subjects carry a null `primary_handle`, so brands are
+deduped by nothing at all. This resolves itself when the router consolidation
+removes the second entry point, but until then every re-run through the other
+path forks a new subject.
+
+---
+
+# Open questions for Jason
 
 Interpretation calls found while moving brand onto the phased spine (S5). Each is
 **pinned in the harness as current behaviour and deliberately not fixed**: the

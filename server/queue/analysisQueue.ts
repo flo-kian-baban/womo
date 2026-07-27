@@ -137,11 +137,36 @@ export async function submitCampaigns(requests: SubmitRequest[]): Promise<Submit
 }
 
 /**
- * Clear a campaign's backoff gates so the next drain picks it up immediately.
+ * Clear a campaign's gates so the next drain picks it up immediately.
  *
  * The queue already resumes parked campaigns when `next_earliest_at` passes;
  * this is the analyst's "don't make me wait" nudge, not a second scheduling
  * mechanism. Durable — an ignored requeue would look like the queue is stuck.
+ *
+ * ─── It used to BE the ignored requeue it warns about ───────────────────────
+ * This preserved `failure_class`, and BOTH reads that offer work to the worker
+ * exclude `structural`:
+ *
+ *   scanReadyWork            `failure_class NOT IN ('structural','genuine_empty')`
+ *   findIncompleteCampaigns  `terminated = … some(failureClass === 'structural')`
+ *
+ * So a requeue wrote `pending` and the campaign was still invisible — for
+ * exactly the parked-by-a-structural-failure campaigns this function exists to
+ * rescue. Observed live: six consecutive drains returned `drained=0` on a
+ * campaign whose every collection phase was complete.
+ *
+ * ─── Why CLEARING the class is the fix, rather than teaching the scan ───────
+ * Those two exclusions are correct and load-bearing: without them a permanently
+ * failed phase reads as ready on every tick and the queue retries it forever.
+ * That rule is about AUTOMATIC re-offering. A manual requeue is a human saying
+ * "I have addressed the cause" — which is precisely the claim that the row is no
+ * longer known-structural, so clearing the class states it in the field the
+ * scan already reads. The alternative, an explicit `requeued_at` override
+ * column, needs DDL and a second concept of readiness to keep in sync.
+ *
+ * `attemptCount` is PRESERVED. The scheduler's ladder restarts at 1 inside each
+ * execution, so a banked count never blocks a retry; it is history, and a
+ * requeue should not erase how much a campaign has already cost.
  */
 export async function requeueCampaignNow(runId: string): Promise<void> {
   const rows = await getPhaseState(runId);
@@ -154,7 +179,9 @@ export async function requeueCampaignNow(runId: string): Promise<void> {
       tool: r.tool ?? undefined,
       status: "pending",
       attemptCount: r.attemptCount,
-      failureClass: (r.failureClass ?? undefined) as never,
+      // Cleared, not carried — see above. `recordPhaseState` writes
+      // `failureClass ?? null`, so omitting it nulls the column.
+      failureClass: undefined,
       nextEarliestAt: null,
       output: r.output,
     });
