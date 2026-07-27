@@ -505,10 +505,23 @@ const instagramCapture: CaptureTool = {
         bio: profile.biography,
         followerCount: profile.follower_count,
         followingCount: profile.following_count,
+        /**
+         * The channel total. All four corpus-rebuild Instagram runs banked 0
+         * here — natgeo among them, at ~30k real posts — because the XHR
+         * listener kept the FIRST user node it saw, and the first is a light
+         * node with no count (fixed: nodes now merge, and web_profile_info's
+         * node back-fills it). When every node still lacks a count, 0 remains
+         * — and `videoCountUnavailableReason` says so, rather than letting a
+         * scraping gap read as a fact about the channel.
+         */
         videoCount: profile.media_count,
         // Instagram has no lifetime like total; the monolith summed post likes.
         totalLikes: posts.reduce((sum, p) => sum + (p.like_count ?? 0), 0),
         location: "",
+        ...(profile.media_count > 0 ? {} : {
+          videoCountUnavailableReason:
+            "no GraphQL profile node carried a posts count (media_count / edge_owner_to_timeline_media absent from every response)",
+        }),
       },
       profileTitles: profileTitles.slice(0, 25),
       profileViewCounts,

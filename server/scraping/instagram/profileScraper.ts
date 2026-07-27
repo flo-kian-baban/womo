@@ -48,11 +48,21 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
         const body = await response.json().catch(() => null);
         if (!body) return;
 
-        // Try to extract user data from GraphQL responses
+        // Try to extract user data from GraphQL responses.
+        //
+        // MERGED, not first-match-wins. Instagram's GraphQL responses carry
+        // user nodes with DIFFERENT subsets of fields — the first to arrive is
+        // typically a light node with followers and bio but NO posts count, so
+        // first-wins banked media_count 0 for every creator (natgeo, ~30k
+        // posts, banked "videoCount": 0 into its evidence — corpus-rebuild
+        // item 4). Later nodes that do carry the count now fill the gaps;
+        // fields already seen keep their first value.
         const userData = findUserData(body, handle);
-        if (userData && !capturedUserData) {
-          capturedUserData = userData;
-          console.log(`[instagramScraper] @${handle}: XHR captured user profile data`);
+        if (userData) {
+          const before = capturedUserData;
+          capturedUserData = mergeUserNodes(capturedUserData, userData);
+          if (!before) console.log(`[instagramScraper] @${handle}: XHR captured user profile data`);
+          else if (capturedUserData !== before) console.log(`[instagramScraper] @${handle}: XHR merged additional profile fields from a later response`);
         }
 
         // Try to extract media edges (posts)
@@ -158,11 +168,16 @@ async function scrapeViaPlaywright(handle: string): Promise<InstagramScrapedProf
             capturedMediaEdges.push(...edges);
             console.log(`[instagramScraper] @${handle}: web_profile_info API got ${edges.length} media edges`);
           }
-          if (!capturedUserData) {
+          {
+            // Same merge as the XHR listener: web_profile_info's user node is
+            // the one that reliably carries edge_owner_to_timeline_media.count,
+            // so it back-fills the posts count even when a light node arrived
+            // first.
             const userData = findUserData(wpiBody, handle);
             if (userData) {
-              capturedUserData = userData;
-              console.log(`[instagramScraper] @${handle}: web_profile_info API also yielded user profile data`);
+              const before = capturedUserData;
+              capturedUserData = mergeUserNodes(capturedUserData, userData);
+              if (!before) console.log(`[instagramScraper] @${handle}: web_profile_info API also yielded user profile data`);
             }
           }
         } else {
@@ -1043,6 +1058,33 @@ async function parseFromMetaTags(page: import("playwright").Page, handle: string
 }
 
 // ─── GraphQL User Extraction ─────────────────────────────────────────────────
+
+/**
+ * Merge two GraphQL user nodes: first-seen wins per field, later nodes fill
+ * only what is MISSING. Exported for tests.
+ *
+ * Deliberately shallow and additive — a later node can never overwrite a value
+ * already captured (the first response is closest to the profile navigation),
+ * it can only supply fields the first one lacked, which is exactly the
+ * media_count/edge_owner_to_timeline_media case that left every Instagram
+ * creator's posts count unknown.
+ */
+export function mergeUserNodes(
+  base: Record<string, unknown> | null,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!base) return incoming;
+  let changed = false;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(incoming)) {
+    if (merged[k] === undefined || merged[k] === null) {
+      merged[k] = v;
+      changed = true;
+    }
+  }
+  // Referential stability when nothing was added, so callers can log honestly.
+  return changed ? merged : base;
+}
 
 function extractProfileFromGraphqlUser(user: Record<string, unknown>, handle: string): InstagramProfileData {
   const profile = emptyProfile();

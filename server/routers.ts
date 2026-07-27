@@ -144,6 +144,11 @@ export function researchDataFromResult(research: CreatorResearchResult): Record<
     // I1: thread followingCount from scraper data.
     followingCount: research.followingCount || undefined,
     totalLikes: research.totalLikes || undefined,
+    // `||` (not `??`) is load-bearing: an Instagram capture that never saw a
+    // posts count banks 0 with `videoCountUnavailableReason` beside it in the
+    // capture output — 0 means UNKNOWN there, never "zero posts" (a genuinely
+    // empty channel is refused by the gate before persistence). Dropping it to
+    // undefined persists NULL, which is the honest DB value for unknown.
     videoCount: research.videoCount || undefined,
     totalViews: research.totalViews || undefined,
     avgViews: research.avgViews || undefined,
