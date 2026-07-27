@@ -142,3 +142,71 @@ describe("deriveCampaignState — the queue view IS the ledger", () => {
     ])).toBe("complete");
   });
 });
+
+/**
+ * BRAND ADMISSION — the same rule, applied to the second subject kind (S5).
+ *
+ * Brand now has a queue entry point and a campaign runner. What this block
+ * enforces is the part that matters architecturally: the RUNNER is reachable
+ * only from the queue, exactly as the creator runner is.
+ *
+ * ─── The honest part ────────────────────────────────────────────────────────
+ * `brand.analyze` and `brand.reanalyze` still call researchBrand and
+ * persistBrandToV2 inline. They are the pre-queue endpoints and removing them is
+ * the router consolidation — a separate, deliberate step. Until then brand has
+ * two ways in, and that is recorded here as a COUNT rather than described in a
+ * comment: a third one cannot appear without failing this file, and the count
+ * drops to zero the day the consolidation lands.
+ */
+const brandRouterSrc = routersSrc.slice(routersSrc.indexOf("brand: router({"));
+
+describe("brand admission — the runner is queue-only", () => {
+  it("routers.ts never calls runBrandCampaign directly", () => {
+    // brandCampaignDeps is DEFINED there (that is the injection point), but the
+    // runner must only ever be invoked by the queue worker.
+    expect(routersSrc.match(/\brunBrandCampaign\s*\(/g) ?? []).toHaveLength(0);
+  });
+
+  it("runBrandCampaign is invoked from exactly one place — the queue worker", () => {
+    const queueSrc = readFileSync(
+      path.join(import.meta.dirname, "queue", "analysisQueue.ts"), "utf8",
+    );
+    expect(queueSrc.match(/\brunBrandCampaign\s*\(/g) ?? []).toHaveLength(1);
+  });
+
+  it("brand.submit enqueues rather than running anything", () => {
+    const submit = brandRouterSrc.slice(
+      brandRouterSrc.indexOf("submit: publicProcedure"),
+      brandRouterSrc.indexOf("analyze: publicProcedure"),
+    );
+    expect(submit).toContain("submitCampaigns(");
+    expect(submit).not.toMatch(/researchBrand\s*\(/);
+    expect(submit).not.toMatch(/persistBrandToV2\s*\(/);
+  });
+
+  it("the subject's locators travel as EXTRAS, not as a flattened handle", () => {
+    const submit = brandRouterSrc.slice(
+      brandRouterSrc.indexOf("submit: publicProcedure"),
+      brandRouterSrc.indexOf("analyze: publicProcedure"),
+    );
+    expect(submit).toContain("extras:");
+    for (const locator of ["googleMapsUrl", "tiktokChannelUrl", "instagramHandle"]) {
+      expect(submit, `${locator} not threaded through the subject descriptor`).toContain(locator);
+    }
+  });
+
+  /**
+   * THE KNOWN BYPASSES, COUNTED. Not an endorsement — a tripwire. These two are
+   * the deferred router consolidation; a THIRD inline brand entry point is a
+   * regression and fails here.
+   */
+  it("exactly TWO inline brand endpoints remain — analyze and reanalyze", () => {
+    const inlineResearch = brandRouterSrc.match(/\bresearchBrand\s*\(/g) ?? [];
+    const inlinePersist = brandRouterSrc.match(/\bpersistBrandToV2\s*\(/g) ?? [];
+    expect(inlineResearch, "a new inline brand path appeared").toHaveLength(2);
+    expect(inlinePersist, "a new inline brand persist appeared").toHaveLength(2);
+    // And they are the two we know about.
+    expect(brandRouterSrc).toMatch(/^\s*analyze: publicProcedure/m);
+    expect(brandRouterSrc).toMatch(/^\s*reanalyze: publicProcedure/m);
+  });
+});

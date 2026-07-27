@@ -50,8 +50,28 @@ import { newRunId, withAnalysisRun } from "../_core/runContext";
 import { encodeSubject, decodeSubject } from "../_core/subjectIdentity";
 import { startRunMemoryTracker } from "../scraping/memoryTelemetry";
 import { runCreatorCampaign, type CreatorCampaignDeps, type CampaignOutcome } from "../phases/creatorCampaign";
+import { runBrandCampaign, type BrandCampaignDeps } from "../phases/brandCampaign";
 import type { CampaignState, PhaseName, PhaseStateEntry } from "../_core/analysisPhase";
-import { PHASE_NAMES } from "../_core/analysisPhase";
+import { PHASE_NAMES, isPseudoPlatform } from "../_core/analysisPhase";
+
+/**
+ * Both subject kinds' dependencies, resolved once at boot.
+ *
+ * A single object rather than two workers: the drain, the reclaim, the
+ * heartbeat, the in-flight set and the terminal telemetry are identical for
+ * every subject, and a second worker would be a second copy of all of it — the
+ * exact drift the single-entry-point rule exists to prevent.
+ */
+export interface QueueDeps {
+  creator: CreatorCampaignDeps;
+  brand: BrandCampaignDeps;
+}
+
+/** The creator fields the terminal telemetry reads; brand has neither. */
+interface CreatorResearchLike {
+  transcriptCount?: number;
+  recentVideoTitles?: string[];
+}
 
 // ─── Submission ──────────────────────────────────────────────────────────────
 
@@ -67,11 +87,20 @@ export interface SubmitRequest {
 }
 
 /**
- * Platforms the queue can actually run. NOT the full PlatformName union: a
- * platform is queueable only once it has a registered toolset, and toolsetFor
- * throws loudly for the rest rather than producing an empty analysis.
+ * What the queue can actually run. NOT the full PlatformName union: a platform
+ * is queueable only once it has a registered toolset, and toolsetFor throws
+ * loudly for the rest rather than producing an empty analysis.
+ *
+ * `"Brand"` is the odd one and deliberately so — it is not a platform, it is a
+ * different KIND of subject occupying the platform slot. The value is
+ * BRAND_PSEUDO_PLATFORM's; it is written literally here only because a `typeof`
+ * on that constant widens to PlatformName and would defeat the narrowing this
+ * union exists for. Brand resolves NO toolset: it brings its own phases and its
+ * own gate, which is why it can be queueable without being registered.
+ *
+ * Read docs/BRAND_PSEUDO_PLATFORM.md before adding a second one.
  */
-export type QueueablePlatform = "TikTok" | "Instagram";
+export type QueueablePlatform = "TikTok" | "Instagram" | "Brand";
 
 export interface SubmittedCampaign {
   runId: string;
@@ -304,7 +333,7 @@ export async function listCampaigns(
 
 // ─── Worker ──────────────────────────────────────────────────────────────────
 
-let _deps: CreatorCampaignDeps | null = null;
+let _deps: QueueDeps | null = null;
 let _timer: ReturnType<typeof setInterval> | null = null;
 let _draining = false;
 const _inFlight = new Set<string>();
@@ -383,15 +412,28 @@ async function recordTerminalFailure(
  * Run one campaign to completion, beating its heartbeat so a live phase is never
  * mistaken for an abandoned one.
  */
-async function processCampaign(runId: string, subjectHint: string, deps: CreatorCampaignDeps): Promise<CampaignOutcome | null> {
+async function processCampaign(
+  runId: string,
+  subjectHint: string,
+  deps: QueueDeps,
+): Promise<CampaignOutcome<unknown> | null> {
   const { handle, platform, extras } = decodeSubject(subjectHint);
-  // The boot loop resumes from the ledger, which outlives any single release —
-  // so it can meet a campaign for a platform that WAS supported when the row was
-  // written and is not any more (YouTube). Skipping here is what keeps a
-  // disabled platform from being resurrected by resumption.
-  if (platform !== "TikTok" && platform !== "Instagram") {
-    console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
-    return null;
+  /**
+   * Brand is a different KIND of subject, not another platform: it resolves no
+   * toolset, brings its own five phases and supplies its own gate. So it is
+   * admitted here rather than through the registry check below, which exists for
+   * a different question entirely.
+   */
+  const isBrand = isPseudoPlatform(platform);
+  if (!isBrand) {
+    // The boot loop resumes from the ledger, which outlives any single release —
+    // so it can meet a campaign for a platform that WAS supported when the row was
+    // written and is not any more (YouTube). Skipping here is what keeps a
+    // disabled platform from being resurrected by resumption.
+    if (platform !== "TikTok" && platform !== "Instagram") {
+      console.warn(`[queue] ${runId}: platform ${platform} has no registered phase toolset — skipping`);
+      return null;
+    }
   }
   _inFlight.add(runId);
 
@@ -413,25 +455,45 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
   const startedAt = new Date();
   const memTracker = startRunMemoryTracker();
 
+  const runType = isBrand ? "brand_analysis" : "creator_analysis";
+
   try {
     const banked = await loadBankedPhases(runId);
-    const outcome = await withAnalysisRun(runId, () => runCreatorCampaign(
-      { runId, handle: handle!, platform, extras, initialPhases: banked },
-      deps,
-    ));
+    /**
+     * RUN CORRELATION, for brand for the first time. `withAnalysisRun` is what
+     * puts the run id in async-local storage, and it is what every scrape event,
+     * LLM invocation and phase observation reads to stamp itself. Brand's
+     * scraping and LLM calls were previously made inside an HTTP request with no
+     * run context at all, so they wrote rows with a null run_id and could not be
+     * traced to the analysis that caused them.
+     */
+    const outcome: CampaignOutcome<unknown> = await withAnalysisRun(runId, (): Promise<CampaignOutcome<unknown>> => (isBrand
+      ? runBrandCampaign(
+          { runId, handle: handle!, extras, initialPhases: banked },
+          deps.brand,
+        )
+      : runCreatorCampaign(
+          { runId, handle: handle!, platform: platform as "TikTok" | "Instagram", extras, initialPhases: banked },
+          deps.creator,
+        )));
     if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);
 
     await recordRunOutcome(runId, outcome.status as RunOutcomeStatus, {
-      runType: "creator_analysis",
+      runType,
       startedAt,
       detail: {
         ...(outcome.message ? { message: outcome.message.slice(0, 300) } : {}),
         memory: memTracker.stop(),
       },
-      captureEvidence: {
-        transcripts: outcome.research?.transcriptCount ?? 0,
-        titles: outcome.research?.recentVideoTitles?.length ?? 0,
-      },
+      // Creator counts transcripts and titles; a brand has neither, and
+      // inventing a zero for it would read as "collected nothing" rather than
+      // "this measure does not apply".
+      ...(isBrand ? {} : {
+        captureEvidence: {
+          transcripts: (outcome.research as CreatorResearchLike | null)?.transcriptCount ?? 0,
+          titles: (outcome.research as CreatorResearchLike | null)?.recentVideoTitles?.length ?? 0,
+        },
+      }),
     }).catch(err => console.warn(`[queue] ${runId}: run telemetry write failed:`, err));
 
     return outcome;
@@ -439,7 +501,7 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
     console.error(`[queue] ${runId} (${subjectHint}) threw:`, err);
     await recordTerminalFailure(runId, subjectHint, null, err instanceof Error ? err.message : String(err), "error");
     await recordRunOutcome(runId, "error", {
-      runType: "creator_analysis",
+      runType,
       startedAt,
       detail: {
         message: (err instanceof Error ? err.message : String(err)).slice(0, 300),
@@ -461,7 +523,7 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
  * Campaigns run concurrently within the pass; their PHASES are what S3a's
  * resource bounds gate, which is the right granularity.
  */
-export async function drainOnce(deps: CreatorCampaignDeps = _deps!): Promise<number> {
+export async function drainOnce(deps: QueueDeps = _deps!): Promise<number> {
   if (_draining) return 0;
   _draining = true;
   try {
@@ -514,7 +576,7 @@ export async function drainOnce(deps: CreatorCampaignDeps = _deps!): Promise<num
  * The boot pass is not special-cased: reclaim + scan already resumes whatever
  * the last process left behind, because the ledger is the only state there is.
  */
-export function startQueueWorker(deps: CreatorCampaignDeps): void {
+export function startQueueWorker(deps: QueueDeps): void {
   if (_timer) return;
   _deps = deps;
 

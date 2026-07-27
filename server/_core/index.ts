@@ -79,8 +79,9 @@ async function startServer() {
     void Promise.all([
       import("../queue/analysisQueue"),
       import("../routers"),
-    ]).then(([{ startQueueWorker }, { creatorCampaignDeps }]) => {
-      startQueueWorker(creatorCampaignDeps);
+    ]).then(([{ startQueueWorker }, { creatorCampaignDeps, brandCampaignDeps }]) => {
+      // Both subject kinds, one worker. See QueueDeps.
+      startQueueWorker({ creator: creatorCampaignDeps, brand: brandCampaignDeps });
     }).catch(err => console.error("[startup] queue worker failed to start:", err));
   });
 

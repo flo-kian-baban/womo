@@ -35,6 +35,7 @@ import { researchBrand } from "./webResearch";
 import { runInstrumentedAnalysis } from "./_core/instrumentedRun";
 import { withResourceSlot } from "./_core/resourceSlots";
 import { runCreatorCampaign, type CreatorCampaignDeps } from "./phases/creatorCampaign";
+import type { BrandCampaignDeps } from "./phases/brandCampaign";
 import { submitCampaigns, getCampaignStatus, listCampaigns, requeueCampaignNow } from "./queue/analysisQueue";
 import type { CreatorResearchResult } from "./webResearch";
 import type { PhaseStateWrite } from "./db";
@@ -208,6 +209,79 @@ export const creatorCampaignDeps: CreatorCampaignDeps = {
       attemptCount: entry.attempt,
     });
   },
+};
+
+/**
+ * Brand extraction WITH the one-retry policy the endpoint has always applied.
+ *
+ * VERBATIM from `brand.analyze`: retry ONLY on a JSON/parse failure, after 1s,
+ * once; any other error rethrows immediately, and a failed retry becomes the
+ * frozen INTERNAL_SERVER_ERROR message. A transient LLM hiccup should not kill
+ * an otherwise-good run, and a semantic failure should not be papered over by
+ * asking twice.
+ */
+async function extractBrandWithRetry(
+  brandNameOrUrl: string,
+  _platform: string,
+  evidenceSummary: string,
+): Promise<Record<string, unknown>> {
+  try {
+    return await extractBrandProfile(brandNameOrUrl, evidenceSummary) as unknown as Record<string, unknown>;
+  } catch (firstErr) {
+    const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
+      console.warn(`[brand.analyze] LLM JSON parse failed on first attempt: ${errMsg.slice(0, 500)}`);
+      console.warn(`[brand.analyze] Retrying extraction after 1s delay...`);
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        return await extractBrandProfile(brandNameOrUrl, evidenceSummary) as unknown as Record<string, unknown>;
+      } catch {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Brand extraction failed after retry — please try again",
+        });
+      }
+    }
+    throw firstErr; // Non-JSON error, rethrow immediately
+  }
+}
+
+/**
+ * Validate the LLM's brandType, then weight it. VERBATIM from `brand.analyze`.
+ *
+ * P1-2: an LLM value outside BRAND_WEIGHT_TABLE is mapped to the closest key by
+ * substring containment, or to "Retail — E-Commerce / DTC Product" — the entry
+ * whose α/β/γ sit nearest the table-wide average across all 107 rows, and the
+ * most semantically generic consumer key.
+ *
+ * MUTATES `extracted.brandType`, exactly as the endpoint does: the corrected
+ * value is what gets persisted, not just what gets weighted.
+ */
+export function validateAndWeighBrandType(extracted: Record<string, unknown>) {
+  const validBrandTypes = Object.keys(BRAND_WEIGHT_TABLE);
+  const brandType = extracted.brandType as string;
+  if (!validBrandTypes.includes(brandType)) {
+    const invalidValue = brandType;
+    const closestMatch = validBrandTypes.find(vbt =>
+      vbt.toLowerCase().includes(invalidValue?.toLowerCase() ?? "") ||
+      (invalidValue?.toLowerCase() ?? "").includes(vbt.toLowerCase())
+    );
+    const fallback = closestMatch || "Retail — E-Commerce / DTC Product";
+    console.warn(`[brandType] Invalid value "${invalidValue}" received from LLM — defaulting to "${fallback}"`);
+    extracted.brandType = fallback;
+  }
+  return getBrandWeights(extracted.brandType as string, extracted.campaignType as string | undefined);
+}
+
+/** The dependency set every brand campaign runs with. */
+export const brandCampaignDeps: BrandCampaignDeps = {
+  ...creatorCampaignDeps,
+  extract: extractBrandWithRetry,
+  // Brand records no womo_0007 snapshot — persistBrandToV2 has no parameter for
+  // one, and the endpoint never built one.
+  buildSnapshot: () => null,
+  persist: async (params) => persistBrandToV2(params as never) as unknown as Record<string, unknown>,
+  weightsFor: validateAndWeighBrandType,
 };
 
 /**
@@ -1362,6 +1436,47 @@ export const appRouter = router({
 
     // ─── Brand Routes ───────────────────────────────────────────────────────────
   brand: router({
+    /**
+     * SUBMIT — the queue entry point for brand analysis (S5).
+     *
+     * The brand mirror of `creator.submit`: durably enqueued, then run by the
+     * same worker on the same ledger with the same retry, park and resume. Poll
+     * `creator.queue.status` for progress — the queue view is subject-agnostic
+     * and reads real ledger state.
+     *
+     * ─── The locators travel as EXTRAS ──────────────────────────────────────
+     * A brand is not one handle. Its Maps URL, TikTok channel and Instagram
+     * handle are carried in the structured subject descriptor, so the campaign
+     * banks under exactly the `subject_hint` the queue enqueued it as, and phases
+     * 2, 3 and 4 receive what they need on a RESUMED run without the submitting
+     * request still being alive. Empty strings are dropped by `encodeSubject`, so
+     * a brand with no channels encodes identically to one submitted without the
+     * fields at all.
+     *
+     * NOTE — `brand.analyze` below still runs inline and is NOT this. Removing
+     * it is the router consolidation, which is deliberately a separate step; see
+     * the no-bypass check in the session report.
+     */
+    submit: publicProcedure
+      .input(z.object({
+        brandNameOrUrl: z.string().min(1),
+        tiktokChannelUrl: z.string().optional().or(z.literal("")),
+        instagramHandle: z.string().optional().or(z.literal("")),
+        googleMapsUrl: z.string().optional().or(z.literal("")),
+      }))
+      .mutation(async ({ input }) => {
+        const campaigns = await submitCampaigns([{
+          handle: input.brandNameOrUrl,
+          platform: "Brand",
+          extras: {
+            ...(input.googleMapsUrl?.trim() ? { googleMapsUrl: input.googleMapsUrl.trim() } : {}),
+            ...(input.tiktokChannelUrl?.trim() ? { tiktokChannelUrl: input.tiktokChannelUrl.trim() } : {}),
+            ...(input.instagramHandle?.trim() ? { instagramHandle: input.instagramHandle.trim() } : {}),
+          },
+        }]);
+        return { campaigns };
+      }),
+
     analyze: publicProcedure
       .input(z.object({
         brandNameOrUrl: z.string().min(1),
