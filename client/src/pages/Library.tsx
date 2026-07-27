@@ -143,7 +143,7 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="text-center min-w-[52px]">
+    <div className="text-center w-[68px]">
       <div className="text-sm font-semibold font-mono text-foreground leading-tight">{value}</div>
       <div className="text-[9px] text-muted-foreground/40 uppercase tracking-wide">{label}</div>
     </div>
@@ -275,17 +275,24 @@ function CreatorRow({ creator, onDelete, onExport }: {
               label="Eng Rate"
             />
             <Stat value={abbr(creator.totalViews)} label="Views" />
-            {creator.transcriptCount != null && (
-              <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
-                <FileText className="w-3 h-3" />
-                <span className="tabular-nums">{creator.transcriptCount}</span>
-              </div>
-            )}
+            {/* Transcripts — a fixed-width column like the Stats beside it.
+                It shrink-wrapped before, so a two-digit count pushed the icon
+                left and the whole mark wandered row to row; the number now
+                occupies a constant slot, which pins the icon and the digits
+                each to one x. Always rendered, "—" when unknown, so the column
+                does not vanish on rows that have no count. */}
+            <div
+              className="w-[52px] flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/50"
+              title="Transcripts captured"
+            >
+              <FileText className="w-3 h-3 flex-shrink-0" />
+              <span className="tabular-nums w-5 text-left">{creator.transcriptCount ?? "—"}</span>
+            </div>
           </div>
 
           {/* Actions (always-on) — ml-auto now lives here, so the actions and
               date hold the right edge that the stats used to. */}
-          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
             <Link href={`/creator/${creator.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="View Profile">
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -493,7 +500,7 @@ function BrandRow({ brand, onDelete, onExport }: {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <Link href={`/brand/${brand.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="View Profile">
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -679,11 +686,11 @@ function MatchRow({ match, onDelete }: {
           <div className="w-[100px] flex-shrink-0 flex items-center justify-end gap-1 pl-3">
             <span className="text-[10px] text-muted-foreground/30 mr-1">{relativeDate(match.createdAt)}</span>
             <Link href={`/report/${match.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-              <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex opacity-0 group-hover:opacity-100 transition-opacity" title="View Report">
+              <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="View Report">
                 <ExternalLink className="w-3.5 h-3.5" />
               </span>
             </Link>
-            <button className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 transition-opacity"
+            <button className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
                 if (confirmingDelete) {
