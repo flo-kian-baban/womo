@@ -153,13 +153,14 @@ export default function AnalyzeBrand() {
         </div>
         <p className="text-sm text-muted-foreground/70 mt-2">
           Queue a brand and it runs in the background — you can close this page, and a
-          restart resumes anything still in flight.
+          restart resumes anything still in flight. Committed profiles land in the
+          Profile Library; what stays here is live work and anything needing your attention.
         </p>
       </div>
 
       <form
         onSubmit={handleSubmit(values => submit.mutate(values))}
-        className="fit-card rounded-xl p-5 space-y-4"
+        className="data-card rounded-xl p-5 space-y-4"
       >
         <div className="space-y-2">
           <Label className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
@@ -235,7 +236,7 @@ export default function AnalyzeBrand() {
         <Button
           type="submit"
           disabled={submit.isPending}
-          className="w-full gold-gradient text-background font-semibold hover:opacity-90 transition-opacity"
+          className="w-full bg-primary hover:bg-primary-hover text-primary-foreground font-semibold transition-colors"
         >
           {submit.isPending
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Queueing…</>

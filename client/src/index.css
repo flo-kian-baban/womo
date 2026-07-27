@@ -147,6 +147,21 @@ html {
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
 }
 
+/* ─── Data surface (B1) ────────────────────────────────────────────────────
+   The working surface for dense R&D lists: flat card color, hairline border,
+   NO gradient, NO hover lift, NO glow. `.fit-card` stays for the marketing-
+   adjacent pages; data rows must not shimmer when the analyst mouses across
+   twenty of them. Motion on data surfaces uses the expo-out token below and
+   moves only what changed. */
+.data-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
+:root {
+  --ease-expo-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* ─── Brand Gradient (replaces gold) ──────────────────────────────────────── */
 .gold-gradient {
   background: linear-gradient(135deg, #6366F1 0%, #38BDF8 100%);

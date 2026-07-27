@@ -112,6 +112,43 @@ export const GROUP_OF: Record<DisplayState, DisplayGroup> = {
 };
 
 /**
+ * ─── B1: the queue sheds finished work ──────────────────────────────────────
+ * The Analyze pages were doing two jobs — submission and archive — with 44
+ * finished campaigns under the input box. The queue is now a live-work surface;
+ * the Profile Library is the destination.
+ *
+ * LEAVES the page immediately: `complete` only. A clean commit's profile is in
+ * the library; the queue owes the analyst nothing further about it.
+ *
+ * STAYS until acknowledged — everything that needs a person to at least see it:
+ *   refused_empty / refused_min_data  no library entry exists; leaving the page
+ *                                     would erase the only record the analyst
+ *                                     ever sees
+ *   failed / parked_for_human         same, plus these may warrant a requeue
+ *   partial_persistence               a library entry EXISTS but data was lost
+ *                                     on the way in — per the B1 order, stays
+ *   committed_with_gaps               a library entry exists, but the library
+ *                                     ROW cannot show the gap today (the row
+ *                                     ships nothing from the ledger, and a
+ *                                     client-side join against queueStatus
+ *                                     would silently miss campaigns older than
+ *                                     its window — an old gapped profile would
+ *                                     render indistinguishable from clean). Per
+ *                                     ruling: stays until B2 ships a gap marker
+ *                                     on the library row.
+ *
+ * Acknowledged rows leave too — see lib/acknowledgements, which is explicit
+ * that the list is per-machine, per-analyst, and touches nothing in the ledger.
+ */
+export const LEAVES_ON_SIGHT: ReadonlySet<DisplayState> = new Set<DisplayState>(["complete"]);
+
+export function staysUntilAcknowledged(state: DisplayState): boolean {
+  return GROUP_OF[state] === "attention"
+    || state === "refused_empty" || state === "refused_min_data"
+    || state === "partial_persistence" || state === "committed_with_gaps";
+}
+
+/**
  * A phase's contribution to the campaign's honesty, as one of five marks.
  *
  * `reduced` is the fix for the audit's finding at PHASE level. A `partial` with
@@ -369,4 +406,21 @@ export function untilLabel(at: Date | string | null, now: number = Date.now()): 
  *      but only `parkReason`/`blockedGap` are lifted out of `output`. A phase
  *      deliberately not attempted is therefore indistinguishable from one that
  *      half-succeeded; both render as `reduced`.
+ *
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ B2 WORK LIST — recorded here because B2 starts in this file.              ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ *   B2-1  FIRST ITEM (accepted as a known gap when B1 shipped): a committed
+ *         run's phase-level account — spine, retries, park history,
+ *         retryHistory — is unreachable from every surface, because B1 sheds
+ *         committed campaigns from the queue and no /campaign/:runId route
+ *         exists. The DATA IS ALREADY SHIPPED: the library row carries `runId`
+ *         and `observationId`, both currently unused by the UI.
+ *   B2-2  The library ROW cannot show committed-with-gaps (server item: ship a
+ *         gap marker on listCreatorProfiles rows). Until then gaps stay in the
+ *         queue — see staysUntilAcknowledged.
+ *   B2-3  Server items logged from B1: `acknowledged_at` on the ledger for
+ *         cross-machine acknowledgement; listCreatorProfiles ordered by latest
+ *         observation date (subjects.createdAt today, so re-analyses never
+ *         resurface) + ship `observedAt`; the library's silent `limit 50`.
  */

@@ -278,12 +278,12 @@ export default function AnalyzeCreator() {
         </div>
         <p className="text-sm text-muted-foreground/70 mt-2">
           Queue creators and they run in the background — you can close this page, and a
-          restart resumes anything still in flight. Add as many as you like and queue them
-          together; each one is its own campaign in the list below.
+          restart resumes anything still in flight. Committed profiles land in the
+          Profile Library; what stays here is live work and anything needing your attention.
         </p>
       </div>
 
-      <div className="fit-card rounded-xl p-5 space-y-4">
+      <div className="data-card rounded-xl p-5 space-y-4">
         {/*
           ONE ROW: platform, field, paste. The platform picker used to be a
           separate labelled block above the field, which read as two decisions
@@ -399,7 +399,7 @@ export default function AnalyzeCreator() {
         <Button
           onClick={() => void queueAll(false)}
           disabled={!canSubmit}
-          className="w-full gold-gradient text-background font-semibold hover:opacity-90 transition-opacity"
+          className="w-full bg-primary hover:bg-primary-hover text-primary-foreground font-semibold transition-colors"
         >
           {submit.isPending
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Queueing…</>

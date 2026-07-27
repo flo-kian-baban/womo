@@ -28,16 +28,18 @@
 import { useState } from "react";
 import {
   CheckCircle2, Loader2, AlertTriangle, Clock, PauseCircle, XCircle,
-  ChevronRight, ArrowRight, CircleDashed, Ban, MinusCircle, Wrench, ShieldX,
-  CircleSlash, RotateCw,
+  ChevronRight, ArrowRight, Circle, CircleDashed, CircleDot, Ban, Wrench,
+  ShieldX, CircleSlash, RotateCw, Check,
 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { PlatformMark, platformLabel } from "@/components/PlatformMark";
+import { acknowledge } from "@/lib/acknowledgements";
 import {
   classifyCampaign, phaseMark, phaseSpineFor, agoLabel, untilLabel,
+  staysUntilAcknowledged,
   type Campaign, type CampaignView, type DisplayState, type PhaseMark, type PhaseName,
 } from "@/lib/campaignState";
 
@@ -82,22 +84,30 @@ const STATE: Record<DisplayState, {
   failed: { icon: XCircle, cls: "text-destructive", label: "Failed" },
 };
 
-/** Phase marks. Same rule: distinct shape first, colour second. */
+/**
+ * Phase pips — FILLED/EMPTY marks, not coloured ones (B1 colour discipline).
+ *
+ * A phase that went normally is a filled neutral pip; one that has not run is a
+ * hollow one. Colour appears only where a phase genuinely needs attention (gap,
+ * broken) or is the page's single live accent (working, indigo). Six green
+ * ticks per row × twenty rows was decoration pretending to be information —
+ * "done" is the expected outcome, and the expected outcome renders quiet.
+ */
 const MARK: Record<PhaseMark, { icon: typeof Clock; cls: string; spin?: boolean; word: string }> = {
-  done: { icon: CheckCircle2, cls: "text-green-400", word: "complete" },
-  /** Committed DESPITE a block. Never a smaller tick — evidence is missing. */
+  done: { icon: Circle, cls: "text-foreground/50 fill-current", word: "complete" },
+  /** Committed DESPITE a block — evidence is missing. Genuine attention. */
   gap: { icon: AlertTriangle, cls: "text-amber-400", word: "committed with a gap" },
   /**
    * Usable, but less than the phase wanted — a budget-bailed transcribe, or a
-   * brand Instagram phase with no handle supplied. NEUTRAL, never green: it
-   * used to render as a faded tick and read as "basically fine".
+   * brand Instagram phase with no handle supplied. A half-filled pip: present,
+   * visibly less than full, and not a warning.
    */
-  reduced: { icon: MinusCircle, cls: "text-muted-foreground/70", word: "partial" },
+  reduced: { icon: CircleDot, cls: "text-foreground/40", word: "partial" },
   working: { icon: Loader2, cls: "text-indigo-400", spin: true, word: "running" },
-  waiting: { icon: Clock, cls: "text-muted-foreground/50", word: "pending" },
+  waiting: { icon: Circle, cls: "text-muted-foreground/30", word: "pending" },
   refused: { icon: Ban, cls: "text-muted-foreground/80", word: "genuine empty" },
   broken: { icon: AlertTriangle, cls: "text-destructive", word: "failed" },
-  unstarted: { icon: CircleDashed, cls: "text-muted-foreground/25", word: "not started" },
+  unstarted: { icon: CircleDashed, cls: "text-muted-foreground/20", word: "not started" },
 };
 
 const HEALTH_TONE: Record<string, string> = {
@@ -123,7 +133,9 @@ function useCachedCaptureHealth(observationId: string | null) {
   return observationId ? (q.data?.captureHealth ?? null) : null;
 }
 
-export function CampaignRow({ campaign, now }: { campaign: Campaign; now: number }) {
+export function CampaignRow({
+  campaign, now, onAcknowledged,
+}: { campaign: Campaign; now: number; onAcknowledged?: () => void }) {
   const [open, setOpen] = useState(false);
   const view = classifyCampaign(campaign, now);
   const s = STATE[view.state];
@@ -200,6 +212,24 @@ export function CampaignRow({ campaign, now }: { campaign: Campaign; now: number
 
         {/* Actions live OUTSIDE the expander button — nested buttons are invalid. */}
         <RequeueAction view={view} runId={campaign.runId} />
+        {/*
+          ACKNOWLEDGE — removes the row from THIS MACHINE'S attention list and
+          nothing else. The ledger row, the refusal, the failure class are all
+          untouched and other analysts' lists are unaffected; the tooltip says
+          so because an ack that LOOKED shared would misinform whoever runs
+          their own copy against the same database.
+        */}
+        {staysUntilAcknowledged(view.state) && onAcknowledged && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { acknowledge(campaign.runId); onAcknowledged(); }}
+            title="Remove from this machine's attention list. The campaign and its ledger are untouched; other analysts' lists are unaffected."
+            className="h-7 px-2 text-[11px] text-muted-foreground/70 hover:text-foreground flex-shrink-0"
+          >
+            <Check className="w-3 h-3 mr-1" />Acknowledge
+          </Button>
+        )}
       </div>
 
       {/* The one-line why, when the ledger has one. Truncated, full text on expand. */}

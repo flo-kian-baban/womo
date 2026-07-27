@@ -1,37 +1,39 @@
 /**
- * THE QUEUE, GROUPED BY WHAT AN ANALYST HAS TO DO ABOUT IT.
+ * THE QUEUE, AS A LIVE-WORK SURFACE (B1).
  *
- * ─── The question this layout answers ───────────────────────────────────────
- * An analyst running twenty campaigns unattended comes back to one question:
- * what needs me? So the top group is exactly that and nothing else — campaigns
- * that will NOT advance without a person. Everything the queue can still finish
- * by itself is in flight, including a parked campaign, because a park resumes on
- * its own and putting it under "attention" would cry wolf on every rate-limit.
+ * ─── What this page is now ──────────────────────────────────────────────────
+ * Input, live work, attention. Nothing else. The Analyze pages were doing two
+ * jobs — submission and archive — with 44 finished campaigns stacked under the
+ * input box. Finished work's home is the Profile Library:
  *
- * The finished group is counted by KIND rather than lumped, because "18
- * finished" hides the only thing worth knowing about them: how many actually
- * produced a clean profile, how many committed with evidence missing, and how
- * many the system refused outright.
+ *   `complete` leaves the page the moment it is seen — its profile is in the
+ *   library, and the queue owes the analyst nothing further about it. A small
+ *   completion metric (with a link) is all that remains of it here.
  *
- * ─── Shared by both submit pages ────────────────────────────────────────────
- * Creator and brand watch the same ledger through the same component. They used
- * to carry a copy of this layout each, and the copies had already drifted — the
- * creator page listed BRAND campaigns because only the brand page filtered.
+ *   Attention states STAY until acknowledged: the refusals have no library
+ *   entry at all — this page is the only record the analyst ever sees — and
+ *   partial saves / gaps have an entry the library row cannot yet describe
+ *   honestly (B2-2). Acknowledgement is per-machine, per-analyst, and touches
+ *   nothing in the ledger — see lib/acknowledgements.
+ *
+ * ─── Still nothing estimated ────────────────────────────────────────────────
+ * Every mark is a ledger row or arithmetic on one. The completion metric
+ * counts campaigns whose commit the ledger recorded today; the countdown is a
+ * timestamp the scheduler durably wrote.
  */
 import { useEffect, useState } from "react";
-import { Inbox } from "lucide-react";
+import { Link } from "wouter";
+import { ArrowRight, Inbox } from "lucide-react";
 import { CampaignRow } from "@/components/CampaignRow";
+import { acknowledgedRunIds } from "@/lib/acknowledgements";
 import {
-  classifyCampaign, GROUP_OF,
-  type Campaign, type DisplayGroup, type DisplayState,
+  classifyCampaign, staysUntilAcknowledged, GROUP_OF,
+  type Campaign, type DisplayState,
 } from "@/lib/campaignState";
 
 /**
  * One clock for the whole list, ticking so a real retry gate counts down.
- *
- * This is arithmetic on `next_earliest_at` — a timestamp the scheduler durably
- * wrote — not simulated progress. Nothing advances because time passed; a
- * countdown to a real deadline just stops being stale.
+ * Arithmetic on `next_earliest_at` — never simulated progress.
  */
 function useNow(everyMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -42,19 +44,11 @@ function useNow(everyMs = 1000): number {
   return now;
 }
 
-/** The states an analyst is told about in each group's one-line summary. */
 const SUMMARY_WORD: Record<DisplayState, string> = {
   queued: "queued",
   running: "running",
   parked: "parked",
   parked_for_human: "needs a human",
-  /**
-   * "complete", not "clean". A campaign can commit with full persistence and no
-   * blocked gaps while a phase still banked `partial` — a budget-bailed
-   * transcribe is the normal case, not a defect. Calling the group "clean" would
-   * claim something about evidence depth that this count cannot know; the phase
-   * spine and the capture-health chip are where thinness is actually reported.
-   */
   complete: "complete",
   committed_with_gaps: "with gaps",
   partial_persistence: "partial save",
@@ -63,96 +57,139 @@ const SUMMARY_WORD: Record<DisplayState, string> = {
   failed: "failed",
 };
 
-const GROUP_TITLE: Record<DisplayGroup, string> = {
-  attention: "Needs attention",
-  flight: "In flight",
-  finished: "Finished",
-};
-
-const GROUP_NOTE: Record<DisplayGroup, string> = {
-  attention: "these will not advance without you",
-  flight: "the queue still owes you these",
-  finished: "settled — nothing further will happen",
-};
-
 export interface CampaignQueueProps {
   campaigns: Campaign[];
   isLoading: boolean;
-  /** What to say when there is nothing at all. Subject-specific wording. */
+  /** What to say when there is no live work at all. Subject-specific wording. */
   emptyLabel: string;
 }
 
 export function CampaignQueue({ campaigns, isLoading, emptyLabel }: CampaignQueueProps) {
   // ONE instant for every row, so twenty rows cannot disagree about the clock.
   const now = useNow();
+  // Re-read on every ack (bumping this state is the button's callback).
+  const [ackVersion, setAckVersion] = useState(0);
+  const acked = acknowledgedRunIds();
+  void ackVersion;
 
   const classified = campaigns.map(c => ({ campaign: c, view: classifyCampaign(c, now) }));
-  const groups: Record<DisplayGroup, typeof classified> = {
-    attention: classified.filter(x => GROUP_OF[x.view.state] === "attention"),
-    flight: classified.filter(x => GROUP_OF[x.view.state] === "flight"),
-    finished: classified.filter(x => GROUP_OF[x.view.state] === "finished"),
-  };
 
-  if (campaigns.length === 0) {
-    return (
-      <div className="fit-card rounded-xl p-8 text-center">
-        <Inbox className="w-5 h-5 mx-auto text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground/60 mt-2">
-          {isLoading ? "Loading the queue…" : emptyLabel}
-        </p>
-      </div>
-    );
-  }
+  /**
+   * The shed. `complete` never renders here; acknowledged attention rows leave
+   * too. Everything remaining is either live or unacknowledged attention.
+   */
+  const attention = classified.filter(
+    x => staysUntilAcknowledged(x.view.state) && !acked.has(x.campaign.runId),
+  );
+  const flight = classified.filter(x => GROUP_OF[x.view.state] === "flight");
+
+  /**
+   * The completion metric: campaigns the ledger committed TODAY (local day),
+   * shed or not. `committed` + last ledger write today — facts, not estimates.
+   */
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const committedToday = classified.filter(
+    x => x.view.committed && x.view.lastActivityAt && x.view.lastActivityAt.getTime() >= today.getTime(),
+  ).length;
+
+  const empty = attention.length === 0 && flight.length === 0;
 
   return (
     <div className="space-y-5">
-      {(["attention", "flight", "finished"] as const).map(group => {
-        const rows = groups[group];
-        if (rows.length === 0) return null;
+      {/* ─── Completion metric — all that remains of finished work here ───── */}
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[11px] text-muted-foreground/60 tabular-nums">
+          {isLoading ? "…" : `${committedToday} committed today`}
+        </span>
+        <Link
+          href="/library"
+          className="text-[11px] text-muted-foreground/60 hover:text-foreground inline-flex items-center gap-1 transition-colors"
+        >
+          Profiles live in the Library <ArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
 
-        // Counted by display state, so "18 finished" cannot hide 3 refusals.
-        const tally = new Map<DisplayState, number>();
-        for (const r of rows) tally.set(r.view.state, (tally.get(r.view.state) ?? 0) + 1);
-        const summary = Array.from(tally.entries())
-          .map(([state, n]) => `${n} ${SUMMARY_WORD[state]}`)
-          .join(" · ");
-
-        return (
-          <section key={group} className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3 flex-wrap">
-              <div className="flex items-baseline gap-2">
-                <span className={`text-xs font-semibold tracking-[0.12em] uppercase ${
-                  group === "attention" ? "text-amber-400" : "text-muted-foreground"
-                }`}>
-                  {GROUP_TITLE[group]}
-                </span>
-                <span className="text-xs text-muted-foreground/40">({rows.length})</span>
-                <span className="text-[10px] text-muted-foreground/35 hidden sm:inline">
-                  {GROUP_NOTE[group]}
-                </span>
-              </div>
-              <span className="text-[11px] text-muted-foreground/60 font-mono">{summary}</span>
-            </div>
-
-            <div className="fit-card rounded-xl divide-y divide-border/40 overflow-hidden">
-              {rows.map(({ campaign }) => (
-                <CampaignRow key={campaign.runId} campaign={campaign} now={now} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {empty ? (
+        <div className="data-card rounded-xl p-8 text-center">
+          <Inbox className="w-5 h-5 mx-auto text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground/60 mt-2">
+            {isLoading ? "Loading the queue…" : emptyLabel}
+          </p>
+        </div>
+      ) : (
+        <>
+          {attention.length > 0 && (
+            <Section
+              title="Needs attention"
+              titleCls="text-amber-400"
+              note="these will not advance without you"
+              rows={attention}
+              now={now}
+              onAcknowledged={() => setAckVersion(v => v + 1)}
+            />
+          )}
+          {flight.length > 0 && (
+            <Section
+              title="In flight"
+              titleCls="text-muted-foreground"
+              note="the queue still owes you these"
+              rows={flight}
+              now={now}
+            />
+          )}
+        </>
+      )}
     </div>
+  );
+}
+
+function Section({
+  title, titleCls, note, rows, now, onAcknowledged,
+}: {
+  title: string;
+  titleCls: string;
+  note: string;
+  rows: Array<{ campaign: Campaign; view: ReturnType<typeof classifyCampaign> }>;
+  now: number;
+  onAcknowledged?: () => void;
+}) {
+  // Counted by display state, so a mixed group cannot hide its composition.
+  const tally = new Map<DisplayState, number>();
+  for (const r of rows) tally.set(r.view.state, (tally.get(r.view.state) ?? 0) + 1);
+  const summary = Array.from(tally.entries())
+    .map(([state, n]) => `${n} ${SUMMARY_WORD[state]}`)
+    .join(" · ");
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-baseline gap-2">
+          <span className={`text-[11px] font-semibold tracking-[0.12em] uppercase ${titleCls}`}>
+            {title}
+          </span>
+          <span className="text-[11px] text-muted-foreground/40 tabular-nums">({rows.length})</span>
+          <span className="text-[10px] text-muted-foreground/35 hidden sm:inline">{note}</span>
+        </div>
+        <span className="text-[11px] text-muted-foreground/60 font-mono tabular-nums">{summary}</span>
+      </div>
+
+      <div className="data-card rounded-xl divide-y divide-border/40 overflow-hidden">
+        {rows.map(({ campaign }) => (
+          <CampaignRow
+            key={campaign.runId}
+            campaign={campaign}
+            now={now}
+            onAcknowledged={onAcknowledged}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
 /**
  * Poll cadence, matched to whether anything is actually moving.
- *
- * MEASURED: `listCampaigns(50, includeTerminal)` takes ~1.8s against the shared
- * database. Re-asking that every 3 seconds when nothing is running is pure load
- * on a database every analyst shares. Work in flight still polls at 3s, because
- * that is when the answer changes.
+ * MEASURED: the list read costs ~1.8s against the shared database — see B0.
  */
 export function pollIntervalFor(campaigns: Campaign[] | undefined): number {
   if (!campaigns || campaigns.length === 0) return 5_000;

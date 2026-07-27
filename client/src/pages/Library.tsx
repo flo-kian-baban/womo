@@ -11,51 +11,56 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { ReviewGatePanel } from "@/components/ReviewGate";
+import { PlatformMark } from "@/components/PlatformMark";
 import { Archive } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const ARCHETYPE_COLORS: Record<string, { text: string; bg: string; border: string }> = {
-  Hero:             { text: "text-red-400",    bg: "bg-red-400/10",    border: "border-red-400/30" },
-  Sage:             { text: "text-blue-400",   bg: "bg-blue-400/10",   border: "border-blue-400/30" },
-  Explorer:         { text: "text-teal-400",   bg: "bg-teal-400/10",   border: "border-teal-400/30" },
-  Outlaw:           { text: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/30" },
-  Magician:         { text: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/30" },
-  "Regular Person": { text: "text-slate-400",  bg: "bg-slate-400/10",  border: "border-slate-400/30" },
-  Everyman:         { text: "text-slate-400",  bg: "bg-slate-400/10",  border: "border-slate-400/30" },
-  Lover:            { text: "text-pink-400",   bg: "bg-pink-400/10",   border: "border-pink-400/30" },
-  Jester:           { text: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/30" },
-  Caregiver:        { text: "text-green-400",  bg: "bg-green-400/10",  border: "border-green-400/30" },
-  Ruler:            { text: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/30" },
-  Creator:          { text: "text-violet-400", bg: "bg-violet-400/10", border: "border-violet-400/30" },
-  Innocent:         { text: "text-sky-400",    bg: "bg-sky-400/10",    border: "border-sky-400/30" },
-};
+/**
+ * B1 COLOUR DISCIPLINE — categorical renders neutral, ordinal carries colour.
+ *
+ * The twelve-hue archetype map is gone: an archetype is a framework VALUE, and
+ * twelve colours for twelve words conveyed nothing but "these are different
+ * words" while spending the entire warning palette on decoration (Hero was
+ * destructive-red; Jester was caution-yellow). Meaning lives in the label. One
+ * quiet chip for every categorical value; colour is reserved for evidence
+ * quality and attention, so a healthy profile renders almost entirely neutral.
+ */
+const CHIP_NEUTRAL = { text: "text-foreground/70", bg: "bg-secondary/50", border: "border-border/60" };
 
+/** Ordinal, but quiet until warning-worthy: drift only colours when it is big. */
 const DRIFT_COLORS: Record<string, string> = {
-  "Zero Change": "text-green-400 bg-green-400/10 border-green-400/30",
-  "Minor Drift": "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
-  "Significant Drift": "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  "Zero Change": `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  "Minor Drift": `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  "Significant Drift": "text-amber-400 bg-amber-400/10 border-amber-400/30",
   "Full Pivot": "text-red-400 bg-red-400/10 border-red-400/30",
 };
 
+/** Cultural velocity is a framework reading — CATEGORICAL, so neutral. */
 const VELOCITY_COLORS: Record<string, string> = {
-  Focusing: "text-green-400 bg-green-400/10 border-green-400/30",
-  Drifting: "text-orange-400 bg-orange-400/10 border-orange-400/30",
-  "Insufficient Data": "text-muted-foreground bg-muted/30 border-border/50",
+  Focusing: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  Drifting: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  "Insufficient Data": "text-muted-foreground/60 bg-muted/30 border-border/50",
 };
 
+/** Consistency is ordinal — but consistent is the EXPECTED state, so neutral. */
 const GOFFMAN_COLORS: Record<string, string> = {
-  Consistent: "text-green-400 bg-green-400/10 border-green-400/30",
-  "Minor Gap": "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
-  "Significant Gap": "text-red-400 bg-red-400/10 border-red-400/30",
+  Consistent: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  "Minor Gap": `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  "Significant Gap": "text-amber-400 bg-amber-400/10 border-amber-400/30",
 };
 
+/**
+ * Platform chips are NEUTRAL — the glyph inside carries the identity, in the
+ * platform's own muted brand tint (approved ruling: recognition kept, tinted
+ * chip dropped).
+ */
 const PLATFORM_COLORS: Record<string, string> = {
-  tiktok: "text-cyan-400 bg-cyan-400/8 border-cyan-400/25",
-  instagram: "text-pink-400 bg-pink-400/8 border-pink-400/25",
-  youtube: "text-red-400 bg-red-400/8 border-red-400/25",
+  tiktok: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  instagram: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
+  youtube: `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`,
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -64,26 +69,13 @@ const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
 };
 
+/**
+ * One platform-glyph source of truth: PlatformMark (approved ruling — the glyph
+ * keeps its muted brand tint; the CHIP around it went neutral). This inline
+ * copy predated PlatformMark and had begun to drift from it.
+ */
 function PlatformIcon({ platform, className = "w-3.5 h-3.5" }: { platform: string; className?: string }) {
-  const p = platform?.toLowerCase();
-  if (p === "tiktok") return (
-    <svg className={`${className} text-cyan-400`} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.75a8.18 8.18 0 004.77 1.52V6.84a4.84 4.84 0 01-1-.15z" />
-    </svg>
-  );
-  if (p === "instagram") return (
-    <svg className={`${className} text-pink-400`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-      <circle cx="12" cy="12" r="5" />
-      <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  );
-  if (p === "youtube") return (
-    <svg className={`${className} text-red-400`} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.54 3.5 12 3.5 12 3.5s-7.54 0-9.38.55A3.02 3.02 0 00.5 6.19 31.6 31.6 0 000 12a31.6 31.6 0 00.5 5.81 3.02 3.02 0 002.12 2.14c1.84.55 9.38.55 9.38.55s7.54 0 9.38-.55a3.02 3.02 0 002.12-2.14A31.6 31.6 0 0024 12a31.6 31.6 0 00-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z" />
-    </svg>
-  );
-  return null;
+  return <PlatformMark platform={platform} className={className} />;
 }
 
 const ARCHETYPES = ["Hero", "Sage", "Outlaw", "Everyman", "Explorer", "Magician", "Lover", "Jester", "Caregiver", "Ruler", "Creator", "Innocent"];
@@ -121,9 +113,10 @@ function formatDate(d: string | Date): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function getArchStyle(a: string | null | undefined) {
-  if (!a) return { text: "text-muted-foreground", bg: "bg-muted/30", border: "border-border/50" };
-  return ARCHETYPE_COLORS[a] ?? { text: "text-primary", bg: "bg-primary/10", border: "border-primary/30" };
+function getArchStyle(_a: string | null | undefined) {
+  // Every archetype, known or novel, gets the same quiet chip — the label is
+  // the information.
+  return CHIP_NEUTRAL;
 }
 
 function matchesSearch(query: string, ...fields: (string | null | undefined | string[])[]): boolean {
@@ -159,8 +152,11 @@ function Stat({ value, label }: { value: string; label: string }) {
 
 function ConfidenceDot({ level }: { level: string | null | undefined }) {
   if (!level) return null;
-  const c = level === "high" ? "bg-green-400 shadow-green-400/40" : level === "medium" ? "bg-yellow-400 shadow-yellow-400/40" : "bg-red-400 shadow-red-400/40";
-  return <span className={`w-2 h-2 rounded-full ${c} shadow-sm`} title={`${level} confidence`} />;
+  // Ordinal, and disciplined: high confidence is the expected state and renders
+  // neutral; colour marks the profiles whose evidence needs a second look. No
+  // glow — glows are the marketing surface.
+  const c = level === "high" ? "bg-foreground/40" : level === "medium" ? "bg-amber-400" : "bg-red-400";
+  return <span className={`w-2 h-2 rounded-full ${c}`} title={`${level} confidence`} />;
 }
 
 function ArchBadge({ archetype }: { archetype: string | null | undefined }) {
@@ -225,10 +221,12 @@ function CreatorRow({ creator, onDelete, onExport }: {
   const isPending = creator.reviewStatus === "pending";
 
   return (
-    <div className={`fit-card rounded-xl transition-all duration-150 group ${
-      isPending
-        ? "border-l-4 border-l-amber-400 border-amber-400/40 bg-amber-400/[0.04] hover:border-amber-400/60"
-        : "hover:border-primary/20"
+    /* data-card: flat, no gradient, no hover lift — rows must not shimmer as
+       the analyst mouses across twenty of them. Pending keeps the amber stripe
+       and chip (review status is ordinal/attention) but loses the background
+       wash: section-level tinting is out, the stripe and the word carry it. */
+    <div className={`data-card rounded-xl group ${
+      isPending ? "border-l-2 border-l-amber-400" : ""
     }`}>
       <div className="px-5 py-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
 
@@ -243,7 +241,7 @@ function CreatorRow({ creator, onDelete, onExport }: {
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-medium text-foreground truncate">{creator.displayName ?? creator.handle}</span>
               {isPending && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-400/60 bg-amber-400/15 text-amber-300 text-[9px] font-bold uppercase tracking-wider flex-shrink-0">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-400/40 text-amber-400 text-[9px] font-semibold uppercase tracking-wider flex-shrink-0">
                   <Clock className="w-2.5 h-2.5" />
                   Pending Review
                 </span>
@@ -296,7 +294,7 @@ function CreatorRow({ creator, onDelete, onExport }: {
               </span>
             </Link>
             <Link href="/fit-score" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-              <span className="p-1.5 rounded-md hover:bg-cyan-400/10 text-muted-foreground/40 hover:text-cyan-400 transition-colors inline-flex" title="Run Match">
+              <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="Run Match">
                 <Zap className="w-3.5 h-3.5" />
               </span>
             </Link>
@@ -346,14 +344,17 @@ function CreatorRow({ creator, onDelete, onExport }: {
                 {creator.driftSignal}
               </Badge>
             )}
+            {/* Rogers, Turner, lifecycle: framework values — the label is the
+                information, the chip is the same quiet chip. Turner losing its
+                amber matters doubly: it was competing with genuine warnings. */}
             {creator.rogersAdopterStage && (
-              <Badge className="text-cyan-400 bg-cyan-400/8 border-cyan-400/25">{creator.rogersAdopterStage}</Badge>
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>{creator.rogersAdopterStage}</Badge>
             )}
             {creator.turnerLiminalPhase && (
-              <Badge className="text-amber-400 bg-amber-400/8 border-amber-400/25">{creator.turnerLiminalPhase}</Badge>
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>{creator.turnerLiminalPhase}</Badge>
             )}
             {creator.lifecyclePhase && (
-              <Badge className="text-violet-400 bg-violet-400/8 border-violet-400/25">{creator.lifecyclePhase}</Badge>
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>{creator.lifecyclePhase}</Badge>
             )}
             {creator.culturalVelocity && (
               <Badge className={VELOCITY_COLORS[creator.culturalVelocity] ?? "text-muted-foreground bg-muted/30 border-border/50"}>
@@ -361,11 +362,7 @@ function CreatorRow({ creator, onDelete, onExport }: {
               </Badge>
             )}
             {(creator.undergroundDensity || creator.mainstreamBleed) && (
-              <Badge className={
-                creator.undergroundDensity && !creator.mainstreamBleed ? "text-purple-400 bg-purple-400/8 border-purple-400/25"
-                : !creator.undergroundDensity && creator.mainstreamBleed ? "text-sky-400 bg-sky-400/8 border-sky-400/25"
-                : "text-muted-foreground bg-muted/30 border-border/50"
-              }>
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>
                 {creator.undergroundDensity && !creator.mainstreamBleed ? "Underground" : !creator.undergroundDensity && creator.mainstreamBleed ? "Mainstream" : "Underground + Mainstream"}
               </Badge>
             )}
@@ -385,9 +382,9 @@ function CreatorRow({ creator, onDelete, onExport }: {
 function ArchivedRunRow({ run }: { run: Record<string, any> }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="fit-card rounded-xl border-red-400/25 bg-red-400/[0.03]">
+    <div className="data-card rounded-xl border-l-2 border-l-red-400/50">
       <div className="px-5 py-3.5 cursor-pointer flex items-center gap-4" onClick={() => setExpanded(!expanded)}>
-        <Archive className="w-3.5 h-3.5 text-red-300/70 flex-shrink-0" />
+        <Archive className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
         <div className="min-w-0 w-[220px] flex-shrink-0">
           <span className="text-[13px] font-medium text-foreground/80 truncate block">{run.displayName ?? run.handle ?? "—"}</span>
           <div className="flex items-center gap-1.5 mt-0.5">
@@ -395,7 +392,7 @@ function ArchivedRunRow({ run }: { run: Record<string, any> }) {
             <span className="text-[11px] text-muted-foreground/50">@{run.handle ?? "?"}</span>
           </div>
         </div>
-        <span className="inline-flex items-center px-2 py-0.5 rounded border border-red-400/40 bg-red-400/10 text-red-300 text-[9px] font-bold uppercase tracking-wider flex-shrink-0">
+        <span className="inline-flex items-center px-2 py-0.5 rounded border border-red-400/40 text-red-400 text-[9px] font-semibold uppercase tracking-wider flex-shrink-0">
           Declined
         </span>
         <div className="text-[11px] text-muted-foreground/60 ml-auto flex items-center gap-4 flex-shrink-0">
@@ -432,7 +429,7 @@ function BrandRow({ brand, onDelete, onExport }: {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <div className="fit-card rounded-xl hover:border-primary/20 transition-all duration-150 group">
+    <div className="data-card rounded-xl group">
       <div className="px-5 py-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
 
         {/* ──── TIER 1: Identity + Metrics ──────────────────────────────────── */}
@@ -448,7 +445,7 @@ function BrandRow({ brand, onDelete, onExport }: {
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {brand.brandType && <Badge className="text-muted-foreground bg-muted/30 border-border/40 text-[9px] py-0">{brand.brandType}</Badge>}
-              {brand.campaignType && <Badge className="text-purple-400/70 bg-purple-400/8 border-purple-400/20 text-[9px] py-0">{brand.campaignType}</Badge>}
+              {brand.campaignType && <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border} text-[9px] py-0`}>{brand.campaignType}</Badge>}
             </div>
             {brand.brandUrl && (
               <div className="flex items-center gap-1 mt-0.5">
@@ -477,8 +474,8 @@ function BrandRow({ brand, onDelete, onExport }: {
             {/* Rating */}
             {brand.overallRating != null && (
               <div className="flex items-center gap-1">
-                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                <span className="text-sm font-semibold font-mono text-amber-400">{Number(brand.overallRating).toFixed(1)}</span>
+                <Star className="w-3.5 h-3.5 text-muted-foreground/50 fill-muted-foreground/30" />
+                <span className="text-sm font-semibold font-mono tabular-nums text-foreground/80">{Number(brand.overallRating).toFixed(1)}</span>
                 {brand.totalReviews != null && <span className="text-[9px] text-muted-foreground/40">({brand.totalReviews})</span>}
               </div>
             )}
@@ -486,8 +483,8 @@ function BrandRow({ brand, onDelete, onExport }: {
             {/* Sentiment */}
             {brand.mentionSentiment && brand.mentionSentiment !== "insufficient_data" && (
               <Badge className={
-                brand.mentionSentiment === "positive" ? "text-green-400 bg-green-400/10 border-green-400/30" :
-                brand.mentionSentiment === "mixed" ? "text-yellow-400 bg-yellow-400/10 border-yellow-400/30" :
+                brand.mentionSentiment === "positive" ? `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}` :
+                brand.mentionSentiment === "mixed" ? "text-amber-400 bg-amber-400/10 border-amber-400/30" :
                 "text-red-400 bg-red-400/10 border-red-400/30"
               }>
                 {brand.mentionTotalCount ? `${brand.mentionTotalCount} ` : ""}{brand.mentionSentiment}
@@ -503,7 +500,7 @@ function BrandRow({ brand, onDelete, onExport }: {
 
             {/* Weight priority */}
             {brand.weightPriority && (
-              <Badge className="text-primary/70 bg-primary/8 border-primary/25 text-[9px]">{brand.weightPriority}</Badge>
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border} text-[9px]`}>{brand.weightPriority}</Badge>
             )}
           </div>
 
@@ -515,7 +512,7 @@ function BrandRow({ brand, onDelete, onExport }: {
               </span>
             </Link>
             <Link href="/fit-score" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-              <span className="p-1.5 rounded-md hover:bg-cyan-400/10 text-muted-foreground/40 hover:text-cyan-400 transition-colors inline-flex" title="Run Match">
+              <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="Run Match">
                 <Zap className="w-3.5 h-3.5" />
               </span>
             </Link>
@@ -545,7 +542,7 @@ function BrandRow({ brand, onDelete, onExport }: {
         <div className="flex items-center gap-1.5 mt-2.5 ml-14 flex-wrap">
           {brand.brandTone && <Tag>{brand.brandTone}</Tag>}
           {brand.brandCulturalCapital && (
-            <Badge className="text-amber-400 bg-amber-400/8 border-amber-400/25">
+            <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>
               {brand.brandCulturalCapital === "Produce" ? "Producer" : "Relay"} (Bourdieu)
             </Badge>
           )}
@@ -596,14 +593,17 @@ function MatchRow({ match, onDelete }: {
   const score = Number(match.caiScore);
   const warnings = (match.radarWarnings as string[]) ?? [];
 
+  // The verdict is ordinal — it keeps its colour. The emoji is gone: the word
+  // and the hue already carry it, and the design system sanctions exactly one
+  // emoji (the footer's).
   const statusConfig = match.caiStatus === "Green Light"
-    ? { color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/30", icon: "🟢" }
+    ? { color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/30" }
     : match.caiStatus === "Proceed with Caution"
-    ? { color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/30", icon: "🟡" }
-    : { color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/30", icon: "🔴" };
+    ? { color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/30" }
+    : { color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/30" };
 
   return (
-    <div className="fit-card rounded-xl hover:border-primary/20 transition-all duration-150 group">
+    <div className="data-card rounded-xl group">
       <div className="px-5 py-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <div className="flex items-center gap-0">
 
@@ -611,8 +611,8 @@ function MatchRow({ match, onDelete }: {
           <div className="flex-1 min-w-0 pr-5">
             <div className="flex items-center gap-3">
               {/* Creator avatar */}
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-400/20 to-blue-400/5 border border-blue-400/15 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-serif text-blue-400/80">
+              <div className="w-9 h-9 rounded-lg bg-secondary/60 border border-border/60 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs text-foreground/60">
                   {(match.creatorDisplayName ?? match.creatorHandle ?? "C")?.[0]?.toUpperCase()}
                 </span>
               </div>
@@ -634,9 +634,9 @@ function MatchRow({ match, onDelete }: {
           <div className="w-[240px] flex-shrink-0 flex items-center gap-4 px-5 border-l border-r border-border/15">
             {/* Score */}
             <div className="text-center flex-shrink-0">
-              <div className="text-2xl font-serif gold-text leading-none">{score.toFixed(2)}</div>
+              <div className="text-2xl font-semibold tabular-nums text-foreground leading-none">{score.toFixed(2)}</div>
               <Badge className={`${statusConfig.color} ${statusConfig.bg} ${statusConfig.border} text-[9px] mt-1`}>
-                {statusConfig.icon} {match.caiStatus}
+                {match.caiStatus}
               </Badge>
             </div>
 
@@ -656,7 +656,7 @@ function MatchRow({ match, onDelete }: {
               </div>
               <div className="flex items-center justify-between pt-0.5">
                 {match.parrScore != null && (
-                  <span className="text-[10px] font-mono text-cyan-400">PARR {Number(match.parrScore)}%</span>
+                  <span className="text-[10px] font-mono tabular-nums text-muted-foreground/70">PARR {Number(match.parrScore)}%</span>
                 )}
                 {warnings.length > 0 && (
                   <span className="flex items-center gap-0.5 text-[10px] text-red-400">
@@ -679,8 +679,8 @@ function MatchRow({ match, onDelete }: {
                 </div>
               </div>
               {/* Brand avatar */}
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-green-400/20 to-green-400/5 border border-green-400/15 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-serif text-green-400/80">
+              <div className="w-9 h-9 rounded-lg bg-secondary/60 border border-border/60 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs text-foreground/60">
                   {((match as any).brandName ?? "B")?.[0]?.toUpperCase()}
                 </span>
               </div>
@@ -893,8 +893,8 @@ export default function Library() {
       {/* Header */}
       <div className="mb-6 animate-fade-in-up">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-purple-400/10 border border-purple-400/20 flex items-center justify-center">
-            <BookOpen className="w-5 h-5 text-purple-400" />
+          <div className="w-10 h-10 rounded-xl bg-secondary/60 border border-border/60 flex items-center justify-center">
+            <BookOpen className="w-5 h-5 text-muted-foreground/70" />
           </div>
           <div>
             <h1 className="text-2xl font-serif">Profile Library</h1>
@@ -956,14 +956,14 @@ export default function Library() {
           <button
             onClick={() => setShowArchived(v => !v)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all duration-150 ${
-              showArchived ? "border-red-400/50 bg-red-400/10 text-red-300" : "border-border/40 bg-secondary text-muted-foreground hover:text-foreground"
+              showArchived ? "border-red-400/50 bg-red-400/10 text-red-400" : "border-border/40 bg-secondary text-muted-foreground hover:text-foreground"
             }`}
             title="Declined runs are archived — retained with full provenance, hidden from the default view"
           >
             <Archive className="w-3 h-3" />
             Archived
             {showArchived && archivedRuns && (
-              <span className="ml-1 w-4 h-4 rounded-full bg-red-400/20 text-red-300 text-[10px] flex items-center justify-center">{archivedRuns.length}</span>
+              <span className="ml-1 w-4 h-4 rounded-full bg-red-400/20 text-red-400 text-[10px] tabular-nums flex items-center justify-center">{archivedRuns.length}</span>
             )}
           </button>
         )}
@@ -971,7 +971,7 @@ export default function Library() {
           {hasFilter ? `Showing ${showing} of ${total}` : `${total} ${activeTab}`}
         </div>
         <Link href={activeTab === "creators" ? "/analyze/creator" : activeTab === "brands" ? "/analyze/brand" : "/fit-score"}>
-          <Button size="sm" className="gold-gradient text-background font-semibold">
+          <Button size="sm" className="bg-primary hover:bg-primary-hover text-primary-foreground font-semibold">
             + {activeTab === "creators" ? "Analyze Creator" : activeTab === "brands" ? "Analyze Brand" : "New Match"}
           </Button>
         </Link>
@@ -979,7 +979,7 @@ export default function Library() {
 
       {/* ─── Filters Panel ────────────────────────────────────────────────── */}
       <div className={`overflow-hidden transition-all duration-150 ease-in-out ${showFilters ? "max-h-80 opacity-100 mb-3" : "max-h-0 opacity-0"}`}>
-        <div className="fit-card rounded-xl p-4">
+        <div className="data-card rounded-xl p-4">
           {activeTab === "creators" && (
             <div className="space-y-3">
               <div>
@@ -1092,7 +1092,7 @@ export default function Library() {
       {isLoading ? (
         <div className="space-y-2 animate-fade-in-up">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="fit-card rounded-xl px-5 py-4">
+            <div key={i} className="data-card rounded-xl px-5 py-4">
               <div className="flex items-center gap-4">
                 <div className="w-2 h-2 rounded-full bg-muted-foreground/10 animate-pulse" />
                 <div className="space-y-1.5 flex-1">
@@ -1118,13 +1118,13 @@ export default function Library() {
         <div className="space-y-2 animate-fade-in-up animate-stagger-3">
           {activeTab === "creators" && showArchived && (
             <>
-              <div className="text-[11px] text-red-300/70 px-1 pb-1">
+              <div className="text-[11px] text-muted-foreground/60 px-1 pb-1">
                 Archived (declined) analysis runs — retained with full provenance for scraper-failure analysis. Never deleted.
               </div>
               {loadingArchived ? (
                 <div className="text-center py-10 text-muted-foreground text-sm animate-pulse">Loading archived runs…</div>
               ) : !archivedRuns || archivedRuns.length === 0 ? (
-                <div className="fit-card rounded-xl p-10 text-center text-muted-foreground text-sm">No declined runs.</div>
+                <div className="data-card rounded-xl p-10 text-center text-muted-foreground text-sm">No declined runs.</div>
               ) : archivedRuns.map(run => (
                 <ArchivedRunRow key={run.observationId} run={run} />
               ))}
@@ -1133,7 +1133,7 @@ export default function Library() {
 
           {activeTab === "creators" && !showArchived && (
             filteredCreators.length === 0 ? (
-              <div className="fit-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
+              <div className="data-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
                 <Users className="w-10 h-10 text-muted-foreground/20 mb-4" />
                 <p className="text-muted-foreground">{searchQuery ? "No creators match your search" : "No creator profiles yet"}</p>
                 {!searchQuery && <Link href="/analyze/creator"><Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">Analyze your first creator</Button></Link>}
@@ -1145,7 +1145,7 @@ export default function Library() {
 
           {activeTab === "brands" && (
             filteredBrands.length === 0 ? (
-              <div className="fit-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
+              <div className="data-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
                 <Building2 className="w-10 h-10 text-muted-foreground/20 mb-4" />
                 <p className="text-muted-foreground">{searchQuery ? "No brands match your search" : "No brand profiles yet"}</p>
                 {!searchQuery && <Link href="/analyze/brand"><Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">Analyze your first brand</Button></Link>}
@@ -1157,7 +1157,7 @@ export default function Library() {
 
           {activeTab === "matches" && (
             filteredMatches.length === 0 ? (
-              <div className="fit-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
+              <div className="data-card rounded-xl p-16 flex flex-col items-center justify-center text-center">
                 <BarChart3 className="w-10 h-10 text-muted-foreground/20 mb-4" />
                 <p className="text-muted-foreground">{searchQuery ? "No matches found" : "No F.I.T. reports yet"}</p>
                 {!searchQuery && <Link href="/fit-score"><Button size="sm" variant="outline" className="mt-4 border-primary/30 text-primary">Calculate your first Cultural Match Score</Button></Link>}

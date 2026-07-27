@@ -5,8 +5,14 @@ import { cn } from "@/lib/utils";
 
 type StatusLevel = "ok" | "limited" | "down";
 
+/**
+ * B1 colour discipline: sources being online is the EXPECTED state and renders
+ * neutral — colour appears only when something needs attention. Green "all
+ * good" chips on every page load were spending the warning palette on the
+ * happy path.
+ */
 const STATUS_CONFIG: Record<StatusLevel, { icon: typeof CheckCircle2; color: string; bg: string; label: string }> = {
-  ok:      { icon: CheckCircle2,   color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Online" },
+  ok:      { icon: CheckCircle2,   color: "text-muted-foreground/70", bg: "bg-secondary/40", label: "Online" },
   limited: { icon: AlertTriangle,  color: "text-amber-400",   bg: "bg-amber-500/10",   label: "Limited" },
   down:    { icon: XCircle,        color: "text-red-400",     bg: "bg-red-500/10",     label: "Offline" },
 };
@@ -19,7 +25,7 @@ export function ApiStatusPanel() {
 
   const overallColor =
     !data ? "text-muted-foreground" :
-    data.overall === "ok" ? "text-emerald-400" :
+    data.overall === "ok" ? "text-muted-foreground/70" :
     data.overall === "degraded" ? "text-red-400" :
     "text-amber-400";
 
