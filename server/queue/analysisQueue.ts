@@ -416,7 +416,7 @@ async function processCampaign(runId: string, subjectHint: string, deps: Creator
   try {
     const banked = await loadBankedPhases(runId);
     const outcome = await withAnalysisRun(runId, () => runCreatorCampaign(
-      { runId, handle: handle!, platform, initialPhases: banked },
+      { runId, handle: handle!, platform, extras, initialPhases: banked },
       deps,
     ));
     if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);

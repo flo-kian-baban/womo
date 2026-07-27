@@ -39,6 +39,7 @@ import { runPhases, bankedOutput, type BankFn } from "./phaseRunner";
 import { makeSchedulerExecute } from "./phaseScheduler";
 import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
 import { runCollection } from "../webResearch";
+import { encodeSubject } from "../_core/subjectIdentity";
 import type { CreatorResearchResult } from "../webResearch";
 
 /** Everything the campaign needs from routers.ts, injected. */
@@ -123,12 +124,28 @@ export async function runCreatorCampaign(
     runId: string;
     handle: string;
     platform: PlatformName;
+    /**
+     * The subject's extra locators, carried through so this campaign banks
+     * under the SAME `subject_hint` the queue enqueued it as (S5).
+     */
+    extras?: Record<string, string>;
     deadlineAt?: number;
     initialPhases?: CampaignState["phases"];
   },
   deps: CreatorCampaignDeps,
 ): Promise<CampaignOutcome> {
-  const subjectHint = `${args.handle}@${args.platform}`;
+  /**
+   * ENCODED ONCE, by the module that owns the encoding.
+   *
+   * This used to rebuild the hint by hand. Harmless while every subject was a
+   * bare handle, and a landmine the moment one carries extras: the queue
+   * enqueues `name@Brand::{...}` while the campaign banks `name@Brand`, so a
+   * campaign's ledger rows split across two subject hints and the queue's own
+   * view reads a different subject than it submitted.
+   */
+  const subjectHint = encodeSubject({
+    handle: args.handle, platform: args.platform, extras: args.extras,
+  });
   const base = {
     runId: args.runId, handle: args.handle, platform: args.platform,
     committed: false, subjectId: null, observationId: null,

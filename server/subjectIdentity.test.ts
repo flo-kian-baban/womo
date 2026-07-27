@@ -13,6 +13,8 @@
  * round-trip: a round-trip through a broken encoder is still self-consistent.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { encodeSubject, decodeSubject } from "./_core/subjectIdentity";
 
 describe("BYTE-IDENTICAL for every subject that has no extras", () => {
@@ -113,6 +115,30 @@ describe("degrading, not throwing", () => {
     for (const hint of [null, undefined, ""]) {
       expect(() => decodeSubject(hint)).not.toThrow();
       expect(decodeSubject(hint).platform).toBe("");
+    }
+  });
+});
+
+/**
+ * NOBODY BUILDS A SUBJECT HINT BY HAND.
+ *
+ * The queue enqueues through `encodeSubject`; the campaign then banks every
+ * phase under a hint it derives itself. While every subject was a bare handle
+ * those agreed by coincidence. The moment one carries extras they diverge — the
+ * queue submits `name@Brand::{...}`, the campaign banks `name@Brand`, and a
+ * single campaign's ledger rows split across two subject hints.
+ *
+ * Asserted as a source rule because it is not observable in any single test:
+ * the two encoders live in different modules and only disagree for a subject
+ * type that does not exist yet.
+ */
+describe("subject hints are never hand-rolled", () => {
+  it("no live module rebuilds `handle@platform` with a template literal", () => {
+    const roots = ["server/phases/creatorCampaign.ts", "server/queue/analysisQueue.ts"];
+    for (const rel of roots) {
+      const src = readFileSync(path.join(import.meta.dirname, "..", rel), "utf8");
+      expect(src, `${rel} rebuilds a subject hint by hand`)
+        .not.toMatch(/subjectHint\s*=\s*`\$\{/);
     }
   });
 });
