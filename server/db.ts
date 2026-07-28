@@ -2978,7 +2978,21 @@ export async function listCreatorProfiles(
     .innerJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
     .leftJoin(creatorObservations, eq(creatorObservations.observationId, observations.id))
     .where(baseCondition)
-    .orderBy(desc(subjects.createdAt))
+    /**
+     * ─── Ordered by the OBSERVATION, not the subject (B1 finding) ───────────
+     * This ordered by `subjects.created_at`, which is when the subject was
+     * first seen. So a creator re-analysed today did not resurface: their row
+     * stayed wherever their first analysis put it, even though their new
+     * observation was the newest thing in the corpus. That was tolerable while
+     * the Analyze pages doubled as the archive; B1 made the Library the
+     * destination for finished work, and a destination that buries the most
+     * recent result is the wrong one.
+     *
+     * READ-PATH ONLY. Same rows, same values, same filters — only the sequence
+     * changes, and `observedAt` is now shipped so a caller can see the key it
+     * is ordered by rather than having to trust it.
+     */
+    .orderBy(desc(observations.observedAt))
     .limit(50);
 
   return rows.map(row => ({
@@ -2989,6 +3003,8 @@ export async function listCreatorProfiles(
     archetype: row.creator_observations?.archetype ?? row.subjects.latestArchetype,
     engagementTier: row.subjects.engagementTier,
     createdAt: row.subjects.createdAt,
+    /** The key the list is ORDERED by — shipped so the sort is auditable. */
+    observedAt: row.observations?.observedAt ?? null,
     // Review gate (womo_0006) — library must mark pending unmistakably
     reviewStatus: row.observations?.reviewStatus ?? null,
     observationId: row.observations?.id ?? null,
