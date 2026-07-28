@@ -258,3 +258,50 @@ describe("firstFailedComponentReason — a partial save must ship its why", () =
     expect(firstFailedComponentReason(undefined)).toBeNull();
   });
 });
+
+// ─── Idle backoff (egress incident, 2026-07-28) ──────────────────────────────
+// The drain cadence must stretch when the queue is quiet — a flat 5s poll reads
+// the ledger ~17,000×/day against a metered database — and must snap back the
+// moment work arrives. The ladder is pure; the snap-back is a source-level
+// contract: both entry points that CREATE ready work must kick the worker,
+// or a submit waits out the idle clock.
+
+import { nextPollDelayMs, POLL_MS, IDLE_AFTER_EMPTY_DRAINS, IDLE_POLL_MS_MAX } from "./queue/analysisQueue";
+
+describe("IDLE BACKOFF — quiet stretches the cadence, work snaps it back", () => {
+  it("holds the working cadence until the streak reaches the threshold", () => {
+    for (let n = 0; n < IDLE_AFTER_EMPTY_DRAINS; n++) {
+      expect(nextPollDelayMs(n)).toBe(POLL_MS);
+    }
+  });
+
+  it("doubles per empty drain past the threshold, capped at the ceiling", () => {
+    expect(nextPollDelayMs(IDLE_AFTER_EMPTY_DRAINS)).toBe(10_000);
+    expect(nextPollDelayMs(IDLE_AFTER_EMPTY_DRAINS + 1)).toBe(20_000);
+    expect(nextPollDelayMs(IDLE_AFTER_EMPTY_DRAINS + 2)).toBe(40_000);
+    expect(nextPollDelayMs(IDLE_AFTER_EMPTY_DRAINS + 3)).toBe(IDLE_POLL_MS_MAX);
+    expect(nextPollDelayMs(1_000)).toBe(IDLE_POLL_MS_MAX);
+  });
+
+  it("a reset streak is back on the working cadence — the kick works", () => {
+    expect(nextPollDelayMs(0)).toBe(POLL_MS);
+  });
+
+  const queueSrc = readFileSync(path.join(import.meta.dirname, "queue", "analysisQueue.ts"), "utf8");
+
+  it("submitCampaigns kicks the worker — a submit never waits out the idle clock", () => {
+    const body = queueSrc.slice(
+      queueSrc.indexOf("export async function submitCampaigns"),
+      queueSrc.indexOf("export async function requeueCampaignNow"),
+    );
+    expect(body).toContain("kickQueueNow()");
+  });
+
+  it("requeueCampaignNow kicks the worker — 'picks it up immediately' stays true", () => {
+    const body = queueSrc.slice(
+      queueSrc.indexOf("export async function requeueCampaignNow"),
+      queueSrc.indexOf("// ─── Status"),
+    );
+    expect(body).toContain("kickQueueNow()");
+  });
+});

@@ -152,6 +152,9 @@ export async function submitCampaigns(requests: SubmitRequest[]): Promise<Submit
     submitted.push({ runId, handle: req.handle, platform: req.platform, state: "queued" });
     console.log(`[queue] enqueued ${req.handle}@${req.platform} as ${runId}`);
   }
+  // Wake an idle-backoff worker immediately — a submit must never wait out
+  // the stretched idle cadence.
+  if (submitted.length > 0) kickQueueNow();
   return submitted;
 }
 
@@ -205,6 +208,8 @@ export async function requeueCampaignNow(runId: string): Promise<void> {
       output: r.output,
     });
   }
+  // "…picks it up immediately" — with idle backoff that promise needs a kick.
+  kickQueueNow();
 }
 
 // ─── Status ──────────────────────────────────────────────────────────────────
@@ -435,12 +440,65 @@ export async function listCampaigns(
 // ─── Worker ──────────────────────────────────────────────────────────────────
 
 let _deps: QueueDeps | null = null;
-let _timer: ReturnType<typeof setInterval> | null = null;
+let _timer: ReturnType<typeof setTimeout> | null = null;
 let _draining = false;
 const _inFlight = new Set<string>();
 
-/** Poll cadence. The scan is one indexed query; this is cheap. */
+/** Poll cadence while there is — or recently was — work. */
 export const POLL_MS = 5_000;
+
+// ─── Idle backoff (egress incident, 2026-07-28) ──────────────────────────────
+// A flat 5s cadence polls the ledger ~17,000 times a day whether or not
+// anything is queued, and every one of those reads crosses the wire to a
+// metered database. After IDLE_AFTER_EMPTY_DRAINS consecutive drains that
+// started nothing, the delay doubles per further empty drain — 10s, 20s, 40s —
+// capped at IDLE_POLL_MS_MAX. A submit or manual requeue calls kickQueueNow(),
+// which drains immediately and restores the 5s cadence, so an analyst never
+// waits on the idle clock. The only latency this adds is to UNATTENDED
+// transitions (a parked campaign's gate expiring while the queue is idle),
+// which now wake within IDLE_POLL_MS_MAX rather than POLL_MS.
+
+/** Consecutive empty drains before the cadence stretches (30s of quiet at 5s). */
+export const IDLE_AFTER_EMPTY_DRAINS = 6;
+/** Idle cadence ceiling. */
+export const IDLE_POLL_MS_MAX = 60_000;
+
+let _emptyDrains = 0;
+
+/** Delay before the next drain, given the current empty-drain streak. Pure. */
+export function nextPollDelayMs(emptyDrains: number = _emptyDrains): number {
+  if (emptyDrains < IDLE_AFTER_EMPTY_DRAINS) return POLL_MS;
+  const over = emptyDrains - IDLE_AFTER_EMPTY_DRAINS; // 0→10s, 1→20s, 2→40s, 3+→60s
+  return Math.min(POLL_MS * 2 ** (over + 1), IDLE_POLL_MS_MAX);
+}
+
+/** Schedule the next drain of the running worker after `delayMs`. */
+function scheduleDrain(delayMs: number): void {
+  if (!_deps) return;
+  if (_timer) clearTimeout(_timer);
+  _timer = setTimeout(() => {
+    void (async () => {
+      try {
+        const drained = await drainOnce(_deps!);
+        _emptyDrains = drained > 0 ? 0 : _emptyDrains + 1;
+      } catch (err) {
+        console.error("[queue] drain failed:", err);
+      }
+      if (_timer) scheduleDrain(nextPollDelayMs());
+    })();
+  }, delayMs);
+  if (typeof _timer === "object" && "unref" in _timer) (_timer as NodeJS.Timeout).unref();
+}
+
+/**
+ * New work exists NOW — drain immediately and return to the 5s cadence.
+ * Called by submitCampaigns and requeueCampaignNow; a no-op (beyond resetting
+ * the idle streak) when no worker is running, e.g. under unit tests.
+ */
+export function kickQueueNow(): void {
+  _emptyDrains = 0;
+  if (_timer && _deps) scheduleDrain(0);
+}
 
 export function queueSnapshot(): { inFlight: number; runIds: string[]; running: boolean } {
   return { inFlight: _inFlight.size, runIds: Array.from(_inFlight), running: _timer !== null };
@@ -689,15 +747,15 @@ export function startQueueWorker(deps: QueueDeps): void {
     }
   })();
 
-  _timer = setInterval(() => { void drainOnce(deps).catch(err => console.error("[queue] drain failed:", err)); }, POLL_MS);
-  if (typeof _timer === "object" && "unref" in _timer) (_timer as NodeJS.Timeout).unref();
+  scheduleDrain(POLL_MS);
 }
 
 /** TEST-ONLY: stop the worker between cases. */
 export function stopQueueWorker(): void {
-  if (_timer) clearInterval(_timer);
+  if (_timer) clearTimeout(_timer);
   _timer = null;
   _deps = null;
   _inFlight.clear();
   _draining = false;
+  _emptyDrains = 0;
 }

@@ -346,8 +346,41 @@ export async function findIncompleteCampaigns(
   const db = await getDb();
   if (!db) return [];
   const cutoff = new Date(Date.now() - maxAgeMs);
-  const rows = await db.select().from(analysisPhaseState)
-    .where(sql`${analysisPhaseState.createdAt} >= ${cutoff}`)
+  /**
+   * NARROW SELECT + SQL FILTER (egress incident, 2026-07-28). This ran every
+   * 5s drain tick as `select()` — every column, `output` included — of every
+   * row under 24h, discarding finished campaigns in JS afterwards. `output`
+   * banks each phase's ENTIRE evidence (avg ~24KB/row), so a hot window cost
+   * 3.9MB per tick, ~2.8GB/hour per running dev server, against a 44MB
+   * database. The drain never reads `output`: execution rehydrates through
+   * `loadBankedPhases` → `getPhaseState`, which keeps its full select.
+   *
+   * The committed/terminated test moved into SQL for the same reason — a
+   * finished campaign's rows must not cross the wire at all, so the
+   * steady-state tick approaches zero rows. The predicate is the JS filter
+   * verbatim: committed = an extract_commit row banked complete/partial;
+   * terminated = any genuine_empty row (a confirmed fact) or any structural
+   * failure (parked for a human).
+   */
+  const rows = await db.select({
+    runId: analysisPhaseState.runId,
+    subjectHint: analysisPhaseState.subjectHint,
+    phase: analysisPhaseState.phase,
+    status: analysisPhaseState.status,
+    failureClass: analysisPhaseState.failureClass,
+    nextEarliestAt: analysisPhaseState.nextEarliestAt,
+    createdAt: analysisPhaseState.createdAt,
+  }).from(analysisPhaseState)
+    .where(and(
+      sql`${analysisPhaseState.createdAt} >= ${cutoff}`,
+      sql`NOT EXISTS (
+        SELECT 1 FROM analysis_phase_state done
+        WHERE done.run_id = ${analysisPhaseState.runId}
+          AND ((done.phase = 'extract_commit' AND done.status IN ('complete', 'partial'))
+            OR done.status = 'genuine_empty'
+            OR done.failure_class = 'structural')
+      )`,
+    ))
     .orderBy(analysisPhaseState.createdAt);
   const byRun = new Map<string, typeof rows>();
   for (const r of rows) {
@@ -357,13 +390,6 @@ export async function findIncompleteCampaigns(
   }
   const out: Array<{ runId: string; subjectHint: string; phases: Array<{ phase: string; status: string; nextEarliestAt: Date | null }> }> = [];
   for (const [runId, list] of Array.from(byRun.entries())) {
-    const commit = list.find(r => r.phase === "extract_commit");
-    const committed = commit && (commit.status === "complete" || commit.status === "partial");
-    // A campaign the gates terminated is finished, not incomplete: genuine_empty
-    // is a confirmed fact and structural failures are parked for a human.
-    const terminated = list.some(r => r.status === "genuine_empty")
-      || list.some(r => r.failureClass === "structural");
-    if (committed || terminated) continue;
     out.push({
       runId,
       subjectHint: list[0]!.subjectHint,
@@ -570,7 +596,18 @@ export const READY_STATUSES = ["pending", "failed", "blocked"] as const;
 export async function scanReadyWork(now: Date = new Date(), limit = 50) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(analysisPhaseState)
+  // NARROW SELECT (egress incident, 2026-07-28): the drain reads only identity
+  // and gate fields from this scan — never `output`, which banks the phase's
+  // entire evidence. Execution rehydrates outputs itself via `loadBankedPhases`.
+  return db.select({
+    runId: analysisPhaseState.runId,
+    subjectHint: analysisPhaseState.subjectHint,
+    phase: analysisPhaseState.phase,
+    status: analysisPhaseState.status,
+    failureClass: analysisPhaseState.failureClass,
+    nextEarliestAt: analysisPhaseState.nextEarliestAt,
+    createdAt: analysisPhaseState.createdAt,
+  }).from(analysisPhaseState)
     .where(and(
       inArray(analysisPhaseState.status, [...READY_STATUSES]),
       // A structural failure NEVER requeues, and a genuine_empty is a confirmed
