@@ -14,6 +14,7 @@ import {
   Mic, ChevronDown, ChevronUp, MapPin, Utensils, Sparkles, User,
   Fingerprint, TrendingUp, Users, Heart, BookOpen,
 } from "lucide-react";
+import { T_SUB, T_BODY, T_DETAIL, T_MICRO } from "@/lib/reportType";
 
 // Flattened creator profile as returned by getCreatorProfileById in db.ts.
 type CreatorProfile = Record<string, any> & { id: string };
@@ -320,16 +321,16 @@ export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
     <div className="mt-4">
       <div className="flex items-baseline gap-2 mb-2">
         <BookOpen className="w-3 h-3 text-muted-foreground/50 self-center" />
-        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+        <span className={T_SUB}>
           Decoded cultural signals
         </span>
-        <span className="text-[10px] text-muted-foreground/45 tabular-nums">
+        <span className={`${T_DETAIL} tabular-nums`}>
           {totalSignals} decoded
         </span>
       </div>
 
       {decoded.symbolicSummary && (
-        <p className="text-[11px] text-muted-foreground/75 leading-relaxed italic mb-2 max-w-3xl">
+        <p className={`${T_DETAIL} italic mb-3 max-w-3xl`}>
           “{decoded.symbolicSummary}”
         </p>
       )}
@@ -346,10 +347,10 @@ export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
                 className="w-full flex items-center gap-2 py-2 text-left"
               >
                 <Icon className="w-3 h-3 text-muted-foreground/45 flex-shrink-0" />
-                <span className="text-[11px] text-foreground/80">{label}</span>
-                <span className="text-[10px] text-muted-foreground/45 tabular-nums">{signals.length}</span>
+                <span className="text-[13px] font-medium text-foreground/85">{label}</span>
+                <span className={`${T_DETAIL} tabular-nums`}>{signals.length}</span>
                 {/* What this group FEEDS — the reason the grouping exists. */}
-                <span className="text-[10px] text-muted-foreground/35 hidden sm:inline truncate">{sublabel}</span>
+                <span className={`${T_DETAIL} hidden sm:inline truncate`}>{sublabel}</span>
                 {isOpen
                   ? <ChevronUp className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />
                   : <ChevronDown className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />}
@@ -358,7 +359,7 @@ export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
               {isOpen && (
                 <div className="pb-2.5 space-y-1.5">
                   {signals.map((signal, i) => (
-                    <div key={i} className="pl-5 text-[11px]">
+                    <div key={i} className="pl-5 text-xs">
                       <div className="flex items-baseline gap-2 flex-wrap">
                         <span className="text-foreground/85">“{signal.phrase}”</span>
                         {signal.informs.length > 0 && (
@@ -371,7 +372,7 @@ export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground/65 leading-relaxed mt-0.5">
+                      <p className={`${T_DETAIL} mt-1`}>
                         {signal.meaning}
                       </p>
                     </div>
@@ -460,10 +461,10 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
         <div>
           <div className="flex items-baseline gap-2 mb-1.5">
             <Mic className="w-3 h-3 text-muted-foreground/50 self-center" />
-            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+            <span className={T_SUB}>
               Transcript evidence
             </span>
-            <span className="text-[10px] text-muted-foreground/45 tabular-nums">
+            <span className={`${T_DETAIL} tabular-nums`}>
               {transcriptCount} video{transcriptCount !== 1 ? "s" : ""} · {totalHighlights} entities
             </span>
             {/*
@@ -488,7 +489,7 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
               <div key={type} className="flex items-center gap-1">
                 <span className={`w-2 h-0.5 rounded-full ${HIGHLIGHT_SWATCH[type]}`} />
                 <Icon className="w-2.5 h-2.5 text-muted-foreground/40" />
-                <span className="text-[9px] text-muted-foreground/50">{label}</span>
+                <span className={T_MICRO}>{label}</span>
               </div>
             ))}
           </div>
@@ -511,7 +512,7 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] text-foreground/80">{entry.label}</span>
+                        <span className="text-[13px] font-medium text-foreground/85">{entry.label}</span>
                         {entry.sourceLabel && (
                           <span
                             title={entry.sourceKind === "speech"
@@ -542,7 +543,7 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
                         )}
                       </div>
                       {!isOpen && preview && (
-                        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">{preview}…</p>
+                        <p className={`${T_DETAIL} mt-1 truncate`}>{preview}…</p>
                       )}
                     </div>
                     {isOpen
@@ -552,7 +553,7 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
 
                   {isOpen && (
                     <div className="pb-3 pl-0">
-                      <p className="text-[11px] text-muted-foreground/85 leading-relaxed italic">
+                      <p className={`${T_BODY} italic text-foreground/80`}>
                         “<HighlightedText segments={entry.segments} />”
                       </p>
                       {highlightCount > 0 && (

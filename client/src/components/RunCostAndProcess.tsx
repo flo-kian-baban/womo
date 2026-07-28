@@ -28,6 +28,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Timer, Cpu, RotateCw, PauseCircle, AlertTriangle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { MODEL_PRICING, PRICING_AS_OF } from "@shared/llmPricing";
+import { T_SUB, T_DETAIL, T_MICRO, T_FIGURE_SM, BOX } from "@/lib/reportType";
 
 const PHASE_LABEL: Record<string, string> = {
   capture: "Capture",
@@ -123,7 +124,7 @@ export function RunCostAndProcess({
   return (
     <div className="space-y-5">
       {/* ── Headline facts ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-3">
+      <div className={`grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-4 p-4 ${BOX}`}>
         <Fact label="Wall clock" value={wallMs != null ? secs(wallMs) : null}
           note={wallMs != null ? "first phase enqueued → last completed" : "no phase rows"} />
         <Fact label="Phases" value={phases.length ? String(phases.length) : null} />
@@ -138,10 +139,8 @@ export function RunCostAndProcess({
           className="w-full flex items-center gap-2 text-left py-1.5"
         >
           <Timer className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-            Phase by phase
-          </span>
-          <span className="text-[10px] text-muted-foreground/40 tabular-nums">
+          <span className={T_SUB}>Phase by phase</span>
+          <span className={`${T_DETAIL} tabular-nums`}>
             {campaign.isLoading ? "…" : `${phases.length} phases`}
             {phases.some(p => p.attemptCount > 1) && " · retries"}
           </span>
@@ -174,7 +173,7 @@ export function RunCostAndProcess({
               const retries = p.retryHistory ?? null;
 
               return (
-                <div key={p.phase} className="text-[11px] border-b border-border/25 last:border-0 pb-1.5">
+                <div key={p.phase} className="text-xs border-b border-border/25 last:border-0 pb-2">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="text-foreground/80 w-[128px] flex-shrink-0">
                       {PHASE_LABEL[p.phase] ?? p.phase}
@@ -249,10 +248,8 @@ export function RunCostAndProcess({
           className="w-full flex items-center gap-2 text-left py-1.5"
         >
           <Cpu className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
-            LLM cost — estimated
-          </span>
-          <span className="text-[10px] text-muted-foreground/40 tabular-nums">
+          <span className={T_SUB}>LLM cost — estimated</span>
+          <span className={`${T_DETAIL} tabular-nums`}>
             {priced && rows.length > 0 ? `~${usd(estTotal)}` : "unpriced"} · {calls.length || d?.llm.calls || 0} calls
           </span>
           {openCalls ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/40 ml-auto" />
@@ -262,7 +259,7 @@ export function RunCostAndProcess({
         {openCalls && (
           <div className="mt-2 space-y-3">
             {/* NOT A RECORDED FACT — stated before the number, not after it. */}
-            <p className="text-[10px] text-muted-foreground/55 leading-relaxed">
+            <p className={T_DETAIL}>
               No cost is recorded with a run. The figures below are computed from the token
               counts the pipeline logged and a published rate table — an <span className="text-foreground/70">estimate</span>,
               not a billed amount. Rates as of{" "}
@@ -346,11 +343,11 @@ export function RunCostAndProcess({
 function Fact({ label, value, note }: { label: string; value: string | null; note?: string }) {
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-wide text-muted-foreground/40">{label}</div>
-      <div className="text-sm font-semibold tabular-nums text-foreground/85">
-        {value ?? <span className="text-muted-foreground/30 italic font-normal text-xs">unknown</span>}
+      <div className={T_MICRO}>{label}</div>
+      <div className={`${T_FIGURE_SM} mt-1`}>
+        {value ?? <span className="text-muted-foreground/35 italic font-normal text-sm">unknown</span>}
       </div>
-      {note && <div className="text-[9px] text-muted-foreground/35 mt-0.5">{note}</div>}
+      {note && <div className={`${T_DETAIL} mt-1`}>{note}</div>}
     </div>
   );
 }

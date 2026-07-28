@@ -31,6 +31,7 @@ import { useState } from "react";
 import {
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Users, Heart, Play,
   TrendingUp, Video, Hash, Tag, Film, Shield, FileText, Layers, Receipt,
+  AlertTriangle, Info,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import TranscriptPanel, { DecodedSignalsPanel } from "./TranscriptPanel";
@@ -43,6 +44,10 @@ import {
   FIELD_SECTIONS, BOOLEAN_FIELDS, FieldValue, VideoEvidenceTable,
   SupplementalVideoPanel, formatNum, CHIP_NEUTRAL, METRIC_TOOLTIPS,
 } from "./CreatorProfileCard";
+import {
+  T_TITLE, T_SECTION, T_SUB, T_BODY, T_LABEL, T_DETAIL, T_MICRO,
+  T_FIGURE_SM, BOX,
+} from "@/lib/reportType";
 
 type Profile = Record<string, any> & { id: string };
 
@@ -63,10 +68,10 @@ function Section({
   return (
     <section className="pt-7 first:pt-0 border-t border-border/40 first:border-0">
       <div className="flex items-baseline gap-2.5 mb-4">
-        <span className="text-[10px] font-mono tabular-nums text-muted-foreground/35">{n}</span>
+        <span className="text-xs font-mono tabular-nums text-muted-foreground/40">{n}</span>
         <Icon className="w-3.5 h-3.5 text-muted-foreground/50 self-center" />
-        <h2 className="text-[11px] font-semibold tracking-[0.14em] uppercase text-foreground/80">{title}</h2>
-        <span className="text-[10px] text-muted-foreground/40 hidden sm:inline">{blurb}</span>
+        <h2 className={T_SECTION}>{title}</h2>
+        <span className={`${T_DETAIL} hidden sm:inline`}>{blurb}</span>
       </div>
       {children}
     </section>
@@ -79,10 +84,13 @@ function Disclosure({
 }: { label: string; summary: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-t border-border/25 first:border-0">
-      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2 py-2 text-left">
-        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">{label}</span>
-        <span className="text-[10px] text-muted-foreground/40 tabular-nums">{summary}</span>
+    /* mt-3 + a full rule: disclosures used to sit flush against the content
+       above them, so a collapsed row read as another line of that content
+       rather than as a control. */
+    <div className="border-t border-border/40 mt-3 first:mt-0">
+      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2.5 py-2.5 text-left group">
+        <span className={T_SUB}>{label}</span>
+        <span className={`${T_DETAIL} tabular-nums`}>{summary}</span>
         {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/40 ml-auto" />
               : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/40 ml-auto" />}
       </button>
@@ -153,10 +161,10 @@ export default function CreatorReport({
           <div className="flex items-start gap-3 flex-wrap">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-semibold text-foreground">{profile.displayName || profile.handle}</h1>
+                <h1 className={T_TITLE}>{profile.displayName || profile.handle}</h1>
                 <ReviewStatusBadge status={profile.reviewStatus} />
               </div>
-              <div className="flex items-center gap-2 mt-1 flex-wrap text-[11px] text-muted-foreground/60">
+              <div className={`flex items-center gap-2 mt-1.5 flex-wrap ${T_DETAIL}`}>
                 <PlatformMark platform={String(profile.platform)} className="w-3.5 h-3.5" />
                 <span>{platformLabel(String(profile.platform))}</span>
                 <span className="text-muted-foreground/70">@{profile.handle}</span>
@@ -172,7 +180,7 @@ export default function CreatorReport({
                   <span>· analysed {new Date(profile.observedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
                 )}
               </div>
-              {profile.bio && <p className="text-xs text-muted-foreground/70 mt-2 leading-relaxed max-w-2xl">{profile.bio}</p>}
+              {profile.bio && <p className={`${T_BODY} text-muted-foreground/80 mt-2.5 max-w-2xl`}>{profile.bio}</p>}
             </div>
             {onReanalyze && (
               <button onClick={onReanalyze} disabled={isReanalyzing}
@@ -191,7 +199,7 @@ export default function CreatorReport({
               </span>
             )}
             {profile.nicheTopicNode && (
-              <span className="text-[11px] text-muted-foreground/70">{profile.nicheTopicNode}</span>
+              <span className={T_LABEL}>{profile.nicheTopicNode}</span>
             )}
             <span className="ml-auto flex items-center gap-1.5 flex-wrap">
               {profile.dataConfidenceLevel && (
@@ -226,11 +234,13 @@ export default function CreatorReport({
 
           {/* The conclusion, in the analyst's words */}
           {profile.aiSummary && (
-            <p className="text-sm text-foreground/80 leading-relaxed max-w-3xl">{profile.aiSummary}</p>
+            <p className={`${T_BODY} max-w-3xl`}>{profile.aiSummary}</p>
           )}
 
           {/* Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-3 pt-1">
+          {/* A CONTAINER, not free-floating figures: six numbers with captions
+              read as one object rather than six sentences. */}
+          <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-4 p-4 ${BOX}`}>
             <Metric icon={Users} label="Followers" value={profile.followerCount} tip="followerCount" />
             <Metric icon={Heart} label="Likes" value={profile.totalLikes} tip="totalLikes" />
             <Metric icon={Play} label="Views" value={profile.totalViews} tip="totalViews" />
@@ -247,16 +257,21 @@ export default function CreatorReport({
           {FIELD_SECTIONS.map(section => (
             <div key={section.title}>
               <div className="mb-2.5">
-                <h3 className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">{section.title}</h3>
-                <p className="text-[10px] text-muted-foreground/50 mt-0.5">{section.subtitle}</p>
+                <h3 className={T_SUB}>{section.title}</h3>
+                <p className={`${T_DETAIL} mt-1`}>{section.subtitle}</p>
               </div>
               <div className="space-y-2.5">
                 {section.fields.map(field => {
                   const value = profile[field.key];
                   return (
-                    <div key={field.key} className="py-1.5 border-b border-border/25 last:border-0">
-                      <div className="grid grid-cols-[1fr_1.5fr] gap-4 items-start">
-                        <span className="text-[11px] text-muted-foreground pt-0.5">{field.label}</span>
+                    /* MEASURE. This was grid-cols-[1fr_1.5fr] across the full
+                       page width: the label sat far left, the value floated far
+                       right, and at that measure the eye lost the row between
+                       them. A fixed label column and a capped total width bring
+                       the pair into one readable unit. */
+                    <div key={field.key} className="py-2 border-b border-border/25 last:border-0">
+                      <div className="grid grid-cols-[minmax(150px,210px)_1fr] gap-5 items-baseline max-w-3xl">
+                        <span className={T_LABEL}>{field.label}</span>
                         <FieldValue fieldKey={field.key} value={value} type={field.type} />
                       </div>
                       {EXPLAINED_FIELD_KEYS.has(field.key) && (
@@ -269,14 +284,14 @@ export default function CreatorReport({
                 })}
               </div>
               {section.title.includes("Three") && (
-                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 max-w-3xl">
                   {BOOLEAN_FIELDS.map(bf => {
                     const val = profile[bf.key] as boolean | null;
                     return (
-                      <div key={bf.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-secondary/40 border border-border/40">
+                      <div key={bf.key} className={`flex items-center gap-2 px-2.5 py-2 ${BOX}`}>
                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${val ? "bg-foreground/55" : "bg-muted-foreground/25"}`} />
-                        <span className="text-[10px] text-muted-foreground">{bf.label}</span>
-                        <span className={`ml-auto text-[10px] font-medium tabular-nums ${val ? "text-foreground/75" : "text-muted-foreground/40"}`}>
+                        <span className={T_LABEL}>{bf.label}</span>
+                        <span className={`ml-auto text-xs font-medium tabular-nums ${val ? "text-foreground/85" : "text-muted-foreground/40"}`}>
                           {val ? "Yes" : "No"}
                         </span>
                       </div>
@@ -301,15 +316,15 @@ export default function CreatorReport({
       {/* ══ 3 TRUST ══════════════════════════════════════════════════════ */}
       <Section n={3} title="Trust" blurb="how far to believe it, and why" icon={Shield}>
         {diagnostics.isLoading ? (
-          <p className="text-[11px] text-muted-foreground/40">Loading run diagnostics…</p>
+          <p className={T_DETAIL}>Loading run diagnostics…</p>
         ) : !d ? (
-          <p className="text-[11px] text-muted-foreground/50 italic">
+          <p className={`${T_DETAIL} italic`}>
             No run diagnostics available for this observation.
           </p>
         ) : (
           <div className="space-y-4">
             {/* The four judgements, stated plainly */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-[11px]">
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 p-4 ${BOX}`}>
               <TrustLine label="Confidence" tone={CONFIDENCE_TONE[String(d.confidence.level)] ?? CHIP_NEUTRAL}
                 value={d.confidence.level ?? "n/a"} detail={d.confidence.rationale} />
               <TrustLine label="Capture health" tone={HEALTH_TONE[d.captureHealth.status] ?? CHIP_NEUTRAL}
@@ -329,41 +344,59 @@ export default function CreatorReport({
                   : `${d.videos.withoutTranscript} metadata-only`} />
             </div>
 
-            {/* Consequences and caveats — the warnings that qualify the read */}
+            {/*
+              THREE KINDS, NOT SEVEN LINES (B2c). These ran as undifferentiated
+              prose at one size, so a scrape failure that cost evidence sat at
+              the same weight as a note about which videos were excluded — the
+              analyst had to read all seven to find the one that mattered.
+              They are now typed by KIND:
+                WARNING  something went wrong that costs you evidence
+                CAVEAT   a number on this page means less than it appears
+                CONTEXT  a fact about how the run was assembled
+              Weight, indent and a rule carry the distinction; only WARNING
+              keeps colour, because only it is asking for a decision.
+            */}
             {(d.scrapes.consequences.length > 0 || !d.exactRunLinkage
               || (d.videos.coveragePct != null && d.videos.coveragePct < 100)
               || (d.pool && d.pool.authorRejected > 0) || d.sociologicalFieldsProvenance) && (
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 {d.scrapes.consequences.map((c, i) => (
-                  <p key={i} className="text-[11px] text-amber-400/80 leading-relaxed">{c}</p>
+                  <Note key={i} kind="warning">{c}</Note>
                 ))}
+                {!d.exactRunLinkage && (
+                  <Note kind="warning">
+                    This observation predates run tagging — scrape and LLM figures are linked by
+                    observation id and may be incomplete.
+                  </Note>
+                )}
+                {d.sociologicalFieldsProvenance === "estimated" && (
+                  <Note kind="warning">
+                    Sociological fields (parasocial / audience / capital / remix) were estimated by
+                    the model — no engagement signals were available to compute them from.
+                  </Note>
+                )}
+
                 {d.videos.coveragePct != null && d.videos.coveragePct < 100 && (
-                  <p className="text-[11px] text-amber-400/80 leading-relaxed">
-                    Derived stats (engagement, avg views) reflect the {d.videos.total} captured videos, not the full channel.
-                  </p>
+                  <Note kind="caveat">
+                    Derived stats (engagement, avg views) reflect the {d.videos.total} captured
+                    videos, not the full channel.
+                  </Note>
                 )}
-                {d.pool && d.pool.authorRejected > 0 && (
-                  <p className="text-[11px] text-muted-foreground/60">
-                    {d.pool.authorRejected} foreign video{d.pool.authorRejected === 1 ? "" : "s"} excluded — author mismatch.
-                  </p>
-                )}
-                {d.sociologicalFieldsProvenance && (
-                  <p className="text-[11px] text-muted-foreground/60">
-                    Sociological fields (parasocial / audience / capital / remix):{" "}
-                    {d.sociologicalFieldsProvenance === "computed"
-                      ? "computed from engagement signals"
-                      : <span className="text-amber-400/80">estimated by the model — no engagement signals</span>}
-                  </p>
+
+                {d.sociologicalFieldsProvenance === "computed" && (
+                  <Note kind="context">
+                    Sociological fields (parasocial / audience / capital / remix) were computed from
+                    engagement signals.
+                  </Note>
                 )}
                 {d.velocity && (
-                  <p className="text-[11px] text-muted-foreground/60">
-                    Velocity {d.velocity.value} — {d.velocity.rationale}
-                  </p>
+                  <Note kind="context">Velocity {d.velocity.value} — {d.velocity.rationale}</Note>
                 )}
-                {!d.exactRunLinkage && (
-                  <p className="text-[11px] text-amber-400/80">
-                    This observation predates run tagging — scrape and LLM figures are linked by observation id and may be incomplete.
-                  </p>
+                {d.pool && d.pool.authorRejected > 0 && (
+                  <Note kind="context">
+                    {d.pool.authorRejected} foreign video{d.pool.authorRejected === 1 ? "" : "s"} excluded
+                    — author mismatch.
+                  </Note>
                 )}
               </div>
             )}
@@ -375,7 +408,7 @@ export default function CreatorReport({
                 {d.fields.missing.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {d.fields.missing.map(f => (
-                      <span key={f} className="px-1.5 py-0.5 rounded text-[9px] border border-destructive/30 text-destructive/80">
+                      <span key={f} className="px-2 py-0.5 rounded text-[11px] border border-destructive/30 text-destructive/80">
                         {f} missing
                       </span>
                     ))}
@@ -384,17 +417,17 @@ export default function CreatorReport({
                 <div className="flex flex-wrap gap-1">
                   {d.fields.provenance.map(p => (
                     <span key={p.field} title={`${p.field}: ${p.provenance}`}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border border-border/50 bg-secondary/40 text-muted-foreground/75">
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border border-border/50 bg-secondary/40 text-foreground/70">
                       {p.field}
-                      <span className="text-muted-foreground/45 uppercase text-[8px]">{p.provenance}</span>
+                      <span className="text-muted-foreground/50 uppercase text-[9px] tracking-wide">{p.provenance}</span>
                     </span>
                   ))}
                 </div>
-                <p className="text-[9px] text-muted-foreground/45 leading-relaxed">
+                <p className={T_DETAIL}>
                   Provenance is one muted treatment — the WORD carries the meaning. evidence-backed ·
                   scraped / derived · computed · estimated · model inference.
                 </p>
-                <div className="font-mono text-[10px] text-muted-foreground/55 tabular-nums">
+                <div className="font-mono text-xs text-muted-foreground/70 tabular-nums leading-relaxed">
                   {d.fields.counts.keywords} keywords · {d.fields.counts.contentThemes} themes ·{" "}
                   {d.fields.counts.hashtags} hashtags · {d.fields.counts.decodedSignals} decoded signals ·{" "}
                   {d.fields.counts.contentItems} content items · {d.fields.counts.transcripts} transcripts ·{" "}
@@ -418,7 +451,7 @@ export default function CreatorReport({
           <Disclosure label="Transcript excerpts" summary={`${transcripts.length} with transcript`} defaultOpen={transcripts.length > 0}>
             {transcripts.length > 0
               ? <TranscriptPanel profile={profile} showDecoded={false} />
-              : <p className="text-[11px] text-muted-foreground/50 italic">No transcripts captured for this run.</p>}
+              : <p className={`${T_DETAIL} italic`}>No transcripts captured for this run.</p>}
           </Disclosure>
 
           <Disclosure label="Keywords & hashtags" summary={`${keywords.length} keywords · ${hashtags.length} hashtags`}>
@@ -426,25 +459,25 @@ export default function CreatorReport({
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Hash className="w-3 h-3 text-muted-foreground/50" />
-                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/45">Hashtags ({hashtags.length})</span>
+                  <span className={T_MICRO}>Hashtags ({hashtags.length})</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {hashtags.map((t, i) => (
-                    <span key={i} className="text-[10px] text-muted-foreground/70 bg-secondary/50 px-1.5 py-0.5 rounded border border-border/50">{t}</span>
+                    <span key={i} className="text-xs text-foreground/70 bg-secondary/50 px-2 py-0.5 rounded border border-border/50">{t}</span>
                   ))}
-                  {hashtags.length === 0 && <span className="text-[11px] text-muted-foreground/40 italic">none</span>}
+                  {hashtags.length === 0 && <span className={`${T_DETAIL} italic`}>none</span>}
                 </div>
               </div>
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Tag className="w-3 h-3 text-muted-foreground/50" />
-                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/45">Keywords ({keywords.length})</span>
+                  <span className={T_MICRO}>Keywords ({keywords.length})</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {keywords.map((k, i) => (
-                    <span key={i} className="text-[10px] text-muted-foreground/70 bg-secondary/50 px-1.5 py-0.5 rounded border border-border/50">{k}</span>
+                    <span key={i} className="text-xs text-foreground/70 bg-secondary/50 px-2 py-0.5 rounded border border-border/50">{k}</span>
                   ))}
-                  {keywords.length === 0 && <span className="text-[11px] text-muted-foreground/40 italic">none</span>}
+                  {keywords.length === 0 && <span className={`${T_DETAIL} italic`}>none</span>}
                 </div>
               </div>
             </div>
@@ -453,12 +486,12 @@ export default function CreatorReport({
           <Disclosure label="Sampled content" summary={`${videoTitles.length} post titles`}>
             <div className="space-y-1 max-h-72 overflow-y-auto">
               {videoTitles.map((t, i) => (
-                <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground/70">
-                  <span className="text-muted-foreground/35 w-5 text-right flex-shrink-0 tabular-nums">{i + 1}.</span>
-                  <span className="leading-relaxed">{t}</span>
+                <div key={i} className={`flex items-start gap-2.5 ${T_DETAIL}`}>
+                  <span className="text-muted-foreground/35 w-6 text-right flex-shrink-0 tabular-nums">{i + 1}.</span>
+                  <span>{t}</span>
                 </div>
               ))}
-              {videoTitles.length === 0 && <p className="text-[11px] text-muted-foreground/40 italic">No titles captured.</p>}
+              {videoTitles.length === 0 && <p className={`${T_DETAIL} italic`}>No titles captured.</p>}
             </div>
           </Disclosure>
 
@@ -493,14 +526,39 @@ function Metric({
     : suffix === "%" ? `${n.toFixed(1)}%` : formatNum(n);
   return (
     <div>
-      <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-muted-foreground/40">
-        <Icon className="w-2.5 h-2.5" />
+      <div className={`flex items-center gap-1.5 ${T_MICRO}`}>
+        <Icon className="w-3 h-3" />
         <span>{label}</span>
         {t && <MetricTooltip title={t.title} explanation={t.explanation} whyItMatters={t.whyItMatters} dataPoints={t.dataPoints} side="top" />}
       </div>
-      <div className="text-sm font-semibold tabular-nums text-foreground/85 mt-0.5">
-        {shown ?? <span className="text-muted-foreground/30 italic font-normal text-xs">unknown</span>}
+      <div className={`${T_FIGURE_SM} mt-1`}>
+        {shown ?? <span className="text-muted-foreground/35 italic font-normal text-sm">unknown</span>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One qualifying line, typed by what it is asking of the reader.
+ *
+ * WARNING keeps amber and a left rule — it is the only kind that wants a
+ * decision. CAVEAT is about a NUMBER's meaning, so it is neutral but rules and
+ * indents like a warning to stay findable. CONTEXT is neither, and reads as
+ * quiet prose.
+ */
+function Note({ kind, children }: { kind: "warning" | "caveat" | "context"; children: React.ReactNode }) {
+  if (kind === "context") {
+    return <p className={`${T_DETAIL} pl-3`}>{children}</p>;
+  }
+  const warn = kind === "warning";
+  return (
+    <div className={`flex items-start gap-2.5 pl-3 border-l-2 ${warn ? "border-amber-400/60" : "border-border/60"}`}>
+      {warn
+        ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400/90 flex-shrink-0 mt-0.5" />
+        : <Info className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0 mt-0.5" />}
+      <p className={`text-xs leading-relaxed ${warn ? "text-amber-400/90 font-medium" : "text-foreground/70"}`}>
+        {children}
+      </p>
     </div>
   );
 }
@@ -511,10 +569,10 @@ function TrustLine({
   return (
     <div>
       <div className="flex items-baseline gap-2">
-        <span className="text-[9px] uppercase tracking-wide text-muted-foreground/45 w-[132px] flex-shrink-0">{label}</span>
+        <span className={`${T_MICRO} w-[150px] flex-shrink-0`}>{label}</span>
         <Pill tone={tone}>{value}</Pill>
       </div>
-      {detail && <p className="text-[10px] text-muted-foreground/55 mt-0.5 pl-[140px] leading-snug">{detail}</p>}
+      {detail && <p className={`${T_DETAIL} mt-1 pl-[158px]`}>{detail}</p>}
     </div>
   );
 }
