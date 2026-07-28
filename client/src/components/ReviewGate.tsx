@@ -112,23 +112,47 @@ function msFmt(ms: number | null | undefined): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-// Session 9 (A8): color a field chip by PROVENANCE (not presence). Marks how a
-// value was arrived at — evidence-backed vs scraped vs model inference — never
-// quality.
-const PROVENANCE_STYLES: Record<string, { cls: string; tag: string; title: string }> = {
-  evidence:  { cls: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30", tag: "✓",    title: "backed by a stored evidence signal (signals / decoded symbols)" },
-  scraped:   { cls: "text-sky-400 bg-sky-400/10 border-sky-400/30",             tag: "raw",  title: "scraped directly from the platform" },
-  derived:   { cls: "text-sky-400 bg-sky-400/10 border-sky-400/30",             tag: "calc", title: "computed from scraped stats" },
-  computed:  { cls: "text-teal-300 bg-teal-400/10 border-teal-400/30",          tag: "calc", title: "computed from engagement signals (TikTok)" },
-  estimated: { cls: "text-amber-300 bg-amber-400/10 border-amber-400/40",       tag: "est",  title: "estimated by the model (no engagement signals)" },
-  inferred:  { cls: "text-violet-300 bg-violet-400/10 border-violet-400/30",    tag: "AI",   title: "model inference — no backing evidence signal is stored" },
+/**
+ * What each provenance WORD means. Explanation only — no styling.
+ *
+ * ─── Why there is no colour here any more ───────────────────────────────────
+ * This was six hues: emerald / sky / sky / teal / amber / violet. Its own
+ * comment said the mark records how a value was arrived at and "never quality"
+ * — which is precisely the definition of a CATEGORY, and categories render
+ * neutral. It also spent amber on `estimated`, sitting a click away from the
+ * genuine warnings in section 3 and reading like one of them.
+ *
+ * The short `tag` is gone with it, and that fixes a real loss: `derived` and
+ * `computed` both abbreviated to "calc", so two distinct provenances rendered
+ * as the same word. The chip now carries the full term, which is the whole
+ * point — the WORD carries the meaning.
+ */
+const PROVENANCE_TITLES: Record<string, string> = {
+  evidence:  "backed by a stored evidence signal (signals / decoded symbols)",
+  scraped:   "scraped directly from the platform",
+  derived:   "computed from scraped stats",
+  computed:  "computed from engagement signals (TikTok)",
+  estimated: "estimated by the model (no engagement signals)",
+  inferred:  "model inference — no backing evidence signal is stored",
 };
 
-function FieldProvenanceChip({ field, provenance }: { field: string; provenance: string }) {
-  const s = PROVENANCE_STYLES[provenance] ?? { cls: "text-slate-400 bg-slate-400/10 border-slate-400/30", tag: provenance, title: provenance };
+/**
+ * ONE provenance chip, exported and shared.
+ *
+ * The report rendered this information twice — muted in section 3's Trust
+ * panel, tinted one click deeper inside the embedded diagnostics — because
+ * each surface had its own copy. There is now a single renderer, so the two
+ * cannot disagree by construction rather than by review.
+ */
+export function FieldProvenanceChip({ field, provenance }: { field: string; provenance: string }) {
+  const title = PROVENANCE_TITLES[provenance] ?? provenance;
   return (
-    <span title={`${field}: ${s.title}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10.5px] cursor-help ${s.cls}`}>
-      {field}<span className="opacity-50 text-[8.5px] uppercase">{s.tag}</span>
+    <span
+      title={`${field}: ${title}`}
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-border/50 bg-secondary/40 text-foreground/70 text-[11px] cursor-help"
+    >
+      {field}
+      <span className="text-muted-foreground/50 uppercase text-[9px] tracking-wide">{provenance}</span>
     </span>
   );
 }

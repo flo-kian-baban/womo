@@ -38,7 +38,9 @@ import TranscriptPanel, { DecodedSignalsPanel } from "./TranscriptPanel";
 import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
 import { MetricTooltip } from "@/components/MetricTooltip";
 import { PlatformMark, platformLabel } from "@/components/PlatformMark";
-import { PendingReviewBanner, ReviewStatusBadge, RunDiagnosticsView } from "./ReviewGate";
+import {
+  PendingReviewBanner, ReviewStatusBadge, RunDiagnosticsView, FieldProvenanceChip,
+} from "./ReviewGate";
 import { RunCostAndProcess } from "./RunCostAndProcess";
 import {
   FIELD_SECTIONS, BOOLEAN_FIELDS, FieldValue, VideoEvidenceTable,
@@ -415,12 +417,12 @@ export default function CreatorReport({
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1">
+                  {/* The SHARED renderer — Trust and the embedded diagnostics
+                      one click below now render provenance from the same
+                      component, so they cannot drift into two treatments of
+                      the same information again. */}
                   {d.fields.provenance.map(p => (
-                    <span key={p.field} title={`${p.field}: ${p.provenance}`}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border border-border/50 bg-secondary/40 text-foreground/70">
-                      {p.field}
-                      <span className="text-muted-foreground/50 uppercase text-[9px] tracking-wide">{p.provenance}</span>
-                    </span>
+                    <FieldProvenanceChip key={p.field} field={p.field} provenance={p.provenance} />
                   ))}
                 </div>
                 <p className={T_DETAIL}>
