@@ -99,6 +99,18 @@ function RadarWarningBadge({ warning }: { warning: string }) {
       color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
       desc: "Creator is behind the niche's current adoption position",
     },
+    // M2: the legend covered 5 of the 7 warning types the engine can emit —
+    // the two below fell through to a blank default badge.
+    "Low Social Engagement": {
+      icon: AlertTriangle,
+      color: "text-orange-400 bg-orange-400/10 border-orange-400/30",
+      desc: "Brand TikTok engagement rate is below 0.5% — limited social proof",
+    },
+    "Negative Audience Sentiment": {
+      icon: AlertTriangle,
+      color: "text-red-400 bg-red-400/10 border-red-400/30",
+      desc: "Audience mentions of this brand skew negative (at medium/high confidence) — partnership may inherit reputational risk",
+    },
   };
 
   const config = configs[warning] ?? { icon: AlertTriangle, color: "text-muted-foreground bg-muted/30 border-border", desc: "" };
@@ -408,12 +420,15 @@ export default function FITScore() {
                 <div className="text-5xl font-serif gold-text">{matchResult.result.caiScore.toFixed(2)}</div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-muted-foreground">Cultural Match Score / 10</span>
+                  {/* M2: transcribed from fitEngine.ts — calculateFITScore
+                      (weighted sum + 7.5/6.0 thresholds + alignment cap) and
+                      runFullFITCalculation (mention-modifier recompute). */}
                   <MetricTooltip
                     title="Cultural Match Score"
-                    explanation="Composite score measuring structural cultural alignment between creator and brand across three dimensions: archetype compatibility, cultural momentum, and identity stability."
-                    formula="CMS = ((Alignment × α) + (Pulse × β) + (Stability × γ)) / 10 | Range: 0–10 | Thresholds: ≥8.0 Exceptional, 6.0–7.9 Strong, 4.0–5.9 Moderate, <4.0 Poor"
-                    whyItMatters="Primary go/no-go signal. Scores <6.0 indicate partnership will feel inauthentic to audiences regardless of engagement metrics. Weights (α, β, γ) are brand-archetype-specific and sum to 1.0."
-                    dataPoints={["Alignment score (archetype + myth + decoding)", "Pulse score (Rogers stage + liminal phase)", "Stability score (Goffman consistency + drift signal)", "Brand-specific weight coefficients"]}
+                    explanation="The weighted sum of the three sub-scores, each 0–10. The displayed value includes the audience-mention modifiers (sentiment on Stability, vocabulary boost on Alignment)."
+                    formula="CMS = Alignment×α + Pulse×β + Stability×γ | Range 0–10 | Status: ≥7.5 Green Light · ≥6.0 Proceed with Caution · <6.0 Do Not Proceed. A Green Light is capped to Caution when Alignment < 6.0."
+                    whyItMatters="It is the engine's single composite verdict. The weights α/β/γ come from the brand-type table and sum to 1.0 — so which sub-score dominates depends on the brand's type, not on the creator."
+                    dataPoints={["Alignment (archetype + myth + tribe + decoding modifier + vocab boost)", "Pulse (Rogers base + liminal adjustment + TikTok boosts)", "Stability (Goffman + drift, sentiment-adjusted)", "α/β/γ from the brand-type weight table"]}
                     side="top"
                   />
                 </div>
@@ -451,12 +466,15 @@ export default function FITScore() {
                   color="oklch(0.65 0.15 240)"
                   size={110}
                 />
+                {/* M2: transcribed from fitEngine.ts — calculateAlignmentScore
+                    (unweighted mean + modifier), ARCHETYPE tiers 10/7/2.5,
+                    DECODING_MODIFIERS, blendDecodingSignals, vocab boost. */}
                 <MetricTooltip
                   title="Alignment (α)"
-                  explanation="Measures three-tier cultural resonance: archetype compatibility (12×12 matrix), shared mythology, and audience decoding acceptance."
-                  formula="Alignment = (Archetype × 0.4) + (Myth × 0.35) + (Decoding × 0.25) | Archetype: Resonant=100, Complementary=70, Clashing=25 | Decoding: Dominant=100, Negotiated=65, Oppositional=20"
-                  whyItMatters="Foundation of cultural fit. Archetype clashes (25 pts) create inauthentic partnerships regardless of engagement. Decoding mismatch means audience rejects brand message."
-                  dataPoints={["12 Jungian archetypes with pairings/clashes", "Myth alignment from creator transcripts", "Stuart Hall decoding from audience sentiment"]}
+                  explanation="The unweighted mean of three 0–10 components, plus a Stuart Hall decoding modifier, plus an audience-vocabulary boost. There is no 0.4/0.35/0.25 weighting — the three components count equally."
+                  formula="Alignment = mean(Archetype, Myth, Tribe) + decoding modifier (Dominant +0.5 · Negotiated 0 · Oppositional −1.0), clamped 0–10, then + vocab boost up to +1.5 when brand-mention hashtags/keywords overlap the creator's vocabulary. Archetype: Resonant 10 · Complementary 7 · Clashing 2.5."
+                  whyItMatters="Myth and Tribe are LLM-judged from the two Barthes-myth sentences; when either sentence is missing or the call fails, both fall back to 3.0 and the match is flagged degraded. When the brand carries its own decoding, creator and brand decoding are blended (any Oppositional → Oppositional)."
+                  dataPoints={["12-archetype compatibility matrix (pairs/clashes)", "Myth + tribe scores: one LLM call over both barthesMyth sentences (fallback 3.0)", "Stuart Hall decoding — extracted framework field, bilaterally blended when brand-side exists", "Brand mention hashtags/keywords vs creator vocabulary"]}
                   side="bottom"
                 />
               </div>
@@ -468,12 +486,14 @@ export default function FITScore() {
                   color="oklch(0.65 0.15 145)"
                   size={110}
                 />
+                {/* M2: transcribed from fitEngine.ts — calculatePulseScore,
+                    ROGERS_BASE_SCORES, LIMINAL_ADJUSTMENTS, 60/40 brand blend. */}
                 <MetricTooltip
                   title="Pulse (β)"
-                  explanation="Measures cultural lifecycle positioning using Rogers adoption curve and liminal phase transitions."
-                  formula="Pulse = (Rogers × 0.6) + (Liminal × 0.4) | Rogers: Innovator=80, Early Adopter=95, Early Majority=100, Late Majority=70, Laggard=40 | Liminal: Ascending=+20, Peak=+10, Stable=0, Descending=-20, Declining=-40"
-                  whyItMatters="Creators at Early Majority (100 pts) amplify brand message. Late Majority (70 pts) or Laggard (40 pts) creators reduce perceived relevance. Liminal adjustments capture momentum shifts."
-                  dataPoints={["Rogers adoption stage from niche positioning", "Liminal phase from keyword drift + engagement trend", "Follower growth trajectory"]}
+                  explanation="A Rogers-stage base plus a small liminal adjustment, on a 0–10 scale. The liminal phases are Pre-Liminal / Liminal / Post-Liminal — not ascending/peak/descending."
+                  formula="Pulse = Rogers base (Innovators 5 · Early Adopters 6 · Early Majority 7 · Late Majority 4 · Laggards 2) + liminal (Pre-Liminal 0 · Liminal +0.5 · Post-Liminal +0.5). TikTok boost only when brand engagement rate AND post frequency are both known: rate÷10 capped +1.5, plus +0.5 daily / +0.3 for 3–5×week. When the brand has its own Rogers+Turner, Pulse = 60% creator + 40% brand."
+                  whyItMatters="Early Majority is the highest base (7) — the engine favors creators at the adoption peak. The TikTok boost has never fired on the current corpus: no brand has post-frequency data recorded."
+                  dataPoints={["Creator Rogers adopter stage (extracted framework field)", "Creator Turner liminal phase", "Brand Rogers + Turner (when present — blended 60/40)", "Brand TikTok engagement + post frequency (currently absent corpus-wide)"]}
                   side="bottom"
                 />
               </div>
@@ -485,12 +505,15 @@ export default function FITScore() {
                   color="oklch(0.78 0.12 75)"
                   size={110}
                 />
+                {/* M2: transcribed from fitEngine.ts — calculateStabilityScore,
+                    GOFFMAN_SCORES, DRIFT_SCORES, 50/50 brand blend, sentiment
+                    modifier in runFullFITCalculation. */}
                 <MetricTooltip
                   title="Stability (γ)"
-                  explanation="Measures identity coherence via Goffman stage consistency and keyword vocabulary drift over rolling 90-day windows."
-                  formula="Stability = (Goffman × 0.5) + (Drift × 0.5) | Goffman: Consistent=100, Minor Gap=80, Significant Gap=50, Full Pivot=20 | Drift: Zero Change=100, Minor=80, Moderate=50, Significant=20, Major=5"
-                  whyItMatters="Stable creators (>80 pts) are reliable ambassadors. Drifting creators (<50 pts) pose reputational risk. Drift >50% keyword shift triggers identity instability warning."
-                  dataPoints={["Goffman stage tracking across 6+ months", "Cosine similarity of keyword vocabulary (threshold: 0.85)", "Engagement trend direction"]}
+                  explanation="The average of two 0–10 tier scores — Goffman consistency and drift — with brand-side blending and an audience-sentiment adjustment. The tiers are 3- and 4-valued; there is no 'Moderate' or 'Major' drift tier."
+                  formula="Stability = (Goffman [Consistent 10 · Minor Gap 5 · Significant Gap 0] + Drift [Zero Change 9.5 · Minor 7 · Significant 3 · Full Pivot 0]) ÷ 2. Brand TikTok boost when followers known: log10(followers)÷6 capped +1.5, + engagement÷20 capped +0.5. When the brand has its own Goffman+Drift, blended 50/50. Then the mention-sentiment modifier: negative −3 · mixed −1 · positive +0.5, scaled by confidence (high ×1.0 · medium ×0.6 · low ×0.3)."
+                  whyItMatters="Identity Instability warns only at the extremes (Full Pivot or Significant Gap). The sentiment adjustment means a brand's own audience reception moves this sub-score — it is not purely about the creator."
+                  dataPoints={["Creator Goffman stage + drift signal (extracted framework fields)", "Brand Goffman + drift (when present — blended 50/50)", "Brand TikTok follower count + engagement rate", "Brand mention sentiment + confidence"]}
                   side="bottom"
                 />
               </div>
@@ -505,62 +528,67 @@ export default function FITScore() {
             </div>
 
             {/* Eight-Signal Display (Default View) */}
+            {/* M2: no fabricated values. The old inputs defaulted to `?? 50`
+                with an invented confidence — a missing measurement rendered as
+                a mid-range score. Now: real value or null, and the Cultural
+                trio is stamped DERIVED (it is the sub-scores ×10, not an
+                independently verified signal). */}
             <SignalPanel
               signals={[
                 {
                   name: "Identity Fit",
-                  score: matchResult.performanceSignals?.creativeIntegrity.score ?? 50,
-                  confidence: matchResult.performanceSignals?.creativeIntegrity.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.creativeIntegrity.reasoning ?? "Does the creator's cultural identity genuinely align with this brand's world?",
+                  score: matchResult.performanceSignals?.creativeIntegrity.score ?? null,
+                  confidence: matchResult.performanceSignals?.creativeIntegrity.confidence ?? "Insufficient Data",
+                  reasoning: matchResult.performanceSignals?.creativeIntegrity.reasoning ?? "",
                   category: "Performance",
                 },
                 {
                   name: "Performance Fit",
-                  score: matchResult.performanceSignals?.performanceConsistency.score ?? 50,
-                  confidence: matchResult.performanceSignals?.performanceConsistency.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.performanceConsistency.reasoning ?? "Does this creator have the engagement track record to deliver for this brand?",
+                  score: matchResult.performanceSignals?.performanceConsistency.score ?? null,
+                  confidence: matchResult.performanceSignals?.performanceConsistency.confidence ?? "Insufficient Data",
+                  reasoning: matchResult.performanceSignals?.performanceConsistency.reasoning ?? "",
                   category: "Performance",
                 },
                 {
                   name: "Audience Fit",
-                  score: matchResult.performanceSignals?.communityQuality.score ?? 50,
-                  confidence: matchResult.performanceSignals?.communityQuality.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.communityQuality.reasoning ?? "Are the creator's followers the people this brand actually needs to reach?",
+                  score: matchResult.performanceSignals?.communityQuality.score ?? null,
+                  confidence: matchResult.performanceSignals?.communityQuality.confidence ?? "Insufficient Data",
+                  reasoning: matchResult.performanceSignals?.communityQuality.reasoning ?? "",
                   category: "Performance",
                 },
                 {
                   name: "Receptivity Fit",
-                  score: matchResult.performanceSignals?.audienceReceptivity.score ?? (matchResult.result.parrScore || 50),
-                  confidence: matchResult.performanceSignals?.audienceReceptivity.confidence ?? "Verified",
-                  reasoning: matchResult.performanceSignals?.audienceReceptivity.reasoning ?? "Will this creator's audience accept a brand message from them?",
+                  score: matchResult.performanceSignals?.audienceReceptivity.score ?? null,
+                  confidence: matchResult.performanceSignals?.audienceReceptivity.confidence ?? "Insufficient Data",
+                  reasoning: matchResult.performanceSignals?.audienceReceptivity.reasoning ?? "",
                   category: "Performance",
                 },
                 {
                   name: "Brand Safety Fit",
-                  score: matchResult.performanceSignals?.brandTrust.score ?? 50,
-                  confidence: matchResult.performanceSignals?.brandTrust.confidence ?? "Estimated",
-                  reasoning: matchResult.performanceSignals?.brandTrust.reasoning ?? "Is this creator a stable, low-risk reputational partner for this brand?",
+                  score: matchResult.performanceSignals?.brandTrust.score ?? null,
+                  confidence: matchResult.performanceSignals?.brandTrust.confidence ?? "Insufficient Data",
+                  reasoning: matchResult.performanceSignals?.brandTrust.reasoning ?? "",
                   category: "Performance",
                 },
                 {
                   name: "Cultural Identity",
                   score: (matchResult.result.alignmentScoreRaw * 10),
-                  confidence: "Verified",
-                  reasoning: "Archetype + myth alignment + tribe match (Alignment component).",
+                  confidence: "Derived",
+                  reasoning: "The Alignment sub-score ×10 — the hero's α rescaled, not an independent measurement.",
                   category: "Cultural",
                 },
                 {
                   name: "Cultural Momentum",
                   score: (matchResult.result.pulseScoreRaw * 10),
-                  confidence: "Verified",
-                  reasoning: "Rogers adoption stage + liminal adjustment (Pulse component).",
+                  confidence: "Derived",
+                  reasoning: "The Pulse sub-score ×10 — the hero's β rescaled, not an independent measurement.",
                   category: "Cultural",
                 },
                 {
                   name: "Partnership Stability",
                   score: (matchResult.result.stabilityScoreRaw * 10),
-                  confidence: "Verified",
-                  reasoning: "Goffman stage consistency + drift signal (Stability component).",
+                  confidence: "Derived",
+                  reasoning: "The Stability sub-score ×10 — the hero's γ rescaled, not an independent measurement.",
                   category: "Cultural",
                 },
               ]}
@@ -587,12 +615,14 @@ export default function FITScore() {
                     <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
                       PARR
                     </div>
+                    {/* M2: transcribed from fitEngine.ts — calculatePARR.
+                        Engagement rate and comment sentiment are NOT inputs. */}
                     <MetricTooltip
                       title="PARR — Predicted Audience Receptivity Rate"
-                      explanation="Percentage of creator's audience structurally likely to accept brand message as authentic."
-                      formula="PARR = (Engagement Rate × 0.4) + (Audience Sentiment × 0.3) + (Decoding Match × 0.3) | Sentiment: Positive=100, Mixed=60, Negative=20 | Decoding: Dominant=100, Negotiated=65, Oppositional=20"
-                      whyItMatters="High PARR (>70%) = audience accepts message without cognitive dissonance. Low PARR (<40%) = audience perceives partnership as inauthentic paid placement, reducing conversion."
-                      dataPoints={["Per-video engagement rate: (likes+comments+shares)/views", "Comment sentiment analysis via LLM classification", "Stuart Hall decoding mode from audience response patterns"]}
+                      explanation="A weighted 0–100 index of five structural signals — not a measured share of the audience, and not built from engagement or comment data."
+                      formula="PARR = (Tribe match ×0.30 + Decoding ×0.25 + Archetype match ×0.20 + Vocabulary overlap ×0.15 + Persona consistency ×0.10) × 10. Decoding: Dominant 10 · Negotiated 5 · Oppositional 0. Persona (Goffman): Consistent 10 · Minor Gap 5 · Significant Gap 1. Labels: ≥80 High Cultural Legitimacy · ≥60 Moderate · ≥40 Mixed Signal · <40 Low."
+                      whyItMatters="Its heaviest input, tribe match, is LLM-judged (fallback 3.0 when myths are missing — flagged as degradation). It uses the creator's own decoding and Goffman, not the bilateral blend Alignment uses."
+                      dataPoints={["Tribe match score (LLM, same call as myth)", "Stuart Hall decoding (creator-side)", "Archetype compatibility (10/7/2.5)", "Symbolic vocabulary overlap (Jaccard ×33.3, capped 10)", "Goffman persona consistency"]}
                       side="top"
                     />
                   </div>
@@ -618,7 +648,9 @@ export default function FITScore() {
                   }} />
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Predicted Audience Receptivity Rate — the percentage of this creator's audience structurally guaranteed to receive the brand message as authentic.
+                  Predicted Audience Receptivity Rate — a 0–100 index of structural receptivity built from
+                  five weighted signals. It predicts nothing about individual audience members and
+                  guarantees nothing; see the tooltip for exactly what it counts.
                 </p>
                 {/* Shared symbolic evidence */}
                 {(matchResult.result.sharedThemes?.length ?? 0) > 0 && (
@@ -642,12 +674,15 @@ export default function FITScore() {
                     <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
                       QoV
                     </div>
+                    {/* M2: transcribed from fitEngine.ts — the qovScore line.
+                        There is no tribe/category/hashtag formula; QoV is a
+                        product of two numbers already on this page. */}
                     <MetricTooltip
                       title="QoV — Quality of View"
-                      explanation="Composite metric measuring genuine brand equity per impression via audience tribe alignment, category affinity, and hashtag overlap."
-                      formula="QoV = (Audience Tribe Alignment × 0.4) + (Brand Category Affinity × 0.3) + (Hashtag Overlap × 0.3) | Tribe: Strong=100, Partial=70, Weak=30 | Category: High=100, Medium=60, Low=20 | Hashtag: (Shared/Total Unique) × 100"
-                      whyItMatters="Raw impression counts are meaningless without quality context. QoV >60% = high-quality impressions converting to brand equity. QoV <30% = audience-brand mismatch despite engagement."
-                      dataPoints={["Audience demographic overlap with brand target", "Creator hashtag frequency in brand category", "Hashtag overlap: creator's top 50 vs. brand campaign hashtags"]}
+                      explanation="The product of the Cultural Match Score and PARR, expressed as a percentage. It contains no information beyond those two numbers."
+                      formula="QoV = (CMS ÷ 10) × (PARR ÷ 100) × 100. Note: the engine computes it from the CMS before the audience-mention modifiers are applied, so when modifiers are non-zero QoV will not exactly equal the displayed CMS × PARR."
+                      whyItMatters="Treat it as a convenience composite, not independent evidence — it rises and falls exactly with CMS and PARR."
+                      dataPoints={["Cultural Match Score (pre-modifier)", "PARR"]}
                       side="top"
                     />
                   </div>

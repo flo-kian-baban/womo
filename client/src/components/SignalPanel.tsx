@@ -5,8 +5,20 @@ import { MetricTooltip } from "@/components/MetricTooltip";
 
 export interface Signal {
   name: string;
-  score: number; // 0-100
-  confidence: "Verified" | "Estimated" | "Insufficient Data";
+  /**
+   * 0-100, or NULL when this match never computed the signal (older persisted
+   * rows). M2: a missing measurement renders as missing — the previous
+   * `?? 50` fallbacks put a mid-range number on screen that was
+   * indistinguishable from a real score.
+   */
+  score: number | null;
+  /**
+   * Measurement provenance. "Derived" (M2) marks a value that is a rescaling
+   * of another number on the same page (the three Cultural signals are the
+   * CMS sub-scores ×10) — previously stamped "Verified", which claimed an
+   * independent verification that never happened.
+   */
+  confidence: "Verified" | "Estimated" | "Insufficient Data" | "Derived";
   reasoning: string;
   category: "Performance" | "Cultural";
 }
@@ -29,6 +41,8 @@ const getConfidenceBadgeVariant = (confidence: string) => {
       return "default";
     case "Estimated":
       return "secondary";
+    case "Derived":
+      return "outline";
     case "Insufficient Data":
       return "outline";
     default:
@@ -63,54 +77,70 @@ const getStatusTextColor = (status: string) => {
 };
 
 // ─── Signal Definitions ────────────────────────────────────────────────────────
+/*
+  M2: every formula below is transcribed from the CODE, with its source cited.
+  The previous set described weightings, tier values and inputs that exist
+  nowhere in the engine (e.g. "Identity Fit = Goffman×0.4 + …", Rogers tiers
+  of 80/95/100). Sources: server/performanceSignals.ts (five Performance
+  signals) and server/fitEngine.ts (the three Cultural rescalings). If a
+  formula here disagrees with those files, THIS FILE is the one that is wrong.
+*/
 const SIGNAL_DEFINITIONS: Record<string, { explanation: string; formula: string; whyItMatters: string; dataPoints: string[] }> = {
   "Identity Fit": {
-    explanation: "Grades how consistently the creator's cultural identity aligns with this brand's world — whether both parties show up as genuine, coherent identities.",
-    formula: "Identity Fit = (Creator Goffman × 0.4) + (Brand Goffman × 0.3) + (Mention Sentiment × 0.3) | Goffman Consistent=+20, Minor Gap=+15, Significant Gap=+5, Full Pivot=0 | Sentiment: Positive=+15, Mixed=0, Negative=-15",
-    whyItMatters: "Partnerships where either party performs inauthentically are decoded by audiences as forced. Identity Fit >75 = natural collaboration. <50 = high risk of audience rejection.",
-    dataPoints: ["Creator Goffman stage consistency (6+ month tracking)", "Brand Goffman gap score", "Brand mention sentiment (positive/mixed/negative)"],
+    // source: performanceSignals.ts — calculateCreativeIntegritySignal
+    explanation: "A point-based heuristic of whether creator and brand each show up as a consistent, genuine identity. Additive points, baseline 20, clamped 0–100.",
+    formula: "20 baseline + creator Goffman (Consistent 10 · Minor Gap 5 · Significant Gap 0) ×2 + cultural capital (Produce +10 · Relay +5) + tone register present +10 + brand audience sentiment with ≥5 mentions (positive +15 · mixed +5 · negative −15; insufficient data +3) + brand Goffman (10/5/0) − 20 if a Produce-type creator meets a brand tone containing “prescriptive”",
+    whyItMatters: "It grades identity consistency on both sides at once — but it is a heuristic point sum, not a measurement; treat the level, not decimal differences, as meaningful.",
+    dataPoints: ["Creator Goffman stage + cultural capital + tone register (extracted framework fields)", "Brand mention sentiment + mention count", "Brand Goffman consistency", "Brand tone text"],
   },
   "Performance Fit": {
-    explanation: "Grades how reliably this creator delivers active audiences and how structurally stable the brand is as a campaign partner.",
-    formula: "Performance Fit = (Engagement Rate × 0.35) + (Lifecycle Phase × 0.35) + (Brand Engagement × 0.3) | Engagement: 0–35 pts | Lifecycle Growth=+15, Stable=+5, Decline=-5 | Brand TikTok Rate=0–15, Brand Rating=0–15",
-    whyItMatters: "Perfect cultural fit produces no value if audience is disengaged or brand has no platform presence. Performance Fit >70 = strong delivery potential. <50 = structural performance risk.",
-    dataPoints: ["Creator engagement rate: (likes+comments+shares)/views", "Creator lifecycle phase (Growth/Stable/Decline)", "Brand TikTok engagement rate (if available)", "Brand star rating (Google/Yelp/if available)"],
+    // source: performanceSignals.ts — calculatePerformanceConsistencySignal
+    explanation: "A point-based heuristic of delivery reliability. No baseline — the score is earned from whichever inputs exist. Clamped 0–100.",
+    formula: "creator engagement rate (≥6% +20 · ≥3% +15 · ≥1% +10 · <1% +5) + lifecycle (Growth/Maturity +15 · Emergence +10 · Decline −10) − 10 if brand-saturated + brand archetype present +10 + brand Goffman (10/5/0) + brand drift (Zero 10 · Minor 7 · Significant 3 · Full Pivot 0) + brand TikTok engagement (≥3% +10 · ≥1% +5) + brand rating (≥4.0 +10 · ≥3.0 +5)",
+    whyItMatters: "Sums the engagement and stability facts available for the pair. Inputs that were never captured contribute zero — a low score can mean weak performance OR missing data; the confidence badge says which.",
+    dataPoints: ["Creator engagement rate + lifecycle phase + brand-saturation flag", "Brand archetype, Goffman, drift", "Brand TikTok engagement rate (null for most brands in the corpus)", "Brand star rating"],
   },
   "Audience Fit": {
-    explanation: "Grades how well the creator's actual community matches the people this brand needs to reach.",
-    formula: "Audience Fit = (PARR × 0.5) + (Hashtag Overlap × 0.5) | PARR: 0–100 | Hashtag Overlap: (Shared Hashtags / Total Unique) × 100",
-    whyItMatters: "Follower count is irrelevant if followers are wrong demographic. Audience Fit >70 = strong audience match. <40 = audience-brand mismatch despite engagement.",
-    dataPoints: ["PARR: creator audience receptivity to brand message", "Hashtag overlap: creator's top 50 vs. brand campaign hashtags", "Audience tribe demographic alignment"],
+    // source: performanceSignals.ts — calculateCommunityQualitySignal
+    explanation: "PARR re-used as the base, plus small additive bonuses. Clamped 0–100.",
+    formula: "PARR (0–100; 50 fallback if absent) + creator decoding (Dominant +15 · Negotiated +5 · Oppositional −15) + creator region present +5 + audience-relationship present +5 + mention-hashtag/creator-keyword overlap (ratio >0.3 +10 · >0.1 +5)",
+    whyItMatters: "Mostly PARR wearing a different name — the bonuses shift it by at most 35 points. Read it together with Receptivity Fit, which also builds on PARR; they are not independent evidence.",
+    dataPoints: ["PARR (see its tooltip)", "Stuart Hall decoding (creator-side)", "Brand mention hashtags vs creator keywords"],
   },
   "Receptivity Fit": {
-    explanation: "Grades how likely the creator's audience will accept and act on a brand message from this creator.",
-    formula: "Receptivity Fit = PARR | PARR = (Engagement Rate × 0.4) + (Audience Sentiment × 0.3) + (Decoding Match × 0.3) | Sentiment: Positive=100, Mixed=60, Negative=20",
-    whyItMatters: "Right demographic can still reject brand message if audience doesn't trust creator. Receptivity Fit >70 = audience will accept message. <40 = audience perceives partnership as inauthentic.",
-    dataPoints: ["Per-video engagement rate", "Comment sentiment analysis (LLM)", "Stuart Hall decoding mode (Dominant/Negotiated/Oppositional)"],
+    // source: performanceSignals.ts — calculateAudienceReceptivitySignal
+    explanation: "A blend of PARR and QoV with small modifiers. Clamped 0–100.",
+    formula: "PARR × 0.6 (50 baseline if PARR absent) + QoV × 0.2 + creator decoding (Dominant +10 · Oppositional −10) + 10 if BOTH myth sentences contain the word “success”",
+    whyItMatters: "Because it is built from PARR and QoV (which is itself CMS × PARR), this signal overlaps heavily with the other receptivity numbers on this page — it is a re-blend, not new evidence. The literal “success” keyword bonus is a real behavior of the code.",
+    dataPoints: ["PARR", "QoV", "Stuart Hall decoding (creator-side)", "The two Barthes-myth sentences (substring check)"],
   },
   "Brand Safety Fit": {
-    explanation: "Grades mutual credibility between creator and brand — whether both parties are stable, low-risk reputational partners.",
-    formula: "Brand Safety Fit = (Creator Goffman × 0.25) + (Drift Signal × 0.25) + (Mention Sentiment × 0.25) + (Brand Rating × 0.25) | Goffman: Consistent=+20, Minor Gap=+15, Significant Gap=+5, Full Pivot=0 | Drift: Zero=+20, Minor=+15, Moderate=+5, Significant=0 | Sentiment: Positive=+20, Mixed=+10, Negative=0 | Rating: ≥4.0=+20, 3.0–3.9=+15, <3.0=+5",
-    whyItMatters: "Single reputational incident from either party damages the other. Brand Safety Fit >80 = low risk. <50 = structural reputational risk; requires close monitoring.",
-    dataPoints: ["Creator Goffman stage consistency", "Creator drift signal (keyword vocabulary shift %)", "Brand mention sentiment (positive/mixed/negative)", "Brand star rating (Google/Yelp/if available)"],
+    // source: performanceSignals.ts — calculateBrandTrustSignal
+    explanation: "A point-based heuristic of mutual reputational risk. Baseline 20, clamped 0–100.",
+    formula: "20 baseline + creator Goffman (Consistent +15 · Minor Gap +8 · Significant Gap −10) + creator drift (Zero +10 · Minor +7 · Significant +3 · Full Pivot −15) − 10 if brand-saturated + brand sentiment with ≥5 mentions (positive +20 · mixed +10 · negative −10) + brand rating (≥4.5 +15 · ≥4.0 +10 · ≥3.5 +5 · <3.0 −5) + brand archetype present +5 + brand Goffman (10/5/0) + data confidence (high +5 · low −5)",
+    whyItMatters: "Aggregates the stability and reputation facts that exist for the pair. Like the other point sums: missing inputs contribute nothing, so compare levels, not decimals.",
+    dataPoints: ["Creator Goffman + drift + saturation flag", "Brand mention sentiment + count", "Brand star rating", "Run data-confidence level"],
   },
   "Cultural Identity": {
-    explanation: "Measures the depth of symbolic overlap between the creator's cultural vocabulary and the brand's cultural vocabulary.",
-    formula: "Cultural Identity = (Symbolic Overlap % × 0.5) + (Shared Themes × 0.3) + (Archetype Resonance × 0.2) | Symbolic Overlap: >70%=100, 40–70%=70, <40%=30 | Archetype: Resonant=100, Complementary=70, Clashing=25",
-    whyItMatters: "Shared symbolic language is foundation of authentic partnership. Cultural Identity >75 = natural collaboration. <50 = forced partnership, audiences perceive as paid placement.",
-    dataPoints: ["Creator decoded symbols from transcripts", "Brand decoded symbols from positioning", "Shared keywords (cosine similarity)", "Shared themes (LLM extraction)", "Archetype compatibility matrix"],
+    // source: fitEngine.ts — alignmentScoreRaw, rescaled in the page
+    explanation: "This is the Alignment sub-score × 10 — the same number already shown in the hero, rescaled to 0–100. It is not an independent measurement.",
+    formula: "Alignment × 10, where Alignment = mean(archetype match, myth alignment, tribe match) + Stuart Hall modifier + audience-vocab boost (see the Alignment tooltip)",
+    whyItMatters: "Shown here so the eight-signal grid covers the cultural dimensions — but do not count it as separate evidence: it moves exactly when Alignment moves.",
+    dataPoints: ["Identical to Alignment (α)"],
   },
   "Cultural Momentum": {
-    explanation: "Measures whether the creator's cultural trajectory is accelerating, stable, or declining and aligns with brand growth direction.",
-    formula: "Cultural Momentum = (Rogers Stage × 0.6) + (Liminal Phase × 0.4) | Rogers: Innovator=80, Early Adopter=95, Early Majority=100, Late Majority=70, Laggard=40 | Liminal: Ascending=+20, Peak=+10, Stable=0, Descending=-20, Declining=-40",
-    whyItMatters: "Creator at Early Majority (100 pts) + brand entering market = strong match. Declining creator (40 pts) + brand seeking growth = weak match. Momentum alignment determines partnership longevity.",
-    dataPoints: ["Rogers adopter stage (from niche positioning)", "Liminal phase (from keyword drift + engagement trend)", "Follower growth trajectory", "Engagement trend direction"],
+    // source: fitEngine.ts — pulseScoreRaw, rescaled in the page
+    explanation: "This is the Pulse sub-score × 10 — the hero's Pulse rescaled to 0–100. Not an independent measurement.",
+    formula: "Pulse × 10, where Pulse = Rogers base + liminal adjustment (+ TikTok boosts, brand blend — see the Pulse tooltip)",
+    whyItMatters: "Moves exactly when Pulse moves; separate evidence it is not.",
+    dataPoints: ["Identical to Pulse (β)"],
   },
   "Partnership Stability": {
-    explanation: "Measures the structural stability of the partnership over time — whether both parties have consistent identities that won't drift or conflict.",
-    formula: "Partnership Stability = (Creator Goffman × 0.4) + (Drift Signal × 0.3) + (Brand Goffman × 0.3) | Goffman: Consistent=100, Minor Gap=80, Significant Gap=50, Full Pivot=20 | Drift: Zero=100, Minor=80, Moderate=50, Significant=20, Major=5",
-    whyItMatters: "Long-term partnerships require both parties to remain consistent. Stability >80 = partnership can be renewed/extended. <50 = high risk of identity conflict or audience confusion after 6 months.",
-    dataPoints: ["Creator Goffman stage consistency (6+ month tracking)", "Creator drift signal (keyword vocabulary shift %)", "Brand Goffman gap score", "Follower growth trajectory"],
+    // source: fitEngine.ts — stabilityScoreRaw, rescaled in the page
+    explanation: "This is the Stability sub-score × 10 — the hero's Stability rescaled to 0–100. Not an independent measurement.",
+    formula: "Stability × 10, where Stability = (Goffman + Drift) ÷ 2 (+ TikTok boosts, brand blend, sentiment modifier — see the Stability tooltip)",
+    whyItMatters: "Moves exactly when Stability moves; separate evidence it is not.",
+    dataPoints: ["Identical to Stability (γ)"],
   },
 };
 
@@ -168,24 +198,41 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                           />
                         )}
                       </div>
-                      <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
-                        {signal.confidence}
-                      </Badge>
+                      {/* M2: no provenance stamp on a value that does not exist. */}
+                      {signal.score != null && (
+                        <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
+                          {signal.confidence}
+                        </Badge>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 bg-gray-700 rounded-full h-2">
-                        <div
-                          className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
-                          style={{ width: `${signal.score}%` }}
-                        />
+                    {/* M2: absence renders as absence. These used to be fed
+                        `?? 50` fallbacks — a missing measurement drew a
+                        mid-range bar indistinguishable from a real score. */}
+                    {signal.score != null ? (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-gray-700 rounded-full h-2">
+                          <div
+                            className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
+                            style={{ width: `${signal.score}%` }}
+                          />
+                        </div>
+                        <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
+                          {signal.score.toFixed(2)}
+                        </span>
                       </div>
-                      <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                        {signal.score.toFixed(2)}
-                      </span>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-gray-800 rounded-full h-2" />
+                        <span className="text-sm italic text-gray-500">not computed</span>
+                      </div>
+                    )}
 
-                    <p className="text-sm text-gray-300">{signal.reasoning}</p>
+                    <p className="text-sm text-gray-300">
+                      {signal.score != null
+                        ? signal.reasoning
+                        : "This signal was not computed for this match — it predates the signal, or its inputs were unavailable. No number is substituted."}
+                    </p>
                   </div>
                 </Card>
               );
@@ -220,24 +267,41 @@ export const SignalPanel: React.FC<SignalPanelProps> = ({
                           />
                         )}
                       </div>
-                      <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
-                        {signal.confidence}
-                      </Badge>
+                      {/* M2: no provenance stamp on a value that does not exist. */}
+                      {signal.score != null && (
+                        <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
+                          {signal.confidence}
+                        </Badge>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 bg-gray-700 rounded-full h-2">
-                        <div
-                          className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
-                          style={{ width: `${signal.score}%` }}
-                        />
+                    {/* M2: absence renders as absence. These used to be fed
+                        `?? 50` fallbacks — a missing measurement drew a
+                        mid-range bar indistinguishable from a real score. */}
+                    {signal.score != null ? (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-gray-700 rounded-full h-2">
+                          <div
+                            className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
+                            style={{ width: `${signal.score}%` }}
+                          />
+                        </div>
+                        <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
+                          {signal.score.toFixed(2)}
+                        </span>
                       </div>
-                      <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                        {signal.score.toFixed(2)}
-                      </span>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-gray-800 rounded-full h-2" />
+                        <span className="text-sm italic text-gray-500">not computed</span>
+                      </div>
+                    )}
 
-                    <p className="text-sm text-gray-300">{signal.reasoning}</p>
+                    <p className="text-sm text-gray-300">
+                      {signal.score != null
+                        ? signal.reasoning
+                        : "This signal was not computed for this match — it predates the signal, or its inputs were unavailable. No number is substituted."}
+                    </p>
                   </div>
                 </Card>
               );
