@@ -3428,6 +3428,21 @@ export async function getBrandProfileById(subjectId: string) {
     // Audit columns (P1-5, I8)
     semanticWordCount: row.brand_observations.semanticWordCount ?? null,
     crawledPagesCount: row.brand_observations.crawledPagesCount ?? null,
+    /**
+     * ─── The three the creator getter always mapped and this one did not ────
+     * All three live on `observations` and were simply never read across. The
+     * brand report needs them for the same reasons the creator report does:
+     * `runId` reaches the campaign's six phase rows (the only route to the
+     * phase-level account), and review status + confidence are the trust
+     * section's two headline judgements. Additive read-path only — no existing
+     * value changes.
+     */
+    runId: row.observations.runId,
+    reviewStatus: row.observations.reviewStatus,
+    reviewedAt: row.observations.reviewedAt,
+    reviewedBy: row.observations.reviewedBy,
+    dataConfidenceLevel: row.observations.dataConfidenceLevel,
+    observedAt: row.observations.observedAt,
     // Timestamps
     createdAt: row.observations.createdAt,
     updatedAt: row.subjects.updatedAt,
@@ -3453,7 +3468,15 @@ export async function listBrandProfiles(search?: string) {
     .leftJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
     .leftJoin(brandObservations, eq(brandObservations.observationId, observations.id))
     .where(baseCondition)
-    .orderBy(desc(subjects.createdAt))
+    /**
+     * Ordered by the OBSERVATION, not the subject — the same fix creators got.
+     * `subjects.created_at` is when the brand was first seen, so a re-analysed
+     * brand never resurfaced even though its new observation was the newest
+     * thing in the corpus. READ-PATH ONLY: same rows, same values, same
+     * filters; only the sequence changes, and `observedAt` is shipped below so
+     * the sort key is visible rather than merely trusted.
+     */
+    .orderBy(desc(observations.observedAt))
     .limit(50);
 
   return rows.map(row => ({
@@ -3462,6 +3485,8 @@ export async function listBrandProfiles(search?: string) {
     brandType: row.subjects.brandType,
     latestArchetype: row.subjects.latestArchetype,
     createdAt: row.subjects.createdAt,
+    /** The key the list is ORDERED by — shipped so the sort is auditable. */
+    observedAt: row.observations?.observedAt ?? null,
     // Fields accessed by Library.tsx rows
     archetype: row.brand_observations?.archetype ?? row.subjects.latestArchetype,
     category: row.subjects.brandCategory ?? null,
