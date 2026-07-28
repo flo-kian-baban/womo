@@ -33,7 +33,7 @@ import {
   TrendingUp, Video, Hash, Tag, Film, Shield, FileText, Layers, Receipt,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import TranscriptPanel from "./TranscriptPanel";
+import TranscriptPanel, { DecodedSignalsPanel } from "./TranscriptPanel";
 import FieldExplainer, { EXPLAINED_FIELD_KEYS } from "./FieldExplainer";
 import { MetricTooltip } from "@/components/MetricTooltip";
 import { PlatformMark, platformLabel } from "@/components/PlatformMark";
@@ -287,42 +287,13 @@ export default function CreatorReport({
             </div>
           ))}
 
-          {/* Decoded signals — identity claims and the rest, with the summary. */}
+          {/* Decoded signals — the SINGLE rendering, in section 2 where a
+              finding belongs. TranscriptPanel is told not to render its copy. */}
           {(decodedCount > 0 || profile.symbolicSummary) && (
-            <Disclosure label="Decoded signals" summary={`${decodedCount} phrases · symbolic summary`}>
-              <div className="text-[11px] space-y-3">
-                {profile.symbolicSummary && (
-                  <p className="text-muted-foreground/75 leading-relaxed">{profile.symbolicSummary}</p>
-                )}
-                {decoded && ([
-                  ["Identity claims", decoded.identityClaims],
-                  ["Status signals", decoded.statusSignals],
-                  ["Community references", decoded.communityReferences],
-                  ["Aspiration drivers", decoded.aspirationDrivers],
-                ] as const).map(([label, list]) => (
-                  (list?.length ?? 0) > 0 && (
-                    <div key={label}>
-                      <div className="text-[9px] uppercase tracking-wide text-muted-foreground/45 mb-1">
-                        {label} ({list!.length})
-                      </div>
-                      <div className="space-y-1">
-                        {list!.map((s: any, i: number) => (
-                          <div key={i} className="flex items-baseline gap-2">
-                            <span className="font-mono text-foreground/75 flex-shrink-0">“{s.phrase}”</span>
-                            <span className="text-muted-foreground/60">{s.meaning}</span>
-                            {s.informs?.length > 0 && (
-                              <span className="text-[9px] text-muted-foreground/35 ml-auto flex-shrink-0">
-                                informs {s.informs.join(", ")}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                ))}
-              </div>
-            </Disclosure>
+            <DecodedSignalsPanel decoded={profile.decodedSymbols ?? {
+              identityClaims: [], statusSignals: [], communityReferences: [],
+              aspirationDrivers: [], symbolicSummary: profile.symbolicSummary ?? "",
+            }} />
           )}
         </div>
       </Section>
@@ -446,7 +417,7 @@ export default function CreatorReport({
         <div className="space-y-0">
           <Disclosure label="Transcript excerpts" summary={`${transcripts.length} with transcript`} defaultOpen={transcripts.length > 0}>
             {transcripts.length > 0
-              ? <TranscriptPanel profile={profile} />
+              ? <TranscriptPanel profile={profile} showDecoded={false} />
               : <p className="text-[11px] text-muted-foreground/50 italic">No transcripts captured for this run.</p>}
           </Disclosure>
 
@@ -492,7 +463,7 @@ export default function CreatorReport({
           </Disclosure>
 
           <Disclosure label="Content items" summary={`${profile.discoveredVideoPoolJson?.length ?? 0} in the pool · full evidence table`}>
-            <VideoEvidenceTable profile={profile} />
+            <VideoEvidenceTable profile={profile} alwaysOpen />
           </Disclosure>
 
           <Disclosure label="Add a supplemental video" summary="ingest one post by URL">

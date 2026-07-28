@@ -56,11 +56,35 @@ interface TranscriptEntry {
 
 // ─── Highlight Config ─────────────────────────────────────────────────────────
 
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ THESE FOUR HUES STAY. Do not "fix" them in a later colour pass.           ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ * Everywhere else on these pages, categorical values render neutral because the
+ * hue carried nothing the label did not. Here it is the reverse: hue IS the
+ * encoding. Four entity kinds are marked INSIDE a running paragraph, where
+ * there is no room for a label beside each mark, and the legend sits directly
+ * above the text that uses it. Neutralising these would delete the distinction
+ * rather than relocate it — the one legitimate categorical use of colour on
+ * this surface.
+ *
+ * What did change (B2b): filled chips became underline-with-tint. A paragraph
+ * carrying eight filled marks read as a ransom note; an underline marks the
+ * span without stopping the prose.
+ */
 const HIGHLIGHT_STYLES: Record<HighlightType, string> = {
-  place:  "bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded px-0.5",
-  entity: "bg-teal-500/15 text-teal-300 border border-teal-500/30 rounded px-0.5",
-  claim:  "bg-violet-500/15 text-violet-300 border border-violet-500/30 rounded px-0.5",
-  person: "bg-sky-500/15 text-sky-300 border border-sky-500/30 rounded px-0.5",
+  place:  "text-amber-200/90 decoration-amber-400/60 underline decoration-2 underline-offset-2",
+  entity: "text-teal-200/90 decoration-teal-400/60 underline decoration-2 underline-offset-2",
+  claim:  "text-violet-200/90 decoration-violet-400/60 underline decoration-2 underline-offset-2",
+  person: "text-sky-200/90 decoration-sky-400/60 underline decoration-2 underline-offset-2",
+};
+
+/** The same four hues as swatches, for the legend and the entity chips. */
+const HIGHLIGHT_SWATCH: Record<HighlightType, string> = {
+  place:  "bg-amber-400/70",
+  entity: "bg-teal-400/70",
+  claim:  "bg-violet-400/70",
+  person: "bg-sky-400/70",
 };
 
 const LEGEND_ITEMS: { type: HighlightType; label: string; icon: React.ElementType }[] = [
@@ -72,56 +96,27 @@ const LEGEND_ITEMS: { type: HighlightType; label: string; icon: React.ElementTyp
 
 // ─── Signal Category Config ───────────────────────────────────────────────────
 
+/**
+ * The four signal kinds.
+ *
+ * ─── B2b: no per-category colour ────────────────────────────────────────────
+ * These were tinted rose / amber / sky / violet across text, chip, border and
+ * background. They are KINDS of signal — an aspiration driver is not better or
+ * worse than a status signal — so the hue encoded nothing and spent the warning
+ * palette on category. The amber group sat next to genuine warnings and read
+ * like one. The label and the sublabel carry the meaning; the sublabel is the
+ * part that matters, because it names which analysed fields the group informs.
+ */
 const SIGNAL_CATEGORIES: {
   key: keyof Omit<DecodedSymbols, "symbolicSummary">;
   label: string;
   sublabel: string;
   icon: React.ElementType;
-  color: string;
-  chipColor: string;
-  borderColor: string;
-  bgColor: string;
 }[] = [
-  {
-    key: "identityClaims",
-    label: "Identity Claims",
-    sublabel: "→ Archetype · NicheTopicNode",
-    icon: Fingerprint,
-    color: "text-rose-300",
-    chipColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
-    borderColor: "border-rose-500/20",
-    bgColor: "bg-rose-950/20",
-  },
-  {
-    key: "statusSignals",
-    label: "Status Signals",
-    sublabel: "→ CulturalCapital · RogersAdoptionStage",
-    icon: TrendingUp,
-    color: "text-amber-300",
-    chipColor: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    borderColor: "border-amber-500/20",
-    bgColor: "bg-amber-950/20",
-  },
-  {
-    key: "communityReferences",
-    label: "Community References",
-    sublabel: "→ ParasocialBond · AudienceRelationshipType",
-    icon: Users,
-    color: "text-sky-300",
-    chipColor: "bg-sky-500/15 text-sky-300 border-sky-500/30",
-    borderColor: "border-sky-500/20",
-    bgColor: "bg-sky-950/20",
-  },
-  {
-    key: "aspirationDrivers",
-    label: "Aspiration Drivers",
-    sublabel: "→ BarthesMyth · StuartHallDecoding",
-    icon: Heart,
-    color: "text-violet-300",
-    chipColor: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-    borderColor: "border-violet-500/20",
-    bgColor: "bg-violet-950/20",
-  },
+  { key: "identityClaims",      label: "Identity claims",      sublabel: "informs Archetype · NicheTopicNode",            icon: Fingerprint },
+  { key: "statusSignals",       label: "Status signals",       sublabel: "informs CulturalCapital · RogersAdoptionStage", icon: TrendingUp },
+  { key: "communityReferences", label: "Community references", sublabel: "informs ParasocialBond · AudienceRelationshipType", icon: Users },
+  { key: "aspirationDrivers",   label: "Aspiration drivers",   sublabel: "informs BarthesMyth · StuartHallDecoding",      icon: Heart },
 ];
 
 // ─── Known entity lists ───────────────────────────────────────────────────────
@@ -280,103 +275,97 @@ function HighlightedText({ segments }: { segments: Segment[] }) {
 
 // ─── Decoded Signals Panel ────────────────────────────────────────────────────
 
-function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
+/**
+ * DECODED CULTURAL SIGNALS (rebuilt, B2b).
+ *
+ * ─── Density: groups collapse, signals open as a SET ────────────────────────
+ * All four groups are collapsed by default and each states its own count and
+ * what it informs. Opening a group reveals every signal in it at once —
+ * deliberately NOT one claim at a time. A decoded signal is two short lines,
+ * and their value is comparative: you read Identity Claims as a set to judge
+ * whether the archetype reading is earned. Collapsing each would add fourteen
+ * clicks to reach what one scroll shows, and hide the very thing being judged.
+ *
+ * (The transcript panel below answers the same question the OTHER way, and the
+ * asymmetry is the point: an entry there is a paragraph read selectively, not a
+ * line read comparatively. Collapse at the unit the analyst chooses between.)
+ *
+ * The previous default opened identityClaims and statusSignals and left the
+ * other two shut, which silently privileged them. A uniform collapsed state
+ * with counts is both shorter and honest.
+ */
+export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
   const totalSignals =
     decoded.identityClaims.length +
     decoded.statusSignals.length +
     decoded.communityReferences.length +
     decoded.aspirationDrivers.length;
 
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    () => new Set(["identityClaims", "statusSignals"])
-  );
-
-  const toggleCategory = (key: string) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = (key: string) => setOpen(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   return (
-    <div className="rounded-xl border border-indigo-500/20 bg-indigo-950/20 overflow-hidden mt-3">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-indigo-500/15">
-        <BookOpen className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-indigo-400">
-          Decoded Cultural Signals
+    <div className="mt-4">
+      <div className="flex items-baseline gap-2 mb-2">
+        <BookOpen className="w-3 h-3 text-muted-foreground/50 self-center" />
+        <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+          Decoded cultural signals
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] text-indigo-400/60">
-            {totalSignals} signal{totalSignals !== 1 ? "s" : ""} decoded
-          </span>
-          <span className="text-[10px] text-indigo-400/50 italic">Symbolic analysis</span>
-        </div>
+        <span className="text-[10px] text-muted-foreground/45 tabular-nums">
+          {totalSignals} decoded
+        </span>
       </div>
 
-      {/* Symbolic Summary */}
       {decoded.symbolicSummary && (
-        <div className="px-4 py-3 border-b border-indigo-500/10 bg-indigo-900/10">
-          <p className="text-[11px] text-indigo-200/80 leading-relaxed italic">
-            &ldquo;{decoded.symbolicSummary}&rdquo;
-          </p>
-        </div>
+        <p className="text-[11px] text-muted-foreground/75 leading-relaxed italic mb-2 max-w-3xl">
+          “{decoded.symbolicSummary}”
+        </p>
       )}
 
-      {/* Signal categories */}
-      <div className="divide-y divide-indigo-500/10">
-        {SIGNAL_CATEGORIES.map(({ key, label, sublabel, icon: Icon, color, chipColor, borderColor, bgColor }) => {
+      <div>
+        {SIGNAL_CATEGORIES.map(({ key, label, sublabel, icon: Icon }) => {
           const signals = decoded[key] as DecodedSignal[];
           if (signals.length === 0) return null;
-          const isOpen = expandedCategories.has(key);
+          const isOpen = open.has(key);
           return (
-            <div key={key} className={`${bgColor}`}>
+            <div key={key} className="border-t border-border/25 first:border-0">
               <button
-                onClick={() => toggleCategory(key)}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-white/5 transition-colors"
+                onClick={() => toggle(key)}
+                className="w-full flex items-center gap-2 py-2 text-left"
               >
-                <Icon className={`w-3 h-3 ${color} flex-shrink-0`} />
-                <div className="flex-1 min-w-0">
-                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${color}`}>
-                    {label}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground/50 ml-2">{sublabel}</span>
-                </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${chipColor} flex-shrink-0`}>
-                  {signals.length}
-                </span>
+                <Icon className="w-3 h-3 text-muted-foreground/45 flex-shrink-0" />
+                <span className="text-[11px] text-foreground/80">{label}</span>
+                <span className="text-[10px] text-muted-foreground/45 tabular-nums">{signals.length}</span>
+                {/* What this group FEEDS — the reason the grouping exists. */}
+                <span className="text-[10px] text-muted-foreground/35 hidden sm:inline truncate">{sublabel}</span>
                 {isOpen
-                  ? <ChevronUp className={`w-3 h-3 ${color} opacity-50 flex-shrink-0`} />
-                  : <ChevronDown className={`w-3 h-3 ${color} opacity-30 flex-shrink-0`} />
-                }
+                  ? <ChevronUp className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />
+                  : <ChevronDown className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />}
               </button>
 
               {isOpen && (
-                <div className="px-4 pb-3 space-y-2.5">
+                <div className="pb-2.5 space-y-1.5">
                   {signals.map((signal, i) => (
-                    <div key={i} className={`rounded-lg border ${borderColor} bg-black/20 p-2.5`}>
-                      {/* Phrase */}
-                      <p className={`text-[11px] font-medium ${color} mb-1`}>
-                        &ldquo;{signal.phrase}&rdquo;
-                      </p>
-                      {/* Meaning */}
-                      <p className="text-[10px] text-muted-foreground/80 leading-relaxed mb-1.5">
+                    <div key={i} className="pl-5 text-[11px]">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-foreground/85">“{signal.phrase}”</span>
+                        {signal.informs.length > 0 && (
+                          <span className="ml-auto flex flex-wrap gap-1 flex-shrink-0">
+                            {signal.informs.map((field, j) => (
+                              <span key={j} className="text-[9px] font-mono px-1 py-0.5 rounded border border-border/50 bg-secondary/40 text-muted-foreground/60">
+                                {field}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground/65 leading-relaxed mt-0.5">
                         {signal.meaning}
                       </p>
-                      {/* Informs chips */}
-                      {signal.informs.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {signal.informs.map((field, j) => (
-                            <span
-                              key={j}
-                              className={`text-[9px] px-1.5 py-0.5 rounded border ${chipColor} font-mono`}
-                            >
-                              {field}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -393,9 +382,17 @@ function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
 
 interface TranscriptPanelProps {
   profile: CreatorProfile;
+  /**
+   * B2b: the report renders decoded signals in section 2 (detailed analysis),
+   * where they belong — they are a FINDING, not transcript evidence. This
+   * suppresses the copy that would otherwise render again beneath the
+   * transcripts. CreatorProfileCard (MatchReport's compact view) omits the prop
+   * and keeps both, exactly as before.
+   */
+  showDecoded?: boolean;
 }
 
-export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
+export default function TranscriptPanel({ profile, showDecoded = true }: TranscriptPanelProps) {
   const transcriptCount = profile.transcriptCount ?? 0;
   const transcriptExcerpts = profile.transcriptExcerpts;
 
@@ -446,89 +443,112 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
 
   return (
     <div className="space-y-0">
-      {/* ── Transcript Excerpts Panel ─────────────────────────────────────── */}
+      {/* ── Transcript evidence ──────────────────────────────────────────────
+          Panel shell, header and chevrons are NEUTRAL (B2b). The emerald
+          wrapper made "we captured transcripts" look like a success state; the
+          transcripts are the evidence, and whether they are trustworthy is what
+          the source chip says. */}
       {entries.length > 0 && (
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/30 overflow-hidden">
-          {/* Panel header */}
-          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-emerald-500/15">
-            <Mic className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-emerald-400">
-              Transcript Evidence
+        <div>
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <Mic className="w-3 h-3 text-muted-foreground/50 self-center" />
+            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+              Transcript evidence
             </span>
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-[10px] text-emerald-400/60">
-                {transcriptCount} video{transcriptCount !== 1 ? "s" : ""} · {totalHighlights} entities detected
+            <span className="text-[10px] text-muted-foreground/45 tabular-nums">
+              {transcriptCount} video{transcriptCount !== 1 ? "s" : ""} · {totalHighlights} entities
+            </span>
+            {/*
+              ORDINAL, and the most important trust signal on the page: did the
+              model read SPEECH or typed text? It keeps a treatment — but not
+              amber, which means warning here. A fact about evidence quality
+              must not read as an error.
+            */}
+            {!hasSpeech && (
+              <span
+                title="Every excerpt below is a post caption — written text, not transcribed speech"
+                className="text-[10px] px-1.5 py-0.5 rounded-full border border-border/60 bg-secondary/50 text-foreground/70"
+              >
+                captions only · no speech
               </span>
-              {hasSpeech
-                ? <span className="text-[10px] text-emerald-400/50 italic">Primary evidence</span>
-                : <span className="text-[10px] text-amber-300/70 italic">Captions only — not speech</span>}
-            </div>
+            )}
           </div>
 
-          {/* Legend */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 border-b border-emerald-500/10 bg-black/20">
+          {/* Legend — sits directly above the marks it explains. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
             {LEGEND_ITEMS.map(({ type, label, icon: Icon }) => (
-              <div key={type} className="flex items-center gap-1.5">
-                <span className={`inline-block text-[10px] px-1.5 py-0 rounded ${HIGHLIGHT_STYLES[type]}`}>Aa</span>
-                <Icon className="w-2.5 h-2.5 text-muted-foreground/50" />
-                <span className="text-[10px] text-muted-foreground/60">{label}</span>
+              <div key={type} className="flex items-center gap-1">
+                <span className={`w-2 h-0.5 rounded-full ${HIGHLIGHT_SWATCH[type]}`} />
+                <Icon className="w-2.5 h-2.5 text-muted-foreground/40" />
+                <span className="text-[9px] text-muted-foreground/50">{label}</span>
               </div>
             ))}
           </div>
 
-          {/* Transcript entries */}
-          <div className="divide-y divide-emerald-500/10">
+          {/* Entries — collapsed individually, because an entry is a PARAGRAPH
+              read selectively, not a line read comparatively (see the decoded
+              panel, which collapses the other way and says why). */}
+          <div>
             {entries.map((entry, i) => {
               const isOpen = expanded.has(i);
               const highlightCount = entry.segments.filter(s => s.type !== null).length;
+              // The collapsed row must be identifiable WITHOUT opening it —
+              // "Video 3" told the analyst nothing about what it contains.
+              const preview = entry.text.replace(/\s+/g, " ").trim().slice(0, 90);
               return (
-                <div key={i} className="group">
+                <div key={i} className="border-t border-border/25 first:border-0">
                   <button
                     onClick={() => toggleEntry(i)}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-emerald-500/5 transition-colors"
+                    className="w-full flex items-start gap-2 py-2 text-left"
                   >
-                    <span className="text-[10px] font-semibold text-emerald-400/80 uppercase tracking-wide flex-1 truncate">
-                      {entry.label}
-                    </span>
-                    {entry.sourceLabel && (
-                      <span
-                        title={entry.sourceKind === "speech" ? "Transcribed speech" : "The post's written caption — not spoken content"}
-                        className={`text-[9px] px-1.5 py-0.5 rounded-full border flex-shrink-0 cursor-help ${entry.sourceKind === "speech" ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10" : "text-amber-300 border-amber-500/40 bg-amber-500/10"}`}
-                      >
-                        {entry.sourceLabel}{entry.sourceKind === "caption" ? " · not speech" : ""}
-                      </span>
-                    )}
-                    {highlightCount > 0 && (
-                      <span className="flex items-center gap-1 flex-shrink-0">
-                        {(["place", "entity", "claim", "person"] as HighlightType[]).map(type => {
-                          const count = entry.segments.filter(s => s.type === type).length;
-                          if (count === 0) return null;
-                          const dotColors: Record<HighlightType, string> = {
-                            place: "bg-amber-400", entity: "bg-teal-400",
-                            claim: "bg-violet-400", person: "bg-sky-400",
-                          };
-                          return (
-                            <span key={type} className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-black/30 text-muted-foreground/70">
-                              <span className={`w-1.5 h-1.5 rounded-full ${dotColors[type]}`} />
-                              {count}
-                            </span>
-                          );
-                        })}
-                      </span>
-                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-foreground/80">{entry.label}</span>
+                        {entry.sourceLabel && (
+                          <span
+                            title={entry.sourceKind === "speech"
+                              ? "Transcribed speech — the creator's own words"
+                              : "The post's written caption — not spoken content"}
+                            className={`text-[9px] px-1.5 py-0.5 rounded-full border cursor-help ${
+                              entry.sourceKind === "speech"
+                                ? "border-border/60 bg-secondary/50 text-foreground/70"
+                                : "border-border/60 bg-secondary/30 text-muted-foreground/70"
+                            }`}
+                          >
+                            {entry.sourceLabel}{entry.sourceKind === "caption" ? " · not speech" : ""}
+                          </span>
+                        )}
+                        {highlightCount > 0 && (
+                          <span className="flex items-center gap-1">
+                            {(["place", "entity", "claim", "person"] as HighlightType[]).map(type => {
+                              const count = entry.segments.filter(s => s.type === type).length;
+                              if (count === 0) return null;
+                              return (
+                                <span key={type} className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/60 tabular-nums">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${HIGHLIGHT_SWATCH[type]}`} />
+                                  {count}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      {!isOpen && preview && (
+                        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">{preview}…</p>
+                      )}
+                    </div>
                     {isOpen
-                      ? <ChevronUp className="w-3 h-3 text-emerald-400/50 flex-shrink-0" />
-                      : <ChevronDown className="w-3 h-3 text-emerald-400/30 flex-shrink-0" />
-                    }
+                      ? <ChevronUp className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 mt-1" />
+                      : <ChevronDown className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 mt-1" />}
                   </button>
 
                   {isOpen && (
-                    <div className="px-4 pb-4 pt-1">
-                      <p className="text-xs text-muted-foreground leading-relaxed italic">
-                        &ldquo;<HighlightedText segments={entry.segments} />&rdquo;
+                    <div className="pb-3 pl-0">
+                      <p className="text-[11px] text-muted-foreground/85 leading-relaxed italic">
+                        “<HighlightedText segments={entry.segments} />”
                       </p>
                       {highlightCount > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {entry.segments
                             .filter(s => s.type !== null)
                             .reduce<Segment[]>((acc, s) => {
@@ -539,12 +559,9 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
                               <span
                                 key={j}
                                 title={s.tooltip}
-                                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full cursor-help ${HIGHLIGHT_STYLES[s.type!]}`}
+                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border border-border/50 bg-secondary/40 text-muted-foreground/80 cursor-help"
                               >
-                                {s.type === "place"  && <MapPin   className="w-2.5 h-2.5" />}
-                                {s.type === "entity" && <Utensils className="w-2.5 h-2.5" />}
-                                {s.type === "claim"  && <Sparkles className="w-2.5 h-2.5" />}
-                                {s.type === "person" && <User     className="w-2.5 h-2.5" />}
+                                <span className={`w-1.5 h-1.5 rounded-full ${HIGHLIGHT_SWATCH[s.type!]}`} />
                                 {s.text}
                               </span>
                             ))}
@@ -560,7 +577,7 @@ export default function TranscriptPanel({ profile }: TranscriptPanelProps) {
       )}
 
       {/* ── Decoded Cultural Signals Panel ────────────────────────────────── */}
-      {decodedSymbols && <DecodedSignalsPanel decoded={decodedSymbols} />}
+      {showDecoded && decodedSymbols && <DecodedSignalsPanel decoded={decodedSymbols} />}
     </div>
   );
 }

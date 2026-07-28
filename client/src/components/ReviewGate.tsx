@@ -72,6 +72,21 @@ export function PendingRerunNotice({ pendingObservedAt, className = "" }: { pend
 
 // ─── Diagnostics rendering helpers ───────────────────────────────────────────
 
+/**
+ * B2b: the 26 diagnostic items are regrouped under four block labels — CAPTURE,
+ * EVIDENCE, MODEL, PERSISTENCE — rather than given a second collapse layer.
+ * B2a already put this whole panel behind one disclosure; collapsing inside it
+ * would bury diagnostics two clicks deep, which is wrong for the panel an
+ * analyst opens precisely BECAUSE they want everything at once.
+ */
+function BlockLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[9px] font-semibold tracking-[0.14em] uppercase text-muted-foreground/40 mt-5 mb-1 first:mt-0">
+      {children}
+    </div>
+  );
+}
+
 function SectionTitle({ icon: Icon, children }: { icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mt-4 mb-2">
@@ -81,6 +96,7 @@ function SectionTitle({ icon: Icon, children }: { icon: React.ComponentType<{ cl
   );
 }
 
+/** Only a real failure is coloured; succeeded/skipped are expected states. */
 function OutcomeChip({ tone, children }: { tone: "ok" | "fail" | "noData" | "notAttempted"; children: React.ReactNode }) {
   const styles = {
     ok: "text-green-400 bg-green-400/10 border-green-400/30",
@@ -160,13 +176,13 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           ))}
         </ul>
         {!d.exactRunLinkage && (
-          <div className="mt-2 text-[10.5px] text-amber-300/80">
+          <div className="mt-2 text-[10.5px] text-muted-foreground/60">
             This observation predates run tagging — scrape/LLM data below is linked by observation id and may be incomplete.
           </div>
         )}
       </div>
 
-      {/* Persistence components */}
+      <BlockLabel>Persistence</BlockLabel>
       <SectionTitle icon={ShieldQuestion}>Persistence components</SectionTitle>
       {d.enrichments.raw == null ? (
         <div className="text-muted-foreground text-[11px]">No outcome map (predates tracking).</div>
@@ -207,7 +223,7 @@ export function RunDiagnosticsView({ d }: { d: any }) {
         </div>
       )}
 
-      {/* Scrapes */}
+      <BlockLabel>Capture</BlockLabel>
       <SectionTitle icon={Globe}>Scrapes ({d.scrapes.total} attempts, {d.scrapes.failed} failed)</SectionTitle>
       {d.scrapes.byPlatform.length === 0 ? (
         <div className="text-muted-foreground text-[11px]">No scrape events recorded for this run.</div>
@@ -216,10 +232,10 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           {d.scrapes.byPlatform.map((p: any) => (
             <div key={p.platform} className="flex items-center gap-3 font-mono text-[11px]">
               <span className="w-24 text-foreground/80">{p.platform}</span>
-              <span className="text-green-400">{p.succeeded} ok</span>
+              <span className="text-foreground/70 tabular-nums">{p.succeeded} ok</span>
               {p.failed > 0
-                ? <span className="text-red-300 font-semibold">{p.failed} failed</span>
-                : <span className="text-muted-foreground/40">0 failed</span>}
+                ? <span className="text-red-400 font-semibold tabular-nums">{p.failed} failed</span>
+                : <span className="text-muted-foreground/40 tabular-nums">0 failed</span>}
             </div>
           ))}
           <button
@@ -282,13 +298,13 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           </div>
         )}
         {d.pool && d.pool.authorRejected > 0 && (
-          <div className="text-emerald-300/70 text-[10.5px]">
+          <div className="text-muted-foreground/60 text-[10.5px]">
             {d.pool.authorRejected} foreign video{d.pool.authorRejected === 1 ? "" : "s"} excluded — author mismatch (not this creator).
           </div>
         )}
       </div>
 
-      {/* Confidence & provenance (A5/A6) */}
+      <BlockLabel>Evidence</BlockLabel>
       <SectionTitle icon={ShieldQuestion}>Confidence &amp; provenance</SectionTitle>
       <div className="font-mono text-[11px] text-foreground/80 space-y-0.5">
         <div>
@@ -305,13 +321,13 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           <div>
             sociological fields (parasocial / audience / capital / remix):{" "}
             {d.sociologicalFieldsProvenance === "computed"
-              ? <span className="text-teal-300">computed from engagement signals</span>
+              ? <span className="text-foreground/70">computed from engagement signals</span>
               : <span className="text-amber-300">estimated by the model — no engagement signals</span>}
           </div>
         )}
       </div>
 
-      {/* LLM */}
+      <BlockLabel>Model</BlockLabel>
       <SectionTitle icon={Cpu}>LLM calls</SectionTitle>
       <div className="font-mono text-[11px] text-foreground/80">
         {d.llm.calls} calls{d.llm.failed > 0 ? <span className="text-red-300 font-semibold"> · {d.llm.failed} failed</span> : " · all succeeded"}
@@ -349,12 +365,11 @@ export function RunDiagnosticsView({ d }: { d: any }) {
           <FieldProvenanceChip key={p.field} field={p.field} provenance={p.provenance} />
         ))}
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[9.5px] text-muted-foreground/60">
-        <span><span className="text-emerald-400">■</span> evidence-backed</span>
-        <span><span className="text-sky-400">■</span> scraped / derived</span>
-        <span><span className="text-teal-300">■</span> computed</span>
-        <span><span className="text-amber-300">■</span> estimated</span>
-        <span><span className="text-violet-300">■</span> model inference</span>
+      {/* One muted treatment — the WORD on each chip carries the provenance,
+          so five hues were spending the palette on a vocabulary the chip
+          already states. */}
+      <div className="text-[9.5px] text-muted-foreground/50 mt-1.5 leading-relaxed">
+        evidence-backed · scraped / derived · computed · estimated · model inference
       </div>
       <div className="font-mono text-[10.5px] text-muted-foreground/60 mt-1.5">
         {d.fields.counts.keywords} keywords · {d.fields.counts.contentThemes} themes · {d.fields.counts.hashtags} hashtags ·{" "}

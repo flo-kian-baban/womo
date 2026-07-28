@@ -242,12 +242,13 @@ export function SupplementalVideoPanel({ profile }: { profile: CreatorProfile })
   const newVideos = displayPool.filter(v => !v.alreadySampled);
   const sampledVideos = displayPool.filter(v => v.alreadySampled);
 
+  // B2b: the amber shell made a routine ingest tool look like a warning.
   return (
-    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+    <div className="space-y-3">
       <div className="flex items-start gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+        <Plus className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-xs font-semibold text-amber-400">
+          <p className="text-xs font-semibold text-foreground/80">
             {isBelowTarget ? `Sample Shortfall — ${transcriptCount}/12 transcripts ingested` : "Video Pool"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -274,7 +275,7 @@ export function SupplementalVideoPanel({ profile }: { profile: CreatorProfile })
                     {video.caption || "(no caption)"}
                   </p>
                   {video.alreadySampled && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 flex-shrink-0">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-secondary/50 text-muted-foreground/70 border border-border/50 flex-shrink-0">
                       Sampled
                     </span>
                   )}
@@ -441,8 +442,14 @@ function DataHealthBar({ profile }: { profile: CreatorProfile }) {
 
 // ─── Video Evidence Table ─────────────────────────────────────────────────────
 
-export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
-  const [expanded, setExpanded] = useState(false);
+/**
+ * B2b: `alwaysOpen` lets the report drop this panel's own header, which
+ * duplicated the disclosure now wrapping it — two chevrons for one table.
+ * CreatorProfileCard (MatchReport's compact view) keeps the header.
+ */
+export function VideoEvidenceTable({ profile, alwaysOpen = false }: { profile: CreatorProfile; alwaysOpen?: boolean }) {
+  const [expandedState, setExpanded] = useState(false);
+  const expanded = alwaysOpen || expandedState;
   const { data: contentItems, isLoading } = trpc.creator.getContentItems.useQuery(
     { subjectId: profile.id },
     { enabled: expanded },
@@ -452,8 +459,8 @@ export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
   if (videoCount === 0 && !expanded) return null;
 
   return (
-    <div className="rounded-xl border border-border/50 bg-secondary/20 overflow-hidden">
-      <button
+    <div className={alwaysOpen ? "" : "rounded-xl border border-border/50 bg-secondary/20 overflow-hidden"}>
+      {!alwaysOpen && <button
         onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/30 transition-colors"
       >
@@ -465,10 +472,10 @@ export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
           ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50" />
           : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50" />
         }
-      </button>
+      </button>}
 
       {expanded && (
-        <div className="border-t border-border/30">
+        <div className={alwaysOpen ? "" : "border-t border-border/30"}>
           {isLoading ? (
             <div className="flex items-center justify-center py-6 text-muted-foreground/50">
               <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -495,7 +502,7 @@ export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
                     const tB = b.createTime ? new Date(b.createTime).getTime() : 0;
                     return tB - tA;
                   }).map((ci) => (
-                    <tr key={ci.id} className={`hover:bg-secondary/30 transition-colors ${ci.transcriptText ? "border-l-2 border-l-emerald-500/40" : ""}`}>
+                    <tr key={ci.id} className={`transition-colors ${ci.transcriptText ? "border-l-2 border-l-foreground/25" : "border-l-2 border-l-transparent"}`}>
                       <td className="px-3 py-2 max-w-[200px]">
                         <span className="text-foreground/80 truncate block" title={ci.caption ?? ""}>
                           {ci.caption ? (ci.caption.length > 60 ? ci.caption.slice(0, 60) + "…" : ci.caption) : "—"}
@@ -511,15 +518,19 @@ export function VideoEvidenceTable({ profile }: { profile: CreatorProfile }) {
                         {ci.videoDuration ? formatDuration(ci.videoDuration) : "—"}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap max-w-[120px]">
+                        {/* B2b: no emoji — the design system sanctions one, in
+                            the footer. "Original" is a fact, not a success. */}
                         {ci.isOriginalAudio
-                          ? <span className="text-emerald-400">🎵 Original</span>
+                          ? <span className="text-foreground/70">Original</span>
                           : ci.musicTitle
-                            ? <span className="truncate block" title={ci.musicTitle}>🎵 {ci.musicTitle.length > 15 ? ci.musicTitle.slice(0, 15) + "…" : ci.musicTitle}</span>
+                            ? <span className="truncate block" title={ci.musicTitle}>{ci.musicTitle.length > 18 ? ci.musicTitle.slice(0, 18) + "…" : ci.musicTitle}</span>
                             : "—"
                         }
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {ci.transcriptText ? <span className="text-emerald-400">✅</span> : <span className="text-muted-foreground/40">—</span>}
+                        {ci.transcriptText
+                          ? <span className="text-foreground/70" title="Transcript captured">yes</span>
+                          : <span className="text-muted-foreground/30">—</span>}
                       </td>
                     </tr>
                   ))}
