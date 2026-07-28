@@ -71,12 +71,20 @@ interface TranscriptEntry {
  * What did change (B2b): filled chips became underline-with-tint. A paragraph
  * carrying eight filled marks read as a ransom note; an underline marks the
  * span without stopping the prose.
+ *
+ * ─── `bg-transparent` is LOAD-BEARING (B2c) ─────────────────────────────────
+ * These spans render in a <mark>, and the UA stylesheet gives <mark> a yellow
+ * background with black text. Tailwind's preflight does not reset it. So B2b's
+ * underline-with-tint shipped as pale tinted text sitting on browser yellow —
+ * the mark obscured the word instead of indicating it, and every highlighted
+ * entity was unreadable. The tint and the underline are the whole treatment;
+ * the background must stay out of the way. Do not drop this class.
  */
 const HIGHLIGHT_STYLES: Record<HighlightType, string> = {
-  place:  "text-amber-200/90 decoration-amber-400/60 underline decoration-2 underline-offset-2",
-  entity: "text-teal-200/90 decoration-teal-400/60 underline decoration-2 underline-offset-2",
-  claim:  "text-violet-200/90 decoration-violet-400/60 underline decoration-2 underline-offset-2",
-  person: "text-sky-200/90 decoration-sky-400/60 underline decoration-2 underline-offset-2",
+  place:  "bg-transparent text-amber-200 decoration-amber-400/70 underline decoration-2 underline-offset-2",
+  entity: "bg-transparent text-teal-200 decoration-teal-400/70 underline decoration-2 underline-offset-2",
+  claim:  "bg-transparent text-violet-200 decoration-violet-400/70 underline decoration-2 underline-offset-2",
+  person: "bg-transparent text-sky-200 decoration-sky-400/70 underline decoration-2 underline-offset-2",
 };
 
 /** The same four hues as swatches, for the legend and the entity chips. */
