@@ -3992,6 +3992,61 @@ export async function getMatchWithProfiles(matchId: string) {
     brand,
     /** M1 item 2: how each profile relates to the scored evidence. */
     profileProvenance: { creator: creatorProvenance, brand: brandProvenance },
+    /** M3 §5: the match's own LLM account (linked=false → state, never zero). */
+    llm: await getMatchLlmInvocations(matchId),
+  };
+}
+
+/**
+ * M3 (§5 cost and process): the LLM calls behind ONE match, read back by the
+ * match_score_id linkage M1 wired. Additive read — shipped inside fit.get and
+ * on the fit.calculate response so both surfaces render the same account.
+ *
+ * HONEST ABSENCE: the linkage is forward-only (M1). A match persisted before
+ * M1 has no linked rows — that must render "cost unavailable — LLM calls not
+ * linked (pre-M1)", NEVER zero. `linked: false` is that signal. Failed calls
+ * are also unlinked by design (they throw before their invocation id is
+ * reachable); the degradation record names them.
+ */
+export async function getMatchLlmInvocations(matchScoreId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select({
+    purpose: llmInvocations.purpose,
+    model: llmInvocations.model,
+    inputTokens: llmInvocations.inputTokens,
+    outputTokens: llmInvocations.outputTokens,
+    durationMs: llmInvocations.durationMs,
+    status: llmInvocations.status,
+    createdAt: llmInvocations.createdAt,
+  })
+    .from(llmInvocations)
+    .where(eq(llmInvocations.matchScoreId, matchScoreId))
+    .orderBy(llmInvocations.createdAt);
+
+  if (rows.length === 0) return { linked: false as const, calls: [], totals: null };
+
+  const calls = rows.map(r => ({
+    purpose: r.purpose,
+    model: r.model,
+    inputTokens: r.inputTokens ?? null,
+    outputTokens: r.outputTokens ?? null,
+    durationMs: r.durationMs ?? null,
+    status: r.status,
+    createdAt: r.createdAt,
+    costUsd: r.inputTokens != null && r.outputTokens != null
+      ? computeLlmCostUsd(r.model, r.inputTokens, r.outputTokens)
+      : null,
+  }));
+
+  const inputTokens = calls.reduce((s, c) => s + (c.inputTokens ?? 0), 0);
+  const outputTokens = calls.reduce((s, c) => s + (c.outputTokens ?? 0), 0);
+  const costUsd = calls.reduce((s, c) => s + (c.costUsd ?? 0), 0);
+  return {
+    linked: true as const,
+    calls,
+    totals: { calls: calls.length, inputTokens, outputTokens, costUsd },
   };
 }
 

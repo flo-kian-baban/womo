@@ -14,7 +14,7 @@ import {
   insertEvidenceSnapshots, insertLongitudinalSampleSnapshot, findExistingCreatorByHandle,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
-  linkLlmInvocationsToMatch,
+  linkLlmInvocationsToMatch, getMatchLlmInvocations,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getStrategyOutcomesForRun, getEvidenceSnapshotByObservation,
@@ -2094,6 +2094,7 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
         // exists, and says so plainly when it does not.
         let persistedMatchId: string | null = null;
         let persistFailure: string | null = null;
+        let matchLlm: Awaited<ReturnType<typeof getMatchLlmInvocations>> | null = null;
         try {
           const matchId = await insertMatchScore({
             creatorSubjectId: input.creatorProfileId,
@@ -2199,6 +2200,10 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           if (invocationIds.length > 0) {
             await linkLlmInvocationsToMatch(matchId, invocationIds);
           }
+          // M3 §5: read the account straight back through the SAME reader
+          // fit.get uses, so the calculation view and the record view cannot
+          // disagree about cost by construction.
+          matchLlm = await getMatchLlmInvocations(matchId);
         } catch (err) {
           // M1 item 5: still non-fatal — the COMPUTATION succeeded and the
           // analyst should see it — but the failure is returned, not swallowed.
@@ -2230,6 +2235,12 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           // result, which never included them. Two dead blocks come alive.
           synergyNarrative: synergyNarrative || null,
           contentDirections,
+          // M3: the borrowing summary was generated and persisted but never
+          // returned — the calculation view rendered its auto-assembled
+          // fallback for a match that HAD a model-written one.
+          culturalBorrowingSummary,
+          // M3 §5: null = not persisted, so no linked account exists yet.
+          llm: matchLlm,
         };
       }),
 

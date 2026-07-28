@@ -1,7 +1,7 @@
 import React from "react";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { MetricTooltip } from "@/components/MetricTooltip";
+import { Pill, TONE_NEUTRAL } from "@/components/report/ReportPrimitives";
+import { T_DETAIL, T_MICRO, T_SUB, BOX } from "@/lib/reportType";
 
 export interface Signal {
   name: string;
@@ -25,56 +25,25 @@ export interface Signal {
 
 interface SignalPanelProps {
   signals: Signal[];
-  caiScore: number;
-  caiStatus: "Green Light" | "Proceed with Caution" | "Do Not Proceed";
+  /**
+   * M3: the CMS header card this panel used to render duplicated §1's verdict
+   * (and did it in light-theme colours on a dark app). The verdict lives in
+   * the report body's §1 now; these props remain accepted for compatibility
+   * and render nothing.
+   */
+  caiScore?: number;
+  caiStatus?: string;
 }
 
-const getScoreColor = (score: number) => {
-  if (score >= 75) return "text-green-600";
-  if (score >= 50) return "text-yellow-600";
-  return "text-red-600";
-};
-
-const getConfidenceBadgeVariant = (confidence: string) => {
-  switch (confidence) {
-    case "Verified":
-      return "default";
-    case "Estimated":
-      return "secondary";
-    case "Derived":
-      return "outline";
-    case "Insufficient Data":
-      return "outline";
-    default:
-      return "secondary";
-  }
-};
-
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "Green Light":
-      return "bg-green-50 border-green-200";
-    case "Proceed with Caution":
-      return "bg-yellow-50 border-yellow-200";
-    case "Do Not Proceed":
-      return "bg-red-50 border-red-200";
-    default:
-      return "bg-gray-50 border-gray-200";
-  }
-};
-
-const getStatusTextColor = (status: string) => {
-  switch (status) {
-    case "Green Light":
-      return "text-green-700";
-    case "Proceed with Caution":
-      return "text-yellow-700";
-    case "Do Not Proceed":
-      return "text-red-700";
-    default:
-      return "text-gray-700";
-  }
-};
+/**
+ * Score level is ORDINAL — quiet end neutral, decision end coloured (M3).
+ * The old thresholds (≥75 / ≥50) are kept; only the palette moved from
+ * light-theme -600 utilities to the report vocabulary's tones.
+ */
+const scoreTextTone = (score: number) =>
+  score >= 75 ? "text-foreground/85" : score >= 50 ? "text-amber-400" : "text-red-400";
+const scoreBarTone = (score: number) =>
+  score >= 75 ? "bg-foreground/45" : score >= 50 ? "bg-amber-400/70" : "bg-red-400/70";
 
 // ─── Signal Definitions ────────────────────────────────────────────────────────
 /*
@@ -144,168 +113,77 @@ const SIGNAL_DEFINITIONS: Record<string, { explanation: string; formula: string;
   },
 };
 
-export const SignalPanel: React.FC<SignalPanelProps> = ({
-  signals,
-  caiScore,
-  caiStatus,
-}) => {
+export const SignalPanel: React.FC<SignalPanelProps> = ({ signals }) => {
   const performanceSignals = signals.filter((s) => s.category === "Performance");
   const culturalSignals = signals.filter((s) => s.category === "Cultural");
 
-  return (
-    <div className="space-y-6">
-      {/* Cultural Match Score Header */}
-      <Card className={`p-6 border-2 ${getStatusColor(caiStatus)}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Cultural Match Score
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">{caiStatus}</p>
+  const SignalCard = ({ signal }: { signal: Signal }) => {
+    const def = SIGNAL_DEFINITIONS[signal.name];
+    return (
+      <div className={`p-3 ${BOX}`}>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h4 className="text-[13px] font-medium text-foreground/90 truncate">{signal.name}</h4>
+            {def && (
+              <MetricTooltip
+                title={signal.name}
+                explanation={def.explanation}
+                formula={def.formula}
+                whyItMatters={def.whyItMatters}
+                dataPoints={def.dataPoints}
+                side="top"
+              />
+            )}
           </div>
-          <div className="text-right">
-            <div className={`text-5xl font-bold ${getStatusTextColor(caiStatus)}`}>
-              {caiScore.toFixed(2)}
-            </div>
-            <p className="text-xs text-gray-600 mt-1">/ 10</p>
-          </div>
+          {/* Provenance is ONE muted treatment — the WORD carries the meaning
+              (Verified · Estimated · Derived · Insufficient Data). No stamp on
+              a value that does not exist. */}
+          {signal.score != null && <Pill tone={TONE_NEUTRAL}>{signal.confidence}</Pill>}
         </div>
-      </Card>
 
-      {/* Performance Signals */}
+        {signal.score != null ? (
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-1.5 rounded-full bg-secondary/60 border border-border/40 overflow-hidden">
+              <div className={`h-full ${scoreBarTone(signal.score)}`} style={{ width: `${signal.score}%` }} />
+            </div>
+            <span className={`text-sm font-semibold font-mono tabular-nums ${scoreTextTone(signal.score)}`}>
+              {signal.score.toFixed(2)}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-1.5 rounded-full bg-secondary/40 border border-border/30" />
+            <span className={`${T_DETAIL} italic`}>not computed</span>
+          </div>
+        )}
+
+        <p className={`${T_DETAIL} mt-2`}>
+          {signal.score != null
+            ? signal.reasoning
+            : "This signal was not computed for this match — it predates the signal, or its inputs were unavailable. No number is substituted."}
+        </p>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
       {performanceSignals.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white">
-            Performance Signals
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {performanceSignals.map((signal, idx) => {
-              const def = SIGNAL_DEFINITIONS[signal.name];
-              return (
-                <Card key={idx} className="p-4 hover:shadow-md transition-shadow bg-gray-900 border-gray-700">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="font-medium text-white">{signal.name}</h4>
-                        {def && (
-                          <MetricTooltip
-                            title={signal.name}
-                            explanation={def.explanation}
-                            formula={def.formula}
-                            whyItMatters={def.whyItMatters}
-                            dataPoints={def.dataPoints}
-                            side="top"
-                          />
-                        )}
-                      </div>
-                      {/* M2: no provenance stamp on a value that does not exist. */}
-                      {signal.score != null && (
-                        <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
-                          {signal.confidence}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* M2: absence renders as absence. These used to be fed
-                        `?? 50` fallbacks — a missing measurement drew a
-                        mid-range bar indistinguishable from a real score. */}
-                    {signal.score != null ? (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-700 rounded-full h-2">
-                          <div
-                            className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
-                            style={{ width: `${signal.score}%` }}
-                          />
-                        </div>
-                        <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                          {signal.score.toFixed(2)}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-800 rounded-full h-2" />
-                        <span className="text-sm italic text-gray-500">not computed</span>
-                      </div>
-                    )}
-
-                    <p className="text-sm text-gray-300">
-                      {signal.score != null
-                        ? signal.reasoning
-                        : "This signal was not computed for this match — it predates the signal, or its inputs were unavailable. No number is substituted."}
-                    </p>
-                  </div>
-                </Card>
-              );
-            })}
+        <div>
+          <h3 className={`${T_SUB} mb-2`}>Performance signals</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {performanceSignals.map((signal, idx) => <SignalCard key={idx} signal={signal} />)}
           </div>
         </div>
       )}
-
-      {/* Cultural Signals */}
       {culturalSignals.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white">
-            Cultural Signals
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {culturalSignals.map((signal, idx) => {
-              const def = SIGNAL_DEFINITIONS[signal.name];
-              return (
-                <Card key={idx} className="p-4 hover:shadow-md transition-shadow bg-gray-900 border-gray-700">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="font-medium text-white">{signal.name}</h4>
-                        {def && (
-                          <MetricTooltip
-                            title={signal.name}
-                            explanation={def.explanation}
-                            formula={def.formula}
-                            whyItMatters={def.whyItMatters}
-                            dataPoints={def.dataPoints}
-                            side="top"
-                          />
-                        )}
-                      </div>
-                      {/* M2: no provenance stamp on a value that does not exist. */}
-                      {signal.score != null && (
-                        <Badge variant={getConfidenceBadgeVariant(signal.confidence)}>
-                          {signal.confidence}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* M2: absence renders as absence. These used to be fed
-                        `?? 50` fallbacks — a missing measurement drew a
-                        mid-range bar indistinguishable from a real score. */}
-                    {signal.score != null ? (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-700 rounded-full h-2">
-                          <div
-                            className={`h-full rounded-full transition-all ${getScoreColor(signal.score).replace("text-", "bg-")}`}
-                            style={{ width: `${signal.score}%` }}
-                          />
-                        </div>
-                        <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
-                          {signal.score.toFixed(2)}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-800 rounded-full h-2" />
-                        <span className="text-sm italic text-gray-500">not computed</span>
-                      </div>
-                    )}
-
-                    <p className="text-sm text-gray-300">
-                      {signal.score != null
-                        ? signal.reasoning
-                        : "This signal was not computed for this match — it predates the signal, or its inputs were unavailable. No number is substituted."}
-                    </p>
-                  </div>
-                </Card>
-              );
-            })}
+        <div>
+          <div className="flex items-baseline gap-2 mb-2">
+            <h3 className={T_SUB}>Cultural signals</h3>
+            <span className={T_MICRO}>derived — the three sub-scores ×10, not independent measurements</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            {culturalSignals.map((signal, idx) => <SignalCard key={idx} signal={signal} />)}
           </div>
         </div>
       )}
