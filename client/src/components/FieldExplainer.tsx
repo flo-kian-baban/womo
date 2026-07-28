@@ -12,6 +12,7 @@
 
 import { useState } from "react";
 import { HelpCircle, ChevronDown, ChevronUp, Database, Target, BookOpen } from "lucide-react";
+import { T_SUB, T_DETAIL, T_MICRO } from "@/lib/reportType";
 
 // ─── Field Explainer Definitions ─────────────────────────────────────────────
 
@@ -451,7 +452,7 @@ export default function FieldExplainer({ fieldKey, value }: FieldExplainerProps)
       {/* Toggle button */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors group"
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground/90 transition-colors group"
         title="What does this field mean?"
       >
         <HelpCircle className="w-3 h-3 group-hover:text-primary/60 transition-colors" />
@@ -466,11 +467,20 @@ export default function FieldExplainer({ fieldKey, value }: FieldExplainerProps)
 
       {/* Expandable panel */}
       {open && (
-        <div className="mt-2 rounded-lg border border-border/40 bg-secondary/30 overflow-hidden text-[11px] leading-relaxed">
-          {/* Framework badge */}
+        <div className="mt-2 rounded-lg border border-border/40 bg-secondary/30 overflow-hidden">
+          {/*
+            ─── B2c colour discipline, applied here too ─────────────────────
+            The four headings below were sky / amber / violet / indigo. They are
+            KINDS OF EXPLANATION — what a field measures, how it was derived,
+            why it matters — not judgements about it, so hue encoded nothing the
+            word did not already say. The amber one in particular sat beside the
+            genuine warnings in section 3 and read like one of them.
+            The type scale separates them now: T_SUB for the heading, T_DETAIL
+            for the prose, and the icon keeps the glance-level distinction.
+          */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border/30 bg-secondary/50">
-            <BookOpen className="w-3 h-3 text-primary/60 flex-shrink-0" />
-            <span className="text-primary/70 font-semibold uppercase tracking-wide text-[9px]">
+            <BookOpen className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+            <span className={T_MICRO}>
               {explanation.framework}
             </span>
           </div>
@@ -479,41 +489,41 @@ export default function FieldExplainer({ fieldKey, value }: FieldExplainerProps)
             {/* What this measures */}
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-1.5 mb-1.5">
-                <Target className="w-3 h-3 text-sky-400/70 flex-shrink-0" />
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-400/70">
+                <Target className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                <span className={T_SUB}>
                   What this measures
                 </span>
               </div>
-              <p className="text-muted-foreground/80">{explanation.measures}</p>
+              <p className={T_DETAIL}>{explanation.measures}</p>
             </div>
 
             {/* How it was determined */}
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-1.5 mb-1.5">
-                <Database className="w-3 h-3 text-amber-400/70 flex-shrink-0" />
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400/70">
+                <Database className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                <span className={T_SUB}>
                   How it was determined
                 </span>
               </div>
-              <p className="text-muted-foreground/80">{explanation.howDetermined}</p>
+              <p className={T_DETAIL}>{explanation.howDetermined}</p>
             </div>
 
             {/* Why it matters */}
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-1.5 mb-1.5">
-                <HelpCircle className="w-3 h-3 text-violet-400/70 flex-shrink-0" />
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-400/70">
+                <HelpCircle className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                <span className={T_SUB}>
                   Why it matters for brand matching
                 </span>
               </div>
-              <p className="text-muted-foreground/80">{explanation.whyItMatters}</p>
+              <p className={T_DETAIL}>{explanation.whyItMatters}</p>
             </div>
 
             {/* Possible values legend */}
             {explanation.possibleValues && explanation.possibleValues.length > 0 && (
               <div className="px-3 py-2.5">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/50">
+                  <span className={T_SUB}>
                     Possible values
                   </span>
                 </div>
@@ -525,12 +535,12 @@ export default function FieldExplainer({ fieldKey, value }: FieldExplainerProps)
                     >
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border flex-shrink-0 mt-0.5 ${
                         value !== null && value !== undefined && String(value) === v
-                          ? "border-primary/50 bg-primary/15 text-primary"
+                          ? "border-primary/50 bg-primary/15 text-primary"  /* ORDINAL: this is the value that applies */
                           : "border-border/40 bg-secondary/50 text-muted-foreground/60"
                       }`}>
                         {v}
                       </span>
-                      <span className="text-muted-foreground/70 leading-relaxed">{meaning}</span>
+                      <span className={T_DETAIL}>{meaning}</span>
                     </div>
                   ))}
                 </div>
