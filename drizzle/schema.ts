@@ -643,6 +643,17 @@ export const matchScores = pgTable("match_scores", {
 
   creatorSubjectId: uuid("creator_subject_id").notNull().references(() => subjects.id, { onDelete: "cascade" }),
   brandSubjectId: uuid("brand_subject_id").notNull().references(() => subjects.id, { onDelete: "cascade" }),
+  /**
+   * ─── EVIDENCE-IDENTITY GUARANTEE (recorded M1, do not "fix") ─────────────
+   * These two FKs deliberately have NO onDelete clause, so Postgres default
+   * NO ACTION applies: an observation that a match was scored against CANNOT
+   * be deleted while the match exists. Nobody designed that on purpose — it
+   * fell out of the default — but it is a real integrity guarantee the match
+   * report's provenance now RELIES on: the "scored observation" a report pins
+   * to (getMatchWithProfiles) is either present or the whole match is gone
+   * (subject cascade). Adding `onDelete: "set null"` here would reopen the
+   * silent-evidence-swap hole M1 closed.
+   */
   creatorObservationId: uuid("creator_observation_id").references(() => observations.id),
   brandObservationId: uuid("brand_observation_id").references(() => observations.id),
 
@@ -715,6 +726,18 @@ export const matchScores = pgTable("match_scores", {
   // Confidence & velocity
   culturalVelocity: culturalVelocityEnum("cultural_velocity"),
   dataConfidenceLevel: confidenceLevelEnum("data_confidence_level"),
+
+  /**
+   * womo_0012 (M1): whether this score rests on FALLBACK values rather than a
+   * real computation (myth/tribe LLM failed, or barthes_myth missing → both
+   * defaulted to 3.0). A statement about the CALCULATION, not about the match
+   * — which is why it is not a warning_type: a warning says something about
+   * the pairing; this says the number was not fully computed. `json`, not
+   * `jsonb`, matching the womo_0010 precedent — verbatim strings, no
+   * normalization.
+   */
+  scoreDegraded: boolean("score_degraded").notNull().default(false),
+  degradationReasons: json("degradation_reasons").$type<string[]>(),
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({

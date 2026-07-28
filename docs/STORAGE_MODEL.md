@@ -675,7 +675,13 @@ The worker needs **two** queries, and the distinction matters:
 
 | 20260726013326 | **womo_0010_phase_state_output_json** (phased-architecture S2: `analysis_phase_state.output` **jsonb → json**. Not cosmetic — phases read their inputs back from this column and those values land in the womo_0007 evidence snapshot, which the identity harness byte-compares; `jsonb` normalizes key order and would break that proof. Verified: jsonb round-trip byte-identical **false**, json **true**. Existing 9 rows preserved) |
 
-> *Note:* the original work order referenced "7 migrations"; there are now **14** — `womo_0004`..`womo_0010` were applied in later sessions. `womo_0008` is a data correction (no schema change). This doc reflects the live state.
+| 20260726053749 | **womo_0011_content_items_observation_scoped** (`ci_platform_video_obs_idx` unique key gains `observation_id` `NULLS NOT DISTINCT` — one row per video **per observation**; see [the womo_0011 FACT](#womo_0011) above. This row was missing from the ledger when womo_0012 was added; backfilled then) |
+
+| 20260728160618 | **womo_0012_match_score_degradation** (M1 item 3: `match_scores.score_degraded` boolean NOT NULL DEFAULT false + `degradation_reasons` **json** — the fallback-vs-computed marker fit.calculate produced and then dropped is now stored and rendered. `json` not `jsonb` per the womo_0010 precedent: verbatim reason strings, no normalization. **Additive only; table had 0 rows at apply time.** Deliberately NOT a `warning_type` value: a warning states something about the MATCH, degradation states something about the CALCULATION — coercing one into the other is exactly the falsified-warning bug M1 item 1 removed) |
+
+> *Note:* the original work order referenced "7 migrations"; there are now **16** — `womo_0004`..`womo_0012` were applied in later sessions. `womo_0008` is a data correction (no schema change). This doc reflects the live state.
+
+**[FACT] match_scores → observations FKs are an accidental-but-real integrity guarantee (recorded M1).** `creator_observation_id` / `brand_observation_id` carry **no ON DELETE clause**, so Postgres NO ACTION applies: an observation a match was scored against cannot be deleted while the match exists (a subject delete removes both via the subject cascades). Nobody designed this deliberately — it fell out of the default — but the match report's evidence-identity pinning (`getMatchWithProfiles` loading the SCORED observations, M1 item 2) now relies on it. Do not "tidy" these FKs to `set null`.
 
 ### Procedure for a future schema change (do this)
 1. Write the SQL for the change (DDL).

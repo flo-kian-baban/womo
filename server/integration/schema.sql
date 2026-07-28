@@ -698,6 +698,8 @@ CREATE TABLE public.match_scores (
     mention_vocab_boost real,
     cultural_velocity public.cultural_velocity,
     data_confidence_level public.confidence_level,
+    score_degraded boolean DEFAULT false NOT NULL,
+    degradation_reasons json,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
