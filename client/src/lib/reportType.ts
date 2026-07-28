@@ -68,3 +68,46 @@ export const T_MONO = "font-mono tabular-nums text-xs text-muted-foreground/75";
  * sentences that happen to contain numbers.
  */
 export const BOX = "rounded-lg border border-border/50 bg-secondary/25";
+
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ THE CONTAINER VOCABULARY (B2c/B2d)                                        ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ * B2b removed section tinting — correct, the tints were decorative — and
+ * replaced it with hairline rules only. That went too far the other way: a
+ * collapsed group and an open one became structurally identical, and an opened
+ * group's contents floated in page space with nothing tying them to the row
+ * that opened them.
+ *
+ * Structure carries what colour used to. Depth here comes from SURFACE and
+ * BORDER only — never shadow, glow or gradient, which are the marketing
+ * surface. Three levels on the #030712 canvas:
+ *
+ *   L0  the page              canvas, no surface of its own
+ *   L1  a group/disclosure    gray-900-ish surface, gray-800 border, rounded-lg
+ *   L2  contents inside L1    a half-step lighter, inset, sharing L1's border
+ *
+ * The NESTING RULE: a container inside a container does not repeat the border —
+ * it insets and lifts the surface a half step instead. Two nested boxes both
+ * drawing a full border reads as two objects side by side rather than one
+ * inside another.
+ */
+
+/** L1 — a disclosure or group, closed. The default resting state. */
+export const PANEL = "rounded-lg border border-border/50 bg-card/40";
+
+/** L1 — the same object, opened. Slightly lifted so open reads as active. */
+export const PANEL_OPEN = "rounded-lg border border-border/70 bg-card/70";
+
+/** The clickable header row of an L1 panel. */
+export const PANEL_HEAD = "w-full flex items-center gap-2.5 px-3 py-2.5 text-left";
+
+/**
+ * L2 — the contents of an opened L1. Inset from the panel edge and separated by
+ * a top rule, so the body visibly belongs to the header above it rather than
+ * to the page.
+ */
+export const PANEL_BODY = "px-3 pb-3 pt-3 border-t border-border/40 bg-secondary/15";
+
+/** Open/close motion. Expo-out, per the Connex easings. */
+export const EASE_EXPO = "transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]";

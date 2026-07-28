@@ -48,7 +48,7 @@ import {
 } from "./CreatorProfileCard";
 import {
   T_TITLE, T_SECTION, T_SUB, T_BODY, T_LABEL, T_DETAIL, T_MICRO,
-  T_FIGURE_SM, BOX,
+  T_FIGURE_SM, BOX, PANEL, PANEL_OPEN, PANEL_HEAD, PANEL_BODY, EASE_EXPO,
 } from "@/lib/reportType";
 
 type Profile = Record<string, any> & { id: string };
@@ -86,17 +86,22 @@ function Disclosure({
 }: { label: string; summary: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    /* mt-3 + a full rule: disclosures used to sit flush against the content
-       above them, so a collapsed row read as another line of that content
-       rather than as a control. */
-    <div className="border-t border-border/40 mt-3 first:mt-0">
-      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2.5 py-2.5 text-left group">
+    /*
+      ─── B2d: a disclosure is an OBJECT, not a rule ─────────────────────────
+      B2c gave these a separating rule, which distinguished a control from the
+      content above it but left closed and open structurally identical, and
+      left an opened disclosure's contents floating in page space. The panel
+      carries its own surface and border; opening lifts the surface and nests
+      the body inside via a shared top rule.
+    */
+    <div className={`${open ? PANEL_OPEN : PANEL} ${EASE_EXPO} overflow-hidden`}>
+      <button onClick={() => setOpen(v => !v)} className={PANEL_HEAD}>
         <span className={T_SUB}>{label}</span>
         <span className={`${T_DETAIL} tabular-nums`}>{summary}</span>
-        {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/40 ml-auto" />
-              : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/40 ml-auto" />}
+        {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50 ml-auto" />
+              : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 ml-auto" />}
       </button>
-      {open && <div className="pb-3">{children}</div>}
+      {open && <div className={PANEL_BODY}>{children}</div>}
     </div>
   );
 }
@@ -449,7 +454,7 @@ export default function CreatorReport({
 
       {/* ══ 4 SUPPORT ════════════════════════════════════════════════════ */}
       <Section n={4} title="Support" blurb="the evidence underneath the findings" icon={Film}>
-        <div className="space-y-0">
+        <div className="space-y-2">
           <Disclosure label="Transcript excerpts" summary={`${transcripts.length} with transcript`} defaultOpen={transcripts.length > 0}>
             {transcripts.length > 0
               ? <TranscriptPanel profile={profile} showDecoded={false} />

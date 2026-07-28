@@ -14,7 +14,9 @@ import {
   Mic, ChevronDown, ChevronUp, MapPin, Utensils, Sparkles, User,
   Fingerprint, TrendingUp, Users, Heart, BookOpen,
 } from "lucide-react";
-import { T_SUB, T_BODY, T_DETAIL, T_MICRO } from "@/lib/reportType";
+import {
+  T_SUB, T_BODY, T_DETAIL, T_MICRO, PANEL, PANEL_OPEN, PANEL_HEAD, PANEL_BODY, EASE_EXPO,
+} from "@/lib/reportType";
 
 // Flattened creator profile as returned by getCreatorProfileById in db.ts.
 type CreatorProfile = Record<string, any> & { id: string };
@@ -335,37 +337,49 @@ export function DecodedSignalsPanel({ decoded }: { decoded: DecodedSymbols }) {
         </p>
       )}
 
-      <div>
+      {/*
+        ─── B2d: each group is an OBJECT, closed or open ───────────────────────
+        These were bare rows separated by hairlines, so a collapsed group and an
+        open one were structurally identical and an opened group's signals
+        floated in page space. Each group now carries its own surface and
+        border; opening lifts the surface and nests the contents INSIDE it via
+        a shared top rule, so the signals visibly belong to the header above.
+
+        Three kinds of information on the header row, three levels of type:
+        the LABEL names the group, the COUNT is a figure, and the INFORMS list
+        says which analysed fields the group feeds — the last being the reason
+        the grouping exists at all, and previously the least readable thing on
+        the row at 10px.
+      */}
+      <div className="space-y-2">
         {SIGNAL_CATEGORIES.map(({ key, label, sublabel, icon: Icon }) => {
           const signals = decoded[key] as DecodedSignal[];
           if (signals.length === 0) return null;
           const isOpen = open.has(key);
           return (
-            <div key={key} className="border-t border-border/25 first:border-0">
-              <button
-                onClick={() => toggle(key)}
-                className="w-full flex items-center gap-2 py-2 text-left"
-              >
-                <Icon className="w-3 h-3 text-muted-foreground/45 flex-shrink-0" />
-                <span className="text-[13px] font-medium text-foreground/85">{label}</span>
-                <span className={`${T_DETAIL} tabular-nums`}>{signals.length}</span>
-                {/* What this group FEEDS — the reason the grouping exists. */}
+            <div key={key} className={`${isOpen ? PANEL_OPEN : PANEL} ${EASE_EXPO} overflow-hidden`}>
+              <button onClick={() => toggle(key)} className={PANEL_HEAD}>
+                <Icon className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
+                <span className="text-sm font-medium text-foreground/90">{label}</span>
+                <span className="text-xs font-mono tabular-nums text-muted-foreground/60 px-1.5 py-0.5 rounded bg-secondary/60 border border-border/40">
+                  {signals.length}
+                </span>
                 <span className={`${T_DETAIL} hidden sm:inline truncate`}>{sublabel}</span>
                 {isOpen
-                  ? <ChevronUp className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />
-                  : <ChevronDown className="w-3 h-3 text-muted-foreground/40 ml-auto flex-shrink-0" />}
+                  ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50 ml-auto flex-shrink-0" />
+                  : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 ml-auto flex-shrink-0" />}
               </button>
 
               {isOpen && (
-                <div className="pb-2.5 space-y-1.5">
+                <div className={`${PANEL_BODY} space-y-3`}>
                   {signals.map((signal, i) => (
-                    <div key={i} className="pl-5 text-xs">
+                    <div key={i}>
                       <div className="flex items-baseline gap-2 flex-wrap">
-                        <span className="text-foreground/85">“{signal.phrase}”</span>
+                        <span className={T_BODY}>“{signal.phrase}”</span>
                         {signal.informs.length > 0 && (
                           <span className="ml-auto flex flex-wrap gap-1 flex-shrink-0">
                             {signal.informs.map((field, j) => (
-                              <span key={j} className="text-[9px] font-mono px-1 py-0.5 rounded border border-border/50 bg-secondary/40 text-muted-foreground/60">
+                              <span key={j} className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border/50 bg-secondary/50 text-muted-foreground/70">
                                 {field}
                               </span>
                             ))}
@@ -497,7 +511,8 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
           {/* Entries — collapsed individually, because an entry is a PARAGRAPH
               read selectively, not a line read comparatively (see the decoded
               panel, which collapses the other way and says why). */}
-          <div>
+          {/* B2d: each entry is its own panel — see the container vocabulary. */}
+          <div className="space-y-2">
             {entries.map((entry, i) => {
               const isOpen = expanded.has(i);
               const highlightCount = entry.segments.filter(s => s.type !== null).length;
@@ -505,20 +520,20 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
               // "Video 3" told the analyst nothing about what it contains.
               const preview = entry.text.replace(/\s+/g, " ").trim().slice(0, 90);
               return (
-                <div key={i} className="border-t border-border/25 first:border-0">
+                <div key={i} className={`${isOpen ? PANEL_OPEN : PANEL} ${EASE_EXPO} overflow-hidden`}>
                   <button
                     onClick={() => toggleEntry(i)}
-                    className="w-full flex items-start gap-2 py-2 text-left"
+                    className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[13px] font-medium text-foreground/85">{entry.label}</span>
+                        <span className="text-sm font-medium text-foreground/90">{entry.label}</span>
                         {entry.sourceLabel && (
                           <span
                             title={entry.sourceKind === "speech"
                               ? "Transcribed speech — the creator's own words"
                               : "The post's written caption — not spoken content"}
-                            className={`text-[9px] px-1.5 py-0.5 rounded-full border cursor-help ${
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${
                               entry.sourceKind === "speech"
                                 ? "border-border/60 bg-secondary/50 text-foreground/70"
                                 : "border-border/60 bg-secondary/30 text-muted-foreground/70"
@@ -533,7 +548,7 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
                               const count = entry.segments.filter(s => s.type === type).length;
                               if (count === 0) return null;
                               return (
-                                <span key={type} className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/60 tabular-nums">
+                                <span key={type} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/65 tabular-nums">
                                   <span className={`w-1.5 h-1.5 rounded-full ${HIGHLIGHT_SWATCH[type]}`} />
                                   {count}
                                 </span>
@@ -547,12 +562,12 @@ export default function TranscriptPanel({ profile, showDecoded = true }: Transcr
                       )}
                     </div>
                     {isOpen
-                      ? <ChevronUp className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 mt-1" />
-                      : <ChevronDown className="w-3 h-3 text-muted-foreground/40 flex-shrink-0 mt-1" />}
+                      ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0 mt-0.5" />
+                      : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0 mt-0.5" />}
                   </button>
 
                   {isOpen && (
-                    <div className="pb-3 pl-0">
+                    <div className={PANEL_BODY}>
                       <p className={`${T_BODY} italic text-foreground/80`}>
                         “<HighlightedText segments={entry.segments} />”
                       </p>

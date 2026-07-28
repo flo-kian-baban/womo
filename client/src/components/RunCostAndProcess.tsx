@@ -28,7 +28,9 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Timer, Cpu, RotateCw, PauseCircle, AlertTriangle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { MODEL_PRICING, PRICING_AS_OF } from "@shared/llmPricing";
-import { T_SUB, T_DETAIL, T_MICRO, T_FIGURE_SM, BOX } from "@/lib/reportType";
+import {
+  T_SUB, T_DETAIL, T_MICRO, T_FIGURE_SM, BOX, PANEL, PANEL_OPEN, PANEL_HEAD, PANEL_BODY, EASE_EXPO,
+} from "@/lib/reportType";
 
 const PHASE_LABEL: Record<string, string> = {
   capture: "Capture",
@@ -133,12 +135,10 @@ export function RunCostAndProcess({
       </div>
 
       {/* ── Phase timeline ───────────────────────────────────────────────── */}
-      <div>
-        <button
-          onClick={() => setOpenPhases(v => !v)}
-          className="w-full flex items-center gap-2 text-left py-1.5"
-        >
-          <Timer className="w-3.5 h-3.5 text-muted-foreground/50" />
+      {/* B2d: section 5's two blocks are panels like every other disclosure. */}
+      <div className={`${openPhases ? PANEL_OPEN : PANEL} ${EASE_EXPO} overflow-hidden`}>
+        <button onClick={() => setOpenPhases(v => !v)} className={PANEL_HEAD}>
+          <Timer className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
           <span className={T_SUB}>Phase by phase</span>
           <span className={`${T_DETAIL} tabular-nums`}>
             {campaign.isLoading ? "…" : `${phases.length} phases`}
@@ -149,14 +149,14 @@ export function RunCostAndProcess({
         </button>
 
         {openPhases && (
-          <div className="mt-2 space-y-1.5">
+          <div className={`${PANEL_BODY} space-y-2`}>
             {!runId && (
-              <p className="text-[11px] text-muted-foreground/50 italic">
+              <p className={`${T_DETAIL} italic`}>
                 This observation predates run tagging — it has no campaign ledger to show.
               </p>
             )}
             {runId && phases.length === 0 && !campaign.isLoading && (
-              <p className="text-[11px] text-muted-foreground/50 italic">
+              <p className={`${T_DETAIL} italic`}>
                 No phase rows found for this run.
               </p>
             )}
@@ -242,12 +242,9 @@ export function RunCostAndProcess({
       </div>
 
       {/* ── LLM cost ─────────────────────────────────────────────────────── */}
-      <div>
-        <button
-          onClick={() => setOpenCalls(v => !v)}
-          className="w-full flex items-center gap-2 text-left py-1.5"
-        >
-          <Cpu className="w-3.5 h-3.5 text-muted-foreground/50" />
+      <div className={`${openCalls ? PANEL_OPEN : PANEL} ${EASE_EXPO} overflow-hidden`}>
+        <button onClick={() => setOpenCalls(v => !v)} className={PANEL_HEAD}>
+          <Cpu className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
           <span className={T_SUB}>LLM cost — estimated</span>
           <span className={`${T_DETAIL} tabular-nums`}>
             {priced && rows.length > 0 ? `~${usd(estTotal)}` : "unpriced"} · {calls.length || d?.llm.calls || 0} calls
@@ -257,7 +254,7 @@ export function RunCostAndProcess({
         </button>
 
         {openCalls && (
-          <div className="mt-2 space-y-3">
+          <div className={`${PANEL_BODY} space-y-3`}>
             {/* NOT A RECORDED FACT — stated before the number, not after it. */}
             <p className={T_DETAIL}>
               No cost is recorded with a run. The figures below are computed from the token
@@ -267,7 +264,7 @@ export function RunCostAndProcess({
             </p>
 
             {rows.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground/50 italic">No LLM calls recorded for this run.</p>
+              <p className={`${T_DETAIL} italic`}>No LLM calls recorded for this run.</p>
             ) : (
               <div className="space-y-2">
                 {rows.map(r => (
