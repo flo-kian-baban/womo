@@ -105,6 +105,15 @@ export type InvokeResult = {
     completion_tokens: number;
     total_tokens: number;
   };
+  /**
+   * M1 (llm linkage): resolves to this call's `llm_invocations` row id, or
+   * null if provenance logging failed. Logging stays FIRE-AND-FORGET — this
+   * only exposes the already-inflight insert's outcome so a caller that later
+   * learns a correlation id (fit.calculate learns its matchId only after
+   * persist, because the FK forbids writing it earlier) can link the rows
+   * retroactively. Callers that never await it change nothing.
+   */
+  invocationIdPromise?: Promise<string | null>;
 };
 
 export type JsonSchema = {
@@ -297,6 +306,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   // Single fire-and-forget provenance path for success AND failure (womo_0005):
   // failed invocations record purpose, error, and duration — a failure that
   // took ~timeoutMs was a hang; one that took milliseconds was a bad request.
+  //
+  // M1: the insert's outcome is CAPTURED (not awaited) into
+  // `invocationIdPromise` and attached to the successful result, so a caller
+  // that later learns a correlation id can link this row retroactively.
+  // Nothing here blocks the hot path; a caller that ignores the promise gets
+  // exactly the previous behavior.
+  let invocationIdPromise: Promise<string | null> = Promise.resolve(null);
   const logInvocation = (outcome: {
     status: "success" | "failed";
     inputTokens?: number;
@@ -304,7 +320,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     errorMessage?: string;
   }): void => {
     try {
-      insertLlmInvocation({
+      invocationIdPromise = insertLlmInvocation({
         purpose: purpose ?? "unknown",
         model: modelName,
         promptVersion: "1.0",
@@ -318,14 +334,19 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
         observationId: observationId ?? undefined,
         status: outcome.status,
         errorMessage: outcome.errorMessage,
-      }).catch(err => console.warn("[LLM] Invocation logging failed:", err));
+      }).then(
+        id => id,
+        err => { console.warn("[LLM] Invocation logging failed:", err); return null; },
+      );
     } catch (err) {
       console.warn("[LLM] Invocation logging failed:", err);
     }
   };
 
   try {
-    return await invokeLLMInner();
+    const result = await invokeLLMInner();
+    result.invocationIdPromise = invocationIdPromise;
+    return result;
   } catch (err) {
     logInvocation({
       status: "failed",

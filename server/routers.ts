@@ -14,6 +14,7 @@ import {
   insertEvidenceSnapshots, insertLongitudinalSampleSnapshot, findExistingCreatorByHandle,
   insertBrandObservation, insertAudienceMentions,
   insertMatchScore, insertMatchNarrative, insertMatchWarnings, insertMatchOverlaps, insertMatchContentDirections,
+  linkLlmInvocationsToMatch,
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getStrategyOutcomesForRun, getEvidenceSnapshotByObservation,
@@ -1707,6 +1708,12 @@ export const appRouter = router({
         // only record when a result rests on fallbacks instead of real
         // computation, so a degraded score is distinguishable from a real one.
         const scoreDegradationReasons: string[] = [];
+        // M1 item 6: invocation ids of this calculation's LLM calls, linked to
+        // the match row AFTER persist (the FK forbids writing them earlier).
+        // Failed calls throw before their result object exists, so only
+        // successful calls are linkable — a failed call is named in the
+        // degradation record instead.
+        const matchLlmInvocationIds: Array<Promise<string | null>> = [];
 
         if (creator.barthesMyth && brand.barthesMyth) {
           try {
@@ -1797,6 +1804,7 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
               },
             });
             const parsed = JSON.parse(mythResponse.choices[0]?.message?.content as string);
+            if (mythResponse.invocationIdPromise) matchLlmInvocationIds.push(mythResponse.invocationIdPromise);
             mythAlignmentScore = Math.min(10, Math.max(0, Number(parsed.mythAlignmentScore) || 3));
             tribMatchScore = Math.min(10, Math.max(0, Number(parsed.tribMatchScore) || 3));
           } catch (err) {
@@ -1884,12 +1892,18 @@ Return ONLY valid JSON: {"mythAlignmentScore": <number>, "tribMatchScore": <numb
           creatorMusicArtists,
         });
 
-        // FIX 5: Inject radar warning when myth/tribe LLM failed
-        if (mythLlmFailed) {
-          (result.radarWarnings as string[]).push(
-            "Myth/tribe alignment could not be computed \u2014 score may be unreliable"
-          );
-        }
+        /*
+          ─── M1 item 1: the myth-LLM-failure marker is NOT a radar warning ──
+          FIX 5 pushed "Myth/tribe alignment could not be computed" into
+          radarWarnings here. That string is not in the warning enum, and the
+          persist layer coerced any unknown string to "Low Alignment" — so a
+          computation failure was STORED AND RENDERED as a substantive claim
+          that alignment fell below 6.0. A warning says something about the
+          MATCH; a degradation says something about the CALCULATION. The
+          failure already lands in scoreDegradationReasons above, which is
+          persisted (womo_0012) and rendered on both surfaces. mythLlmFailed
+          stays read below for the degraded flag.
+        */
 
         // Calculate performance signals using actual brand + creator data
         const performanceSignals = calculateAllSignals(
@@ -1991,6 +2005,7 @@ Write the following in JSON format:
             },
           });
           const synergyParsed = JSON.parse(synergyResponse.choices[0]?.message?.content as string);
+          if (synergyResponse.invocationIdPromise) matchLlmInvocationIds.push(synergyResponse.invocationIdPromise);
           synergyNarrative = synergyParsed.synergyNarrative ?? "";
           contentDirections = synergyParsed.contentDirections ?? [];
         } catch (err) {
@@ -2016,6 +2031,8 @@ Write the following in JSON format:
           weightPriority: result.weightPriority,
           creatorPronouns: creator.pronouns ?? "not specified",
         });
+
+        if (narrative.invocationIdPromise) matchLlmInvocationIds.push(narrative.invocationIdPromise);
 
         // Generate Cultural Borrowing Summary — what the brand gains from this creator
         let culturalBorrowingSummary: string | null = null;
@@ -2058,11 +2075,25 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
             ],
           });
           culturalBorrowingSummary = borrowingResponse.choices[0]?.message?.content as string ?? null;
+          if (borrowingResponse.invocationIdPromise) matchLlmInvocationIds.push(borrowingResponse.invocationIdPromise);
         } catch (err) {
           console.warn("[routers] Cultural borrowing summary generation failed (non-fatal):", err);
         }
 
-        // Save match record — V2 pipeline
+        // Session 5 marker, computed ONCE and used three ways: persisted on the
+        // match row (womo_0012), returned to the client, and — nowhere — as a
+        // radar warning (M1 item 1).
+        const scoreDegradation = {
+          degraded: mythAlignmentScore === null || tribMatchScore === null,
+          reasons: scoreDegradationReasons,
+        };
+
+        // Save match record — V2 pipeline.
+        // M1 items 4+5: the persisted id and any failure are RETURNED, not
+        // swallowed — the client links to the report only when a record
+        // exists, and says so plainly when it does not.
+        let persistedMatchId: string | null = null;
+        let persistFailure: string | null = null;
         try {
           const matchId = await insertMatchScore({
             creatorSubjectId: input.creatorProfileId,
@@ -2113,7 +2144,11 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
             // C5: Wire observation IDs for provenance
             creatorObservationId: (creator as Record<string, unknown>).observationId as string | undefined,
             brandObservationId: (brand as Record<string, unknown>).observationId as string | undefined,
+            // womo_0012 (M1 item 3): the fallback-vs-computed marker, stored.
+            scoreDegraded: scoreDegradation.degraded,
+            degradationReasons: scoreDegradation.reasons,
           });
+          persistedMatchId = matchId;
 
           // Insert narratives (single row with all narrative fields)
           await insertMatchNarrative(matchId, {
@@ -2135,11 +2170,19 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
             await insertMatchWarnings(matchId, result.radarWarnings);
           }
 
-          // Insert overlaps
-          if (result.sharedKeywords.length > 0 || result.sharedThemes.length > 0) {
-            const overlaps: Array<{ domain: string; value: string }> = [];
-            result.sharedKeywords.forEach((k: string) => overlaps.push({ domain: "keyword", value: k }));
-            result.sharedThemes.forEach((t: string) => overlaps.push({ domain: "theme", value: t }));
+          // Insert overlaps.
+          // M1 item 7c: music titles/artists were computed, returned, and then
+          // LOST — never written, while the read path reconstructed musicOverlap
+          // from exactly these domains and always found nothing. The engine's
+          // music result persists now. (sharedArtists is structurally empty
+          // today — the creator side has no artist source — so music_artist
+          // rows appear only when that changes; the write path is ready.)
+          const overlaps: Array<{ domain: string; value: string }> = [];
+          result.sharedKeywords.forEach((k: string) => overlaps.push({ domain: "keyword", value: k }));
+          result.sharedThemes.forEach((t: string) => overlaps.push({ domain: "theme", value: t }));
+          result.musicOverlap.sharedTitles.forEach((t: string) => overlaps.push({ domain: "music_title", value: t }));
+          result.musicOverlap.sharedArtists.forEach((a: string) => overlaps.push({ domain: "music_artist", value: a }));
+          if (overlaps.length > 0) {
             await insertMatchOverlaps(matchId, overlaps);
           }
 
@@ -2147,7 +2190,19 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           if (contentDirections.length > 0) {
             await insertMatchContentDirections(matchId, contentDirections);
           }
+
+          // M1 item 6: tie this calculation's LLM calls to the match row now
+          // that it exists. The inserts were fired long ago (fire-and-forget);
+          // awaiting their ids here costs nothing measurable.
+          const invocationIds = (await Promise.all(matchLlmInvocationIds))
+            .filter((id): id is string => Boolean(id));
+          if (invocationIds.length > 0) {
+            await linkLlmInvocationsToMatch(matchId, invocationIds);
+          }
         } catch (err) {
+          // M1 item 5: still non-fatal — the COMPUTATION succeeded and the
+          // analyst should see it — but the failure is returned, not swallowed.
+          persistFailure = err instanceof Error ? err.message : String(err);
           console.error("[fit.calculate] Match record persist failed (non-fatal):", err);
         }
 
@@ -2160,10 +2215,21 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
           // Session 5: marks results that rest on fallback values instead of a
           // real computation. Score VALUES are unchanged (scoring is frozen) —
           // this only stops a degraded result from masquerading as a real one.
-          scoreDegradation: {
-            degraded: mythAlignmentScore === null || tribMatchScore === null,
-            reasons: scoreDegradationReasons,
-          },
+          scoreDegradation,
+          // M1 item 4: the persisted record's id — "View Full Report" linked
+          // to /report/undefined for as long as this endpoint existed, because
+          // the id was never returned. Null when persist failed.
+          matchId: persistedMatchId,
+          // M1 item 5: persist outcome, stated. A computed-but-unsaved result
+          // must not render identically to a saved one.
+          persist: persistedMatchId
+            ? { ok: true as const }
+            : { ok: false as const, error: persistFailure ?? "persist did not run" },
+          // M1 item 7b: these were generated, persisted, and rendered on the
+          // full report — but the calculate page read them from the mutation
+          // result, which never included them. Two dead blocks come alive.
+          synergyNarrative: synergyNarrative || null,
+          contentDirections,
         };
       }),
 

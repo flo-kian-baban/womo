@@ -2042,13 +2042,28 @@ function authoritativeObservationIdSubquery(db: DbHandle, subjectId: string) {
  * Get a creator "profile" view by subject ID — joins subjects + latest observation + creator_observations.
  * Returns a flat object compatible with existing routers.ts expectations.
  */
-export async function getCreatorProfileById(subjectId: string) {
+/**
+ * M1 (evidence identity): `opts.observationId` PINS the load to one specific
+ * observation instead of the subject's latest. The match report uses this to
+ * show the evidence a score was actually computed from — after a re-analysis,
+ * "latest" and "scored" are different observations, and rendering the latest
+ * beside an old score silently swaps the evidence out from under the number.
+ * A pinned load also scopes every list-shaped read (signals, decoded symbols,
+ * content items) to that one observation: the accepted-union visibility rule
+ * answers "what is this subject's current profile?", which is not the pinned
+ * question. Read path only — no caller's values change unless it passes opts.
+ */
+export async function getCreatorProfileById(subjectId: string, opts?: { observationId?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  const pinnedObservationId = opts?.observationId ?? null;
   const rows = await db.select()
     .from(subjects)
-    .innerJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
+    .innerJoin(observations, and(
+      eq(observations.subjectId, subjects.id),
+      pinnedObservationId ? eq(observations.id, pinnedObservationId) : eq(observations.isLatest, true),
+    ))
     .innerJoin(creatorObservations, eq(creatorObservations.observationId, observations.id))
     .where(eq(subjects.id, subjectId))
     .limit(1);
@@ -2064,12 +2079,15 @@ export async function getCreatorProfileById(subjectId: string) {
   // observations, to the current authoritative observation (covers a
   // first-run pending profile being reviewed), or legacy rows with no
   // observation link (content_items only — its FK is SET NULL).
+  // Pinned load (M1): visible = exactly the pinned observation.
   const visibleObservationIds = db.select({ id: observations.id })
     .from(observations)
-    .where(and(
-      eq(observations.subjectId, subjectId),
-      or(eq(observations.reviewStatus, "accepted"), eq(observations.id, observationId)),
-    ));
+    .where(pinnedObservationId
+      ? eq(observations.id, pinnedObservationId)
+      : and(
+          eq(observations.subjectId, subjectId),
+          or(eq(observations.reviewStatus, "accepted"), eq(observations.id, observationId)),
+        ));
 
   // ── Parallel subqueries for signal_values, decoded_signals, content_items ──
   const [
@@ -2106,14 +2124,17 @@ export async function getCreatorProfileById(subjectId: string) {
       .where(and(eq(decodedSignals.subjectId, subjectId), inArray(decodedSignals.observationId, visibleObservationIds))),
     // womo_0011: content resolves to ONE observation, not the visible union —
     // see authoritativeObservationIdSubquery. Signals and decoded symbols keep
-    // the union above (unchanged this session).
+    // the union above (unchanged this session). Pinned load (M1): that ONE
+    // observation is the pinned one, not the authoritative-latest.
     db.select()
       .from(contentItems)
       .where(and(
         eq(contentItems.subjectId, subjectId),
         or(
           isNull(contentItems.observationId), // legacy rows (FK is SET NULL); none exist today
-          inArray(contentItems.observationId, authoritativeObservationIdSubquery(db, subjectId)),
+          pinnedObservationId
+            ? eq(contentItems.observationId, pinnedObservationId)
+            : inArray(contentItems.observationId, authoritativeObservationIdSubquery(db, subjectId)),
         ),
       ))
       .orderBy(desc(contentItems.viewCount)),
@@ -3225,14 +3246,21 @@ export async function insertAudienceMentions(
 
 /**
  * Get a brand "profile" view by subject ID.
+ *
+ * M1: `opts.observationId` pins the load to one specific observation — same
+ * semantics and same reason as getCreatorProfileById's pinned mode.
  */
-export async function getBrandProfileById(subjectId: string) {
+export async function getBrandProfileById(subjectId: string, opts?: { observationId?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  const pinnedObservationId = opts?.observationId ?? null;
   const rows = await db.select()
     .from(subjects)
-    .innerJoin(observations, and(eq(observations.subjectId, subjects.id), eq(observations.isLatest, true)))
+    .innerJoin(observations, and(
+      eq(observations.subjectId, subjects.id),
+      pinnedObservationId ? eq(observations.id, pinnedObservationId) : eq(observations.isLatest, true),
+    ))
     .innerJoin(brandObservations, eq(brandObservations.observationId, observations.id))
     .where(eq(subjects.id, subjectId))
     .limit(1);
@@ -3243,12 +3271,15 @@ export async function getBrandProfileById(subjectId: string) {
   // Review-gate visibility (womo_0006) — same rule as getCreatorProfileById.
   // All brand observations are 'accepted' until Session 7 gates the brand
   // path, so this is currently a no-op; it keeps the visibility rule uniform.
+  // Pinned load (M1): visible = exactly the pinned observation.
   const visibleObservationIds = db.select({ id: observations.id })
     .from(observations)
-    .where(and(
-      eq(observations.subjectId, subjectId),
-      or(eq(observations.reviewStatus, "accepted"), eq(observations.id, row.observations.id)),
-    ));
+    .where(pinnedObservationId
+      ? eq(observations.id, pinnedObservationId)
+      : and(
+          eq(observations.subjectId, subjectId),
+          or(eq(observations.reviewStatus, "accepted"), eq(observations.id, row.observations.id)),
+        ));
 
   // ── Parallel subqueries for signal_values + decoded_signals (mirrors getCreatorProfileById) ──
   const [
@@ -3572,6 +3603,9 @@ export async function insertMatchScore(data: {
   mentionVocabBoost?: number;
   culturalVelocity?: string;
   dataConfidenceLevel?: string;
+  /** womo_0012 (M1): fallback-vs-computed marker — about the CALCULATION, not the match. */
+  scoreDegraded?: boolean;
+  degradationReasons?: string[];
 }): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -3621,6 +3655,10 @@ export async function insertMatchScore(data: {
     mentionVocabBoost: data.mentionVocabBoost ?? null,
     culturalVelocity: validateEnum(data.culturalVelocity, VALID_CULTURAL_VELOCITY, "matchScore.culturalVelocity"),
     dataConfidenceLevel: validateEnum(data.dataConfidenceLevel, VALID_CONFIDENCE_LEVELS, "matchScore.dataConfidenceLevel"),
+    scoreDegraded: data.scoreDegraded ?? false,
+    degradationReasons: data.degradationReasons && data.degradationReasons.length > 0
+      ? data.degradationReasons
+      : null,
   }).returning({ id: matchScores.id });
 
   return result[0].id;
@@ -3675,11 +3713,33 @@ export async function insertMatchWarnings(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  /*
+    ─── M1 item 1: a backstop must never invent a verdict ───────────────────
+    This used to be `validateEnum(...) ?? "Low Alignment"`, which rewrote ANY
+    unrecognised string into a substantive claim that alignment fell below
+    6.0. The concrete casualty: the router's myth-LLM-failure marker was
+    stored — and rendered on the report — as "Low Alignment", a false
+    statement about the match instead of a true one about the calculation.
+    Unknown strings are now SKIPPED with a loud error; computation status
+    belongs in match_scores.score_degraded (womo_0012), not in warnings.
+  */
+  const valid: Array<(typeof VALID_WARNING_TYPES)[number]> = [];
+  const skipped: string[] = [];
+  for (const w of warnings) {
+    const v = validateEnum(w, VALID_WARNING_TYPES, "warningType");
+    if (v) valid.push(v);
+    else skipped.push(w);
+  }
+  if (skipped.length > 0) {
+    console.error(
+      `[db] insertMatchWarnings: ${skipped.length} non-enum warning(s) SKIPPED, not coerced ` +
+      `(match ${matchScoreId}): ${skipped.map(s => JSON.stringify(s)).join(", ")}`,
+    );
+  }
+  if (valid.length === 0) return;
+
   await db.insert(matchWarnings).values(
-    warnings.map(w => ({
-      matchScoreId,
-      warningType: validateEnum(w, VALID_WARNING_TYPES, "warningType") ?? "Low Alignment",
-    })),
+    valid.map(w => ({ matchScoreId, warningType: w })),
   );
 }
 
@@ -3787,6 +3847,18 @@ export async function deleteMatchRecord(matchId: string) {
   await db.delete(matchScores).where(eq(matchScores.id, matchId));
 }
 
+/**
+ * How each profile on a match report relates to the evidence that was SCORED.
+ *   scored          — loaded from the exact observation the match stored.
+ *   latest-fallback — match predates observation tagging (id is null);
+ *                     latest data shown, which may differ from what was scored.
+ *   missing         — an observation id is stored but the row is gone. The FK
+ *                     has no ON DELETE, so Postgres blocks this while the
+ *                     match exists — reaching it means manual SQL. The page
+ *                     STATES it rather than silently substituting the latest.
+ */
+export type MatchProfileProvenance = "scored" | "latest-fallback" | "missing";
+
 export async function getMatchWithProfiles(matchId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -3794,8 +3866,26 @@ export async function getMatchWithProfiles(matchId: string) {
   const [match] = await db.select().from(matchScores).where(eq(matchScores.id, matchId)).limit(1);
   if (!match) return null;
 
-  const creator = await getCreatorProfileById(match.creatorSubjectId);
-  const brand = await getBrandProfileById(match.brandSubjectId);
+  /*
+    ─── M1 item 2: load the SCORED observations, not the latest ─────────────
+    The match stores which observations it was computed from
+    (creator_observation_id / brand_observation_id, written since C5) and this
+    reader ignored them — it loaded by SUBJECT, i.e. whatever is latest today.
+    After any re-analysis the report showed evidence the score never saw.
+    Pinned loads fix that; matches from before observation tagging fall back
+    to latest and SAY so via profileProvenance.
+  */
+  const creator = match.creatorObservationId
+    ? await getCreatorProfileById(match.creatorSubjectId, { observationId: match.creatorObservationId })
+    : await getCreatorProfileById(match.creatorSubjectId);
+  const brand = match.brandObservationId
+    ? await getBrandProfileById(match.brandSubjectId, { observationId: match.brandObservationId })
+    : await getBrandProfileById(match.brandSubjectId);
+
+  const creatorProvenance: MatchProfileProvenance =
+    match.creatorObservationId ? (creator ? "scored" : "missing") : "latest-fallback";
+  const brandProvenance: MatchProfileProvenance =
+    match.brandObservationId ? (brand ? "scored" : "missing") : "latest-fallback";
 
   // Also fetch narrative
   const [narrative] = await db.select().from(matchNarratives)
@@ -3863,7 +3953,26 @@ export async function getMatchWithProfiles(matchId: string) {
     },
     creator,
     brand,
+    /** M1 item 2: how each profile relates to the scored evidence. */
+    profileProvenance: { creator: creatorProvenance, brand: brandProvenance },
   };
+}
+
+/**
+ * M1 item 6: link the LLM calls a match made to the persisted match row.
+ * Runs AFTER insertMatchScore because the FK forbids writing match_score_id
+ * before the match exists; the ids come from InvokeResult.invocationIdPromise.
+ */
+export async function linkLlmInvocationsToMatch(
+  matchScoreId: string,
+  invocationIds: string[],
+): Promise<void> {
+  if (invocationIds.length === 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(llmInvocations)
+    .set({ matchScoreId })
+    .where(inArray(llmInvocations.id, invocationIds));
 }
 
 export async function getComparablePartnerships(input: {

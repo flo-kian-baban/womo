@@ -622,6 +622,8 @@ export interface NarrativeResult {
     identityStability: string;
     recommendation: string;
   };
+  /** M1 (llm linkage): pass-through of the underlying call's invocation-row id. */
+  invocationIdPromise?: Promise<string | null>;
 }
 
 export async function generateFITNarrative(input: NarrativeInput): Promise<NarrativeResult> {
@@ -704,5 +706,9 @@ Output a JSON object with:
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from narrative generation");
 
-  return JSON.parse(content as string) as NarrativeResult;
+  const parsed = JSON.parse(content as string) as NarrativeResult;
+  // M1: carry the invocation id through so fit.calculate can link this call
+  // to the match row it persists (the id only exists after persist).
+  parsed.invocationIdPromise = response.invocationIdPromise;
+  return parsed;
 }

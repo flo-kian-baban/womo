@@ -273,6 +273,13 @@ export default function MatchReport() {
   }
 
   const { match, creator, brand } = data;
+  // M1 item 2: how each profile relates to the SCORED evidence.
+  const profileProvenance = (data as Record<string, any>).profileProvenance as
+    | { creator: "scored" | "latest-fallback" | "missing"; brand: "scored" | "latest-fallback" | "missing" }
+    | undefined;
+  // M1 item 3 (womo_0012): fallback-vs-computed, read from the stored record.
+  const scoreDegraded = Boolean((match as Record<string, unknown>).scoreDegraded);
+  const degradationReasons = ((match as Record<string, unknown>).degradationReasons as string[] | null) ?? [];
   const radarWarnings = (match.radarWarnings as string[]) ?? [];
   const alignmentNotes = (match.alignmentNotes as Record<string, string>) ?? {};
   const contentDirections = (match.contentDirections as Array<{ title: string; rationale: string; exampleAngle: string }>) ?? [];
@@ -340,6 +347,27 @@ export default function MatchReport() {
         </div>
       </div>
 
+      {/* M1 item 3: a score whose components are fallbacks says so BEFORE the
+          number. Stored on the match row (womo_0012) — before that, degraded
+          and computed records were indistinguishable everywhere. */}
+      {(scoreDegraded || degradationReasons.length > 0) && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-yellow-400/40 bg-yellow-400/5 mb-6 animate-fade-in-up">
+          <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-yellow-400">
+              {scoreDegraded
+                ? "Score degraded — parts of this number are fallbacks, not computations"
+                : "Calculation note"}
+            </div>
+            {degradationReasons.length > 0 && (
+              <ul className="text-xs text-yellow-400/80 mt-1 space-y-0.5 leading-relaxed list-disc pl-4">
+                {degradationReasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ─── Hero: Cultural Match Score + Verified F.I.T. Impressions Score ─────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 animate-fade-in-up animate-stagger-1">
         {/* Cultural Match Score */}
@@ -391,6 +419,7 @@ export default function MatchReport() {
               <div key={sub.label} className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5 w-28 flex-shrink-0">
                   <span className="text-xs text-muted-foreground">{sub.label}</span>
+                  {/* intentionally nothing between label and tooltip */}
                   <MetricTooltip
                     title={sub.label}
                     explanation={sub.label === "Alignment (α)" ? "Measures archetype compatibility, myth alignment, and audience decoding acceptance between creator and brand." : sub.label === "Pulse (β)" ? "Measures cultural momentum: whether the creator's niche is trending, stable, or declining based on music signals and remix rates." : "Measures identity consistency: whether the creator's themes remain stable over time and whether their follower growth is accelerating or declining."}
@@ -398,6 +427,13 @@ export default function MatchReport() {
                     dataPoints={sub.label === "Alignment (α)" ? ["Archetype compatibility", "Barthes myth alignment", "Stuart Hall decoding"] : sub.label === "Pulse (β)" ? ["Music niche/mainstream", "Remix enablement rate", "Engagement trend"] : ["Theme consistency", "Keyword drift", "Follower growth"]}
                   />
                 </div>
+                {/* M1 item 7a: the VALUE. `sub.value` was computed into this
+                    array and never rendered — the hero listed the three
+                    sub-scores with their weights and omitted the numbers the
+                    weights apply to. */}
+                <span className="text-sm font-mono tabular-nums text-foreground/85 w-10 text-right">
+                  {Number.isFinite(sub.value) ? sub.value.toFixed(1) : "—"}
+                </span>
                 <span className="text-xs text-muted-foreground/50 w-12">w:{sub.weight.toFixed(1)}</span>
               </div>
             ))}
@@ -1065,6 +1101,27 @@ export default function MatchReport() {
       </div>
 
       {/* ─── Profile Cards ───────────────────────────────────────────────────── */}
+      {/* M1 item 2: say WHICH evidence these cards show. "scored" = the exact
+          observations this score was computed from (the reader now pins to
+          match.creator_observation_id / brand_observation_id). Anything else
+          is stated, never silently substituted. */}
+      {profileProvenance && (profileProvenance.creator !== "scored" || profileProvenance.brand !== "scored") ? (
+        <div className="flex items-start gap-3 p-3 rounded-xl border border-yellow-400/40 bg-yellow-400/5 mb-4 animate-fade-in-up">
+          <Info className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-yellow-400/90 leading-relaxed">
+            {[
+              profileProvenance.creator === "latest-fallback" && "This match predates observation tagging on the creator side — the creator profile below is the LATEST data, which may differ from what was scored.",
+              profileProvenance.creator === "missing" && "The creator observation this match was scored against no longer exists — its evidence cannot be shown, and the latest profile is deliberately NOT substituted.",
+              profileProvenance.brand === "latest-fallback" && "This match predates observation tagging on the brand side — the brand profile below is the LATEST data, which may differ from what was scored.",
+              profileProvenance.brand === "missing" && "The brand observation this match was scored against no longer exists — its evidence cannot be shown, and the latest profile is deliberately NOT substituted.",
+            ].filter(Boolean).join(" ")}
+          </p>
+        </div>
+      ) : profileProvenance && (
+        <p className="text-[10px] text-muted-foreground/50 mb-2 animate-fade-in-up">
+          Profiles below are the exact observations this score was computed from.
+        </p>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up animate-stagger-5">
         {creator && (
           <div className="fit-card rounded-xl p-6">

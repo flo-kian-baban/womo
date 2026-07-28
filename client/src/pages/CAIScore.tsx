@@ -9,7 +9,6 @@ import { Link } from "wouter";
 // Local types matching the flattened V2 return shapes from db.ts
 type CreatorProfile = Record<string, any> & { id: string };
 type BrandProfile = Record<string, any> & { id: string };
-type MatchRecord = Record<string, any> & { id: string };
 import { SignalPanel } from "@/components/SignalPanel";
 import { MetricTooltip } from "@/components/MetricTooltip";
 
@@ -143,7 +142,6 @@ function FITStatusBadge({ status }: { status: string }) {
 }
 
 type MatchResult = {
-  match: MatchRecord;
   creator: CreatorProfile;
   brand: BrandProfile;
   result: {
@@ -197,6 +195,12 @@ type MatchResult = {
     audienceReceptivity: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
     brandTrust: { score: number; confidence: "Verified" | "Estimated" | "Insufficient Data"; reasoning: string };
   };
+  // M1: the persisted record's id (null when persist failed) + the outcome.
+  matchId?: string | null;
+  persist?: { ok: true } | { ok: false; error: string };
+  // M1 item 3: fallback-vs-computed marker — server has returned it since
+  // Session 5; the client dropped it on the floor.
+  scoreDegradation?: { degraded: boolean; reasons: string[] };
 };
 
 export default function FITScore() {
@@ -208,6 +212,11 @@ export default function FITScore() {
   // Matching eligibility (womo_0006): only ACCEPTED creator profiles are offered.
   const { data: creators } = trpc.creator.list.useQuery({ search: undefined, matchableOnly: true });
   const { data: brands } = trpc.brand.list.useQuery({ search: undefined });
+  // M1 item 8: the default list (accepted + pending) exists ONLY to make the
+  // empty state truthful. "No profiles yet" while twenty sit pending review
+  // told the analyst to go analyse creators they already had.
+  const { data: allCreators } = trpc.creator.list.useQuery({ search: undefined });
+  const pendingCreatorCount = (allCreators ?? []).filter(c => c.reviewStatus === "pending").length;
 
   const calculateMutation = trpc.fit.calculate.useMutation({
     onSuccess: (data) => {
@@ -265,9 +274,17 @@ export default function FITScore() {
               </SelectContent>
             </Select>
             {(!creators || creators.length === 0) && (
-              <p className="text-xs text-muted-foreground/60">
-                No profiles yet. <Link href="/analyze/creator" className="text-primary underline">Analyze a creator</Link>
-              </p>
+              pendingCreatorCount > 0 ? (
+                <p className="text-xs text-muted-foreground/60">
+                  {pendingCreatorCount} profile{pendingCreatorCount === 1 ? " is" : "s are"} pending review —
+                  matching requires an accepted run.{" "}
+                  <Link href="/library" className="text-primary underline">Review in Library</Link>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground/60">
+                  No profiles yet. <Link href="/analyze/creator" className="text-primary underline">Analyze a creator</Link>
+                </p>
+              )
             )}
           </div>
 
@@ -330,6 +347,42 @@ export default function FITScore() {
       {/* ─── Report Card ─────────────────────────────────────────────────────── */}
       {matchResult && (
         <div className="space-y-6 animate-fade-in-up">
+          {/* M1 item 5: a computed-but-unsaved result must say so. Before this,
+              a persist failure was a console.error and nothing else — the
+              analyst saw a complete report and assumed a record existed. */}
+          {matchResult.persist && !matchResult.persist.ok && (
+            <div className="flex items-start gap-3 p-4 rounded-xl border border-red-400/40 bg-red-400/5">
+              <XCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm font-semibold text-red-400">This result was NOT saved</div>
+                <p className="text-xs text-red-400/80 mt-0.5 leading-relaxed">
+                  The calculation completed, but persisting the match record failed — it will not appear
+                  in the library and there is no full report. Error: {matchResult.persist.error}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* M1 item 3: fallback-vs-computed, stated where the score is. The
+              server has marked degraded results since Session 5; this page
+              never read the marker, so a match scored on fallback 3.0s
+              rendered identically to a computed one. */}
+          {matchResult.scoreDegradation?.reasons && matchResult.scoreDegradation.reasons.length > 0 && (
+            <div className="flex items-start gap-3 p-4 rounded-xl border border-yellow-400/40 bg-yellow-400/5">
+              <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm font-semibold text-yellow-400">
+                  {matchResult.scoreDegradation.degraded
+                    ? "Score degraded — parts of this number are fallbacks, not computations"
+                    : "Calculation note"}
+                </div>
+                <ul className="text-xs text-yellow-400/80 mt-1 space-y-0.5 leading-relaxed list-disc pl-4">
+                  {matchResult.scoreDegradation.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Main Score Card */}
           <div className="fit-card rounded-xl p-8 connex-glow">
             {/* Header */}
@@ -811,7 +864,11 @@ export default function FITScore() {
                   brand: matchResult.brand,
                   scores: matchResult.result,
                   narrative: matchResult.narrative,
-                  match: matchResult.match,
+                  // M1: the persisted record id + outcome — `match` used to
+                  // embed a field the mutation never returned (undefined).
+                  matchId: matchResult.matchId ?? null,
+                  persisted: matchResult.persist?.ok ?? false,
+                  scoreDegradation: matchResult.scoreDegradation ?? null,
                 };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
@@ -825,11 +882,16 @@ export default function FITScore() {
             >
               Export JSON
             </Button>
-            <Link href={`/report/${matchResult.match?.id}`}>
-              <Button variant="outline" className="border-primary/30 text-primary hover:bg-primary/10">
-                View Full Report
-              </Button>
-            </Link>
+            {/* M1 item 4: linked by the RETURNED id. `matchResult.match?.id`
+                was undefined for as long as this page existed — the button
+                navigated to /report/undefined every single time. */}
+            {matchResult.matchId && (
+              <Link href={`/report/${matchResult.matchId}`}>
+                <Button variant="outline" className="border-primary/30 text-primary hover:bg-primary/10">
+                  View Full Report
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       )}
