@@ -1068,7 +1068,8 @@ export default function MatchReport() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up animate-stagger-5">
         {creator && (
           <div className="fit-card rounded-xl p-6">
-            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-blue-400/70 mb-4">
+            {/* Categorical: which SIDE of the match, not a judgement. */}
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-4">
               Creator Profile
             </div>
             <CreatorProfileCard profile={creator} compact />
@@ -1076,7 +1077,7 @@ export default function MatchReport() {
         )}
         {brand && (
           <div className="fit-card rounded-xl p-6">
-            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-green-400/70 mb-4">
+            <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground mb-4">
               Brand Profile
             </div>
             <BrandProfileCard profile={brand} compact />

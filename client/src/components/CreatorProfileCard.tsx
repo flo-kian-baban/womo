@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { MODEL_PRICING } from "@shared/llmPricing";
 import { PendingReviewBanner, ReviewStatusBadge } from "./ReviewGate";
+import { BOX, T_DETAIL, T_MICRO } from "@/lib/reportType";
 
 // Flattened creator profile as returned by getCreatorProfileById in db.ts.
 // Uses Record<string, any> base so field access with `as` casts works
@@ -303,7 +304,7 @@ export function SupplementalVideoPanel({ profile }: { profile: CreatorProfile })
                   });
                 }}
                 disabled={isLoading || ingestingId !== null}
-                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
               >
                 {isLoading ? (
                   <><Loader2 className="w-3 h-3 animate-spin" /> Fetching...</>
@@ -585,6 +586,25 @@ function PipelineMetricsSection({ profile, propMetrics }: {
 
 // ─── Pipeline Performance ─────────────────────────────────────────────────────
 
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ DEAD ON BOTH PATHS — reachable from nothing today.                        ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ * `compact` gates this off, and the creator report uses RunCostAndProcess
+ * instead (which reads the ledger and states its cost as an estimate). It is
+ * kept rather than deleted because presentation sessions do not remove things,
+ * but a future session finding a fully-styled component that nothing renders
+ * should not have to work out whether it matters: it does not. Retire it with
+ * the card — see the RETIREMENT note at the head of this file.
+ *
+ * ─── The canonical instance of the categorical-colour defect ────────────────
+ * The step-timeline bars below used to cycle violet / amber / emerald BY ARRAY
+ * INDEX — `stepColors[i % stepColors.length]`. The hue meant "third item in
+ * the list" and nothing else: re-order the steps and every colour changes
+ * while the data does not. That is the clearest statement of the rule this
+ * codebase now follows — colour must encode something about the VALUE, or it
+ * is decoration wearing the palette that warnings need.
+ */
 function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileCardProps["pipelineMetrics"]> }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -622,7 +642,7 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
         className="w-full flex items-center justify-between group hover:opacity-80 transition-opacity"
       >
         <div className="flex items-center gap-2">
-          <Timer className="w-4 h-4 text-violet-400" />
+          <Timer className="w-4 h-4 text-muted-foreground/50" />
           <span className="text-sm font-semibold text-foreground/80">Pipeline Performance</span>
           {metrics.totalDurationMs > 0 && (
             <span className="text-xs text-muted-foreground/60 font-mono">
@@ -630,7 +650,7 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
             </span>
           )}
           {metrics.tokens.totalTokens > 0 && (
-            <span className="text-xs text-emerald-400/70 font-mono">
+            <span className="text-xs text-muted-foreground/60 font-mono tabular-nums">
               · {formatCost(totalCost)}
             </span>
           )}
@@ -647,30 +667,30 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
           {/* Summary cards */}
           <div className={`grid gap-2.5 ${metrics.totalDurationMs > 0 ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {metrics.totalDurationMs > 0 && (
-            <div className="rounded-lg bg-violet-500/5 border border-violet-500/10 p-3 text-center">
-              <Timer className="w-3.5 h-3.5 text-violet-400 mx-auto mb-1" />
-              <div className="text-base font-bold text-violet-300 font-mono">{formatDuration(metrics.totalDurationMs)}</div>
+            <div className={`p-3 text-center ${BOX}`}>
+              <Timer className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto mb-1" />
+              <div className="text-base font-semibold text-foreground/90 font-mono tabular-nums">{formatDuration(metrics.totalDurationMs)}</div>
               <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Total Time</div>
             </div>
             )}
-            <div className="rounded-lg bg-amber-500/5 border border-amber-500/10 p-3 text-center">
-              <Zap className="w-3.5 h-3.5 text-amber-400 mx-auto mb-1" />
-              <div className="text-base font-bold text-amber-300 font-mono">{formatTokens(metrics.tokens.totalTokens)}</div>
+            <div className={`p-3 text-center ${BOX}`}>
+              <Zap className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto mb-1" />
+              <div className="text-base font-semibold text-foreground/90 font-mono tabular-nums">{formatTokens(metrics.tokens.totalTokens)}</div>
               <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Tokens Used</div>
             </div>
-            <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/10 p-3 text-center">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1" />
-              <div className="text-base font-bold text-emerald-300 font-mono">{formatCost(totalCost)}</div>
+            <div className={`p-3 text-center ${BOX}`}>
+              <DollarSign className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto mb-1" />
+              <div className="text-base font-semibold text-foreground/90 font-mono tabular-nums">{formatCost(totalCost)}</div>
               <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Est. Cost</div>
             </div>
-            <div className="rounded-lg bg-blue-500/5 border border-blue-500/10 p-3 text-center">
-              <Cpu className="w-3.5 h-3.5 text-blue-400 mx-auto mb-1" />
-              <div className="text-base font-bold text-blue-300 font-mono">{metrics.tokens.llmCalls}</div>
+            <div className={`p-3 text-center ${BOX}`}>
+              <Cpu className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto mb-1" />
+              <div className="text-base font-semibold text-foreground/90 font-mono tabular-nums">{metrics.tokens.llmCalls}</div>
               <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">LLM Calls</div>
             </div>
-            <div className="rounded-lg bg-rose-500/5 border border-rose-500/10 p-3 text-center">
-              <Database className="w-3.5 h-3.5 text-rose-400 mx-auto mb-1" />
-              <div className="text-base font-bold text-rose-300 font-mono">{metrics.transcriptCount}</div>
+            <div className={`p-3 text-center ${BOX}`}>
+              <Database className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto mb-1" />
+              <div className="text-base font-semibold text-foreground/90 font-mono tabular-nums">{metrics.transcriptCount}</div>
               <div className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mt-0.5">Transcripts</div>
             </div>
           </div>
@@ -681,12 +701,9 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
             <h4 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Step Breakdown</h4>
             {metrics.steps.map((step, i) => {
               const pct = Math.max((step.durationMs / maxStepMs) * 100, 3);
-              const stepColors = [
-                { bar: "bg-violet-500/40", text: "text-violet-400" },
-                { bar: "bg-amber-500/40", text: "text-amber-400" },
-                { bar: "bg-emerald-500/40", text: "text-emerald-400" },
-              ];
-              const color = stepColors[i % stepColors.length];
+              // Was stepColors[i % 3] — see the header note. One neutral bar:
+              // the LENGTH already encodes the duration.
+              const color = { bar: "bg-foreground/25", text: "text-muted-foreground/70" };
               return (
                 <div key={step.step} className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground w-40 shrink-0 truncate">{step.step}</span>
@@ -710,26 +727,26 @@ function PipelinePerformance({ metrics }: { metrics: NonNullable<CreatorProfileC
             <div className="pt-3 border-t border-border/20 space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold">Model</span>
-                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/15 text-blue-300">
+                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-secondary/60 border border-border/50 text-foreground/80">
                   {pricing.label}
                 </span>
               </div>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground/40">Input:</span>
-                  <span className="text-blue-400">{formatTokens(metrics.tokens.inputTokens)}</span>
+                  <span className="text-foreground/80 tabular-nums">{formatTokens(metrics.tokens.inputTokens)}</span>
                   <span className="text-muted-foreground/30">×</span>
                   <span className="text-muted-foreground/50">${pricing.input}/1M</span>
                   <span className="text-muted-foreground/30">=</span>
-                  <span className="text-blue-300">{formatCost(inputCost)}</span>
+                  <span className="text-foreground/70 tabular-nums">{formatCost(inputCost)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground/40">Output:</span>
-                  <span className="text-amber-400">{formatTokens(metrics.tokens.outputTokens)}</span>
+                  <span className="text-foreground/80 tabular-nums">{formatTokens(metrics.tokens.outputTokens)}</span>
                   <span className="text-muted-foreground/30">×</span>
                   <span className="text-muted-foreground/50">${pricing.output}/1M</span>
                   <span className="text-muted-foreground/30">=</span>
-                  <span className="text-amber-300">{formatCost(outputCost)}</span>
+                  <span className="text-foreground/70 tabular-nums">{formatCost(outputCost)}</span>
                 </div>
               </div>
               {metrics.videosScraped > 0 && (
@@ -793,8 +810,8 @@ function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
               {provenance.llmCalls.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Activity className="w-3 h-3 text-violet-400/60" />
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-400/60">
+                    <Activity className="w-3 h-3 text-muted-foreground/50" />
+                    <span className={T_MICRO}>
                       LLM Calls ({provenance.llmCalls.length})
                     </span>
                     <span className="text-[10px] text-muted-foreground/40 ml-auto">
@@ -805,14 +822,14 @@ function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
                     {provenance.llmCalls.map((call, i) => (
                       <span
                         key={i}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-secondary/50 text-foreground/75 border border-border/50"
                         title={`${call.purpose} • ${call.model} • ${(call.inputTokens ?? 0) + (call.outputTokens ?? 0)} tokens • ${call.durationMs ?? 0}ms`}
                       >
                         {humanPurpose(call.purpose)}
-                        <span className="text-violet-400/50">·</span>
-                        <span className="text-violet-400/60">{call.model?.split("/").pop()?.split("-").slice(0, 2).join("-") ?? call.model}</span>
-                        <span className="text-violet-400/50">·</span>
-                        <span className="text-violet-400/60">{call.durationMs ? `${(call.durationMs / 1000).toFixed(1)}s` : "—"}</span>
+                        <span className="text-muted-foreground/50">·</span>
+                        <span className="text-muted-foreground/50">{call.model?.split("/").pop()?.split("-").slice(0, 2).join("-") ?? call.model}</span>
+                        <span className="text-muted-foreground/50">·</span>
+                        <span className="text-muted-foreground/50">{call.durationMs ? `${(call.durationMs / 1000).toFixed(1)}s` : "—"}</span>
                       </span>
                     ))}
                   </div>
@@ -823,8 +840,8 @@ function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
               {provenance.scrapeEvents.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Globe className="w-3 h-3 text-sky-400/60" />
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-400/60">
+                    <Globe className="w-3 h-3 text-muted-foreground/50" />
+                    <span className={T_MICRO}>
                       Scrape Events ({provenance.scrapeEvents.length})
                     </span>
                     <span className="text-[10px] text-muted-foreground/40 ml-auto">
@@ -839,8 +856,8 @@ function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
                           key={i}
                           className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium border ${
                             failed
-                              ? "bg-red-500/10 text-red-300 border-red-500/20"
-                              : "bg-sky-500/10 text-sky-300 border-sky-500/20"
+                              ? "bg-red-400/10 text-red-400 border-red-400/30"
+                              : "bg-secondary/50 text-foreground/70 border-border/50"
                           }`}
                           title={evt.urlRequested ?? ""}
                         >
@@ -982,7 +999,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
       {hasStats && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {(profile.followerCount ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center relative">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center relative">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Users className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Followers</span>
@@ -994,12 +1011,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-amber-400">{formatNum(profile.followerCount!)}</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{formatNum(profile.followerCount!)}</div>
               <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.totalLikes ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Heart className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Total Likes</span>
@@ -1011,12 +1028,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-amber-400">{formatNum(profile.totalLikes!)}</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{formatNum(profile.totalLikes!)}</div>
               <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.totalViews ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Play className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Total Views</span>
@@ -1028,12 +1045,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-foreground">{formatNum(profile.totalViews!)}</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{formatNum(profile.totalViews!)}</div>
               <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
           {(profile.avgViews ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <TrendingUp className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Avg Views</span>
@@ -1045,12 +1062,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-foreground">{formatNum(profile.avgViews!)}</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{formatNum(profile.avgViews!)}</div>
               <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
           {(profile.videoCount ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-amber-500/30 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <Video className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Videos</span>
@@ -1062,12 +1079,12 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-amber-400">{formatNum(profile.videoCount!)}</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{formatNum(profile.videoCount!)}</div>
               <div className="text-[9px] text-amber-500/80 mt-0.5">Unverified</div>
             </div>
           )}
           {(profile.engagementRate ?? 0) > 0 && (
-            <div className="p-3 rounded-lg bg-secondary/60 border border-sky-500/20 text-center">
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border/50 text-center">
               <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                 <TrendingUp className="w-3 h-3" />
                 <span className="text-[10px] uppercase tracking-wide font-medium">Engagement</span>
@@ -1079,7 +1096,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                   side="top"
                 />
               </div>
-              <div className="text-base font-semibold text-foreground">{profile.engagementRate!.toFixed(1)}%</div>
+              <div className="text-base font-semibold text-foreground tabular-nums">{profile.engagementRate!.toFixed(1)}%</div>
               <div className="text-[9px] text-sky-500/70 mt-0.5">Derived</div>
             </div>
           )}
@@ -1090,7 +1107,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
       {themes.length > 0 && (
         <div className="p-4 rounded-xl bg-muted/20 border border-border/50 space-y-3">
           <div className="flex items-center gap-2">
-            <Tag className="w-3.5 h-3.5 text-primary" />
+            <Tag className="w-3.5 h-3.5 text-muted-foreground/50" />
             <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
               Content Themes
             </span>
@@ -1100,7 +1117,7 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
             {themes.map((theme, i) => (
               <span
                 key={i}
-                className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
+                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${CHIP_NEUTRAL}`}
               >
                 {theme}
               </span>
@@ -1223,9 +1240,9 @@ export default function CreatorProfileCard({ profile, compact = false, onReanaly
                     const val = profile[bf.key as keyof CreatorProfile] as boolean | null;
                     return (
                       <div key={bf.key} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/50">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${val ? "bg-green-400" : "bg-muted-foreground/30"}`} />
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${val ? "bg-foreground/55" : "bg-muted-foreground/25"}`} />
                         <span className="text-xs text-muted-foreground">{bf.label}</span>
-                        <span className={`ml-auto text-xs font-medium ${val ? "text-green-400" : "text-muted-foreground/50"}`}>
+                        <span className={`ml-auto text-xs font-medium ${val ? "text-foreground/85" : "text-muted-foreground/40"}`}>
                           {val ? "Yes" : "No"}
                         </span>
                       </div>
