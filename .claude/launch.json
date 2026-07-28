@@ -12,6 +12,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["harness:app"],
       "port": 3000
+    },
+    {
+      "name": "womo-alt",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3100", "pnpm", "start:local"],
+      "port": 3100
     }
   ]
 }

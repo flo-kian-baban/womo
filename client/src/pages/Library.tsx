@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   BookOpen, Users, Building2, BarChart3, Search, Trash2,
   ExternalLink, FileJson, ChevronDown, Filter,
-  X, Zap, Star, FileText, Clock, Activity,
+  X, Zap, FileText, Clock, Activity,
   AlertTriangle, Eye, TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -422,7 +422,8 @@ function ArchivedRunRow({ run }: { run: Record<string, any> }) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BRAND ROW — Two-tier: Brand identity + Key metrics, Badge strip below
+// BRAND ROW — mirrors CreatorRow's two-tier layout: identity + fixed-column
+// metrics on the headline, every framework/context chip inside the dropdown.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function BrandRow({ brand, onDelete, onExport }: {
@@ -432,6 +433,8 @@ function BrandRow({ brand, onDelete, onExport }: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const sentiment = brand.mentionSentiment && brand.mentionSentiment !== "insufficient_data"
+    ? (brand.mentionSentiment as string) : null;
 
   return (
     <div className="data-card rounded-xl group">
@@ -443,64 +446,43 @@ function BrandRow({ brand, onDelete, onExport }: {
           {/* Confidence indicator */}
           <ConfidenceDot level={brand.dataConfidenceLevel} />
 
-          {/* Name + Meta */}
-          <div className="min-w-0 w-[220px] flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] font-medium text-foreground truncate">{brand.brandName}</span>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              {brand.brandType && <Badge className="text-muted-foreground bg-muted/30 border-border/40 text-[9px] py-0">{brand.brandType}</Badge>}
-              {brand.campaignType && <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border} text-[9px] py-0`}>{brand.campaignType}</Badge>}
-            </div>
+          {/* Name + Meta — the URL is the brand's @handle */}
+          <div className="min-w-0 w-[200px] flex-shrink-0">
+            <div className="text-[13px] font-medium text-foreground truncate">{brand.brandName}</div>
             {brand.brandUrl && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="text-[10px] text-muted-foreground/30 truncate max-w-[160px]">{brand.brandUrl.replace(/^https?:\/\//, "")}</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[11px] text-muted-foreground/50 truncate">
+                  {brand.brandUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                </span>
               </div>
             )}
           </div>
 
-          {/* Archetype — anchor visual */}
-          <div className="flex-shrink-0">
+          {/* Archetype — anchor visual, fixed-width so the stat columns that
+              follow start at the same x on every row (mirrors CreatorRow). */}
+          <div className="flex items-center flex-shrink-0 w-[150px]">
             <ArchBadge archetype={brand.archetype} />
           </div>
 
-          {/* ── Metric cluster ── */}
-          <div className="flex items-center gap-4 ml-auto flex-shrink-0">
-            {/* Rating */}
-            {brand.overallRating != null && (
-              <div className="flex items-center gap-1">
-                <Star className="w-3.5 h-3.5 text-muted-foreground/50 fill-muted-foreground/30" />
-                <span className="text-sm font-semibold font-mono tabular-nums text-foreground/80">{Number(brand.overallRating).toFixed(1)}</span>
-                {brand.totalReviews != null && <span className="text-[9px] text-muted-foreground/40">({brand.totalReviews})</span>}
-              </div>
-            )}
-
-            {/* Sentiment */}
-            {brand.mentionSentiment && brand.mentionSentiment !== "insufficient_data" && (
-              <Badge className={
-                brand.mentionSentiment === "positive" ? `${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}` :
-                brand.mentionSentiment === "mixed" ? "text-amber-400 bg-amber-400/10 border-amber-400/30" :
-                "text-red-400 bg-red-400/10 border-red-400/30"
-              }>
-                {brand.mentionTotalCount ? `${brand.mentionTotalCount} ` : ""}{brand.mentionSentiment}
-              </Badge>
-            )}
-
-            {/* TikTok */}
-            {brand.tiktokFollowerCount != null && Number(brand.tiktokFollowerCount) > 0 && (
-              <div className="text-[10px] text-muted-foreground/50">
-                TT {abbr(brand.tiktokFollowerCount)}
-              </div>
-            )}
-
-            {/* Weight priority */}
-            {brand.weightPriority && (
-              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border} text-[9px]`}>{brand.weightPriority}</Badge>
-            )}
+          {/* ── Stat cluster — always rendered, "—" when unknown, so columns
+                 never wander row to row. Rating, review volume, mention pulse
+                 and TikTok reach are the at-a-glance brand evidence. ── */}
+          <div className="flex items-center gap-9 flex-shrink-0 ml-8">
+            <Stat value={brand.overallRating != null ? Number(brand.overallRating).toFixed(1) : "—"} label="Rating" />
+            <Stat value={abbr(brand.totalReviews)} label="Reviews" />
+            {/* Mentions — the label carries the sentiment reading; colour only
+                when it is warning-worthy (positive is the expected state). */}
+            <div className="text-center w-[68px]" title={sentiment ? `Mention sentiment: ${sentiment}` : "Brand mentions"}>
+              <div className="text-sm font-semibold font-mono text-foreground leading-tight">{abbr(brand.mentionTotalCount)}</div>
+              <div className={`text-[9px] uppercase tracking-wide ${
+                sentiment === "negative" ? "text-red-400" : sentiment === "mixed" ? "text-amber-400" : "text-muted-foreground/40"
+              }`}>{sentiment ?? "Mentions"}</div>
+            </div>
+            <Stat value={abbr(brand.tiktokFollowerCount)} label="TikTok" />
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
             <Link href={`/brand/${brand.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <span className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors inline-flex" title="View Profile">
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -533,42 +515,49 @@ function BrandRow({ brand, onDelete, onExport }: {
           <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/30 flex-shrink-0 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`} />
         </div>
 
-        {/* ──── TIER 2: Badge strip ─────────────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 mt-2.5 ml-14 flex-wrap">
-          {brand.brandTone && <Tag>{brand.brandTone}</Tag>}
-          {brand.brandCulturalCapital && (
-            <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>
-              {brand.brandCulturalCapital === "Produce" ? "Producer" : "Relay"} (Bourdieu)
-            </Badge>
-          )}
-          {brand.brandGoffmanConsistency && (
-            <Badge className={GOFFMAN_COLORS[brand.brandGoffmanConsistency] ?? "text-muted-foreground bg-muted/30 border-border/50"}>
-              Presentation: {brand.brandGoffmanConsistency}
-            </Badge>
-          )}
-          {brand.brandDriftSignal && (
-            <Badge className={DRIFT_COLORS[brand.brandDriftSignal] ?? "text-muted-foreground bg-muted/30 border-border/50"}>
-              {brand.brandDriftSignal}
-            </Badge>
-          )}
-          {brand.category && <Tag>{brand.category}</Tag>}
-          {(brand.googleRating != null || brand.yelpRating != null) && (
-            <span className="text-[10px] text-muted-foreground/40 ml-1">
-              {brand.googleRating != null && `G: ${Number(brand.googleRating).toFixed(1)}★`}
-              {brand.googleRating != null && brand.yelpRating != null && " · "}
-              {brand.yelpRating != null && `Y: ${Number(brand.yelpRating).toFixed(1)}★`}
-            </span>
-          )}
-        </div>
       </div>
 
-      {/* ──── EXPANDED: AI Summary ──────────────────────────────────────────── */}
-      <div className={`overflow-hidden transition-all duration-150 ease-in-out ${expanded ? "max-h-48" : "max-h-0"}`}>
-        {brand.aiSummary && (
-          <div className="px-5 pb-4 pt-0 border-t border-border/15">
+      {/* ──── EXPANDED: AI Summary + Badge strip ─────────────────────────────── */}
+      <div className={`overflow-hidden transition-all duration-150 ease-in-out ${expanded ? "max-h-96" : "max-h-0"}`}>
+        <div className="px-5 pb-4 pt-0 border-t border-border/15">
+          {brand.aiSummary && (
             <p className="text-xs text-muted-foreground/60 leading-relaxed mt-3">{brand.aiSummary}</p>
+          )}
+          {/* Badge strip — now inside dropdown below description */}
+          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+            {brand.brandTone && <Tag>{brand.brandTone}</Tag>}
+            {brand.brandType && <Tag>{brand.brandType}</Tag>}
+            {brand.category && <Tag>{brand.category}</Tag>}
+            {brand.campaignType && (
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>{brand.campaignType}</Badge>
+            )}
+            {brand.weightPriority && (
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>{brand.weightPriority}</Badge>
+            )}
+            {brand.brandCulturalCapital && (
+              <Badge className={`${CHIP_NEUTRAL.text} ${CHIP_NEUTRAL.bg} ${CHIP_NEUTRAL.border}`}>
+                {brand.brandCulturalCapital === "Produce" ? "Producer" : "Relay"} (Bourdieu)
+              </Badge>
+            )}
+            {brand.brandGoffmanConsistency && (
+              <Badge className={GOFFMAN_COLORS[brand.brandGoffmanConsistency] ?? "text-muted-foreground bg-muted/30 border-border/50"}>
+                Presentation: {brand.brandGoffmanConsistency}
+              </Badge>
+            )}
+            {brand.brandDriftSignal && (
+              <Badge className={DRIFT_COLORS[brand.brandDriftSignal] ?? "text-muted-foreground bg-muted/30 border-border/50"}>
+                {brand.brandDriftSignal}
+              </Badge>
+            )}
+            {(brand.googleRating != null || brand.yelpRating != null) && (
+              <span className="text-[10px] text-muted-foreground/40 ml-1">
+                {brand.googleRating != null && `G: ${Number(brand.googleRating).toFixed(1)}★`}
+                {brand.googleRating != null && brand.yelpRating != null && " · "}
+                {brand.yelpRating != null && `Y: ${Number(brand.yelpRating).toFixed(1)}★`}
+              </span>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
