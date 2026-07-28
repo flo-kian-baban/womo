@@ -1,3 +1,27 @@
+/**
+ * ─── WHAT IS STILL LIVE IN THIS FILE (B3) ───────────────────────────────────
+ * The brand report page now renders BrandReport, which composes the shared
+ * report vocabulary. THE ONLY REMAINING CALLER OF THIS CARD IS MatchReport,
+ * and it passes `compact` — so everything below the `compact ? null :` branch
+ * is dead on both paths today. It is kept, not deleted, for the same reason
+ * CreatorProfileCard was: it is the definition site of exports other files
+ * import, and deleting it is a separate, verified change.
+ *
+ * The compact header is neutralised here because it is the one part that still
+ * renders: the avatar tile was green, which said nothing except "brand".
+ *
+ * ─── Two dead branches found while mapping this file, recorded not fixed ────
+ * 1. The Instagram metrics grid is gated on `profile.followerCount`, and
+ *    `getBrandProfileById` returns no such key for any brand — measured across
+ *    all 15. The grid has never rendered.
+ * 2. The "Channel Bio" block reads `(profile as any).bio`, also absent from
+ *    every brand row, so its output was always the literal em dash. Its gate
+ *    (`brandVideoTranscripts === null && aiSummary && instagramHandle`) also
+ *    asks for captions to be ABSENT before showing a bio, which is backwards.
+ * Neither is carried into BrandReport: a tile that has never had a value is
+ * not a datum to preserve. Both are named here so the loss is a record, not a
+ * silence.
+ */
 import { useState } from "react";
 import FieldExplainer from "./FieldExplainer";
 
@@ -508,8 +532,11 @@ export default function BrandProfileCard({ profile, compact = false, onReanalyze
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4 flex-1">
-          <div className="w-12 h-12 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-lg font-serif text-green-400">
+          {/* Neutral. The green said "brand", which the heading beside it
+              already says — categorical colour, the defect B2/B3 removed
+              everywhere else. */}
+          <div className="w-12 h-12 rounded-xl bg-secondary/50 border border-border/60 flex items-center justify-center flex-shrink-0">
+            <span className="text-lg font-serif text-foreground/70">
               {profile.brandName?.[0]?.toUpperCase() ?? "?"}
             </span>
           </div>

@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import BrandProfileCard from "@/components/BrandProfileCard";
+import BrandReport from "@/components/BrandReport";
 import { Button } from "@/components/ui/button";
 
 export default function BrandDetail() {
@@ -58,8 +58,18 @@ export default function BrandDetail() {
         </div>
       )}
 
+      {/*
+        NO ReviewGatePanel HERE, deliberately. The creator page mounts it for
+        accept/decline, but it embeds RunDiagnosticsView, whose field-presence
+        and provenance blocks are resolved from `creator_observations` — empty
+        for a brand, so it would report Patagonia's archetype, myth and summary
+        as MISSING while all three are populated. A brand's review status and
+        the subject-agnostic half of its diagnostics are in §3 of the report;
+        an accept/decline control for brands is logged as a gap rather than
+        shipped on top of a creator-shaped reader.
+      */}
       {data && (
-        <BrandProfileCard profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
+        <BrandReport profile={data} onReanalyze={handleReanalyze} isReanalyzing={isReanalyzing} />
       )}
     </div>
   );
