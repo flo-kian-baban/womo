@@ -2696,7 +2696,24 @@ export function siteNameFromHtml(html: string): string | null {
   const title = html.match(/<title>([^<]+)<\/title>/i)?.[1];
   const raw = (ogSite || ogTitle || title || "").trim();
   if (!raw) return null;
-  const name = raw.split(/\s+[|–—·:]\s+/)[0]!.trim();
+  let name = raw.split(/\s+[|–—·:]\s+/)[0]!.trim();
+
+  /*
+    A SITE THAT NAMES ITSELF BY ITS DOMAIN IS NOT GIVING US A NAME.
+    nike.com's og:site_name is literally "Nike.com", and "Nike.com" as a TikTok
+    search term returns NOTHING — nobody writes a domain in a caption. The
+    hostname stem "nike" found 36 real @Nike hauls; the "better" crawl-derived
+    name found zero, which is how this fix briefly made Nike worse than the bug
+    it replaced. So a single-token domain-shaped name is reduced to its
+    registrable label, the same rule brandSearchName applies to a URL.
+    Multi-word names are left alone — "Roses Cafe Senso" is a name.
+  */
+  if (/^[^\s]+$/.test(name) && /\.[a-z]{2,3}$/i.test(name)) {
+    const labels = name.split(".").filter(Boolean);
+    while (labels.length > 1 && labels[labels.length - 1]!.length <= 3) labels.pop();
+    name = labels[labels.length - 1] ?? name;
+  }
+
   // A bare separator-led title ("| Home") or a runaway string is not a name.
   return name.length >= 2 && name.length <= 80 ? name : null;
 }

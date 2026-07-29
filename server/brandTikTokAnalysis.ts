@@ -219,6 +219,14 @@ export function mentionContainsBrand(
  * Blu Dental result already carried `confidence: low`, which nothing acted on.
  *
  * REVIEW THIS NUMBER. It is a judgement, not a measurement.
+ *
+ * UNTESTED NEAR ITS BOUNDARY (recorded 2026-07-29). Across the six-brand
+ * corpus nothing has landed anywhere near 5: autorama survives with 31 and
+ * clears it comfortably, every other brand survives with 0 and fails it
+ * outright. So this threshold has never actually decided an outcome — it has
+ * only ever agreed with a verdict that was already unambiguous. The first
+ * brand that survives with 3-8 mentions is the one that tests it, and is the
+ * moment to revisit the number rather than before.
  */
 export const MIN_SURVIVING_MENTIONS = 5;
 
