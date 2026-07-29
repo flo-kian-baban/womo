@@ -323,7 +323,76 @@ export async function reclaimStaleRunning(
  */
 export const RESUMABLE_AGE_MS = 24 * 60 * 60 * 1000;
 
-export async function findIncompleteCampaigns(
+// ═══ EGRESS METER (egress session, 2026-07-29) ═══════════════════════════════
+//
+// The 75GB incident ran for weeks because nothing counted. Every significant
+// reader below is wrapped in `metered(name, fn)`, which records {calls,
+// approxBytes} per reader — approxBytes = JSON byte length of the result, an
+// honest ~wire-size proxy (numbers/dates differ slightly from the Postgres
+// text protocol; direction and magnitude are right). One log line prints per
+// hour naming the top consumers; `system.egressStats` serves the same numbers
+// to a dev panel. NOTE: composed readers double-count their components
+// (getMatchWithProfiles includes the profile getters it calls) — the meter is
+// a smoke detector, not an invoice.
+const EGRESS_LOG_INTERVAL_MS = 3_600_000;
+type EgressEntry = { calls: number; approxBytes: number };
+const _egressWindow = new Map<string, EgressEntry>();
+const _egressLifetime = new Map<string, EgressEntry>();
+let _egressWindowStart = Date.now();
+const _egressProcessStart = Date.now();
+
+function _egressTop(m: Map<string, EgressEntry>, n = 5): Array<[string, EgressEntry]> {
+  return Array.from(m.entries()).sort((a, b) => b[1].approxBytes - a[1].approxBytes).slice(0, n);
+}
+function _mb(b: number): string { return b >= 1048576 ? `${(b / 1048576).toFixed(1)}MB` : `${(b / 1024).toFixed(1)}KB`; }
+
+export function egressLogLine(): string {
+  const total = Array.from(_egressWindow.values()).reduce((s, e) => s + e.approxBytes, 0);
+  const top = _egressTop(_egressWindow)
+    .map(([name, e]) => `${name} ${_mb(e.approxBytes)}/${e.calls} calls`).join(", ");
+  const mins = Math.round((Date.now() - _egressWindowStart) / 60_000);
+  return `[egress] ${_mb(total)} read in the last ${mins}m — top: ${top || "none"}`;
+}
+
+export function getEgressStats() {
+  const entries = Array.from(_egressLifetime.entries())
+    .map(([reader, e]) => ({ reader, ...e }))
+    .sort((a, b) => b.approxBytes - a.approxBytes);
+  return {
+    processStartedAt: new Date(_egressProcessStart).toISOString(),
+    windowStartedAt: new Date(_egressWindowStart).toISOString(),
+    totalBytes: entries.reduce((s, e) => s + e.approxBytes, 0),
+    totalCalls: entries.reduce((s, e) => s + e.calls, 0),
+    entries,
+    logLine: egressLogLine(),
+  };
+}
+
+function _recordEgress(name: string, result: unknown): void {
+  try {
+    const b = Buffer.byteLength(JSON.stringify(result) ?? "");
+    for (const m of [_egressWindow, _egressLifetime]) {
+      const e = m.get(name) ?? { calls: 0, approxBytes: 0 };
+      e.calls += 1; e.approxBytes += b; m.set(name, e);
+    }
+    if (Date.now() - _egressWindowStart >= EGRESS_LOG_INTERVAL_MS) {
+      console.log(egressLogLine());
+      _egressWindow.clear();
+      _egressWindowStart = Date.now();
+    }
+  } catch { /* the meter must never break a read */ }
+}
+
+/** Wrap a reader so its result size is counted. Passthrough on the value. */
+function metered<F extends (...args: never[]) => Promise<unknown>>(name: string, fn: F): F {
+  return (async (...args: never[]) => {
+    const result = await fn(...args);
+    _recordEgress(name, result);
+    return result;
+  }) as F;
+}
+
+async function _findIncompleteCampaigns(
   limit = 100,
   /**
    * How far back a campaign may be and still count as "in flight".
@@ -418,7 +487,7 @@ export async function findIncompleteCampaigns(
  *
  * Ordered by most recent ledger activity so in-flight work sorts to the top.
  */
-export async function listRecentCampaigns(limit = 50): Promise<Array<{ runId: string; subjectHint: string }>> {
+async function _listRecentCampaigns(limit = 50): Promise<Array<{ runId: string; subjectHint: string }>> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
@@ -441,7 +510,7 @@ export async function listRecentCampaigns(limit = 50): Promise<Array<{ runId: st
  * (complete or partial) and banked output. Returns null otherwise, so the
  * caller can refuse cleanly rather than resume from half a corpus.
  */
-export async function loadResumableBankedPhases(runId: string): Promise<{
+async function _loadResumableBankedPhases(runId: string): Promise<{
   subjectHint: string;
   phases: Record<string, unknown>;
 } | null> {
@@ -471,7 +540,19 @@ export async function loadResumableBankedPhases(runId: string): Promise<{
  * 11-17s per poll on a 3s interval, i.e. requests piling up faster than they
  * complete. One query instead.
  */
-export async function getPhaseStateForRuns(runIds: string[]) {
+/**
+ * POSIX-ARE extraction patterns for the three marks a phase's output may carry
+ * (park reason, blocked gap, retry history — all FLAT shapes, see
+ * phaseScheduler's writers). Escaped-string-aware: a quote, bracket or brace
+ * INSIDE a JSON string value routes through the `"(?:[^"\\]|\\.)*"`
+ * alternative and cannot terminate the lexeme early. Bound as parameters, so
+ * no SQL-literal escaping is involved.
+ */
+const PARK_REASON_RE = `"parkReason"[[:space:]]*:[[:space:]]*"((?:[^"\\\\]|\\\\.)*)"`;
+const BLOCKED_GAP_RE = `"blockedGap"[[:space:]]*:[[:space:]]*(\\{(?:[^{}"]|"(?:[^"\\\\]|\\\\.)*")*\\})`;
+const RETRY_HISTORY_RE = `"retryHistory"[[:space:]]*:[[:space:]]*(\\[(?:[^]["]|"(?:[^"\\\\]|\\\\.)*")*\\])`;
+
+async function _getPhaseStateForRuns(runIds: string[]) {
   const db = await getDb();
   if (!db || runIds.length === 0) return [];
   return db.select({
@@ -493,24 +574,44 @@ export async function getPhaseStateForRuns(runIds: string[]) {
      * message), so the rest is nulled in SQL rather than fetched and discarded.
      */
     /**
-     * Ship `output` for the rows that actually need it: the commit row (subject
-     * / observation / message) and any row carrying a park reason or a blocked
-     * gap. Everything else is nulled in SQL — a phase's output holds its entire
-     * banked evidence, which is megabytes per poll.
+     * Ship full `output` ONLY for the commit row (subject / observation /
+     * persistence / message — small by construction). Everything else is
+     * nulled in SQL — a phase's output holds its entire banked evidence.
+     *
+     * ─── The three marks are EXTRACTED, not shipped (egress, 2026-07-29) ────
+     * This used to ship the WHOLE document for any row whose text contained
+     * "parkReason", "blockedGap" or "retryHistory" — so a capture that ever
+     * retried shipped its ~26KB evidence bank on every queue poll to render a
+     * retry count (~190KB/poll on the corpus). The marks are now cut out of
+     * the text in SQL (below) and the document stays home.
      *
      * MATCHED AS TEXT, NOT JSON, AND THAT IS DELIBERATE. Postgres JSON
      * operators re-parse the document, and some scraped captions contain a lone
      * UTF-16 surrogate (an emoji clipped by a truncation boundary) that strict
      * re-parsing rejects: `output::jsonb` errors with "Unicode low surrogate
      * must follow a high surrogate" and takes the WHOLE queue view down with
-     * it. `LIKE` over the stored text parses nothing. The keys are extracted in
-     * JS instead, where JSON.parse tolerates the same input.
+     * it. The extraction regexes below parse nothing either — they cut the
+     * mark's lexeme out of the stored text (escaped-string-aware, so quotes
+     * and brackets INSIDE values cannot derail them), and JS parses just that
+     * small lexeme, where JSON.parse tolerates the same input.
+     *
+     * THE BELT: if a mark's key is present (LIKE) but its regex extraction
+     * returns NULL — a shape this code did not anticipate — the row falls back
+     * to shipping the full document, exactly the old behaviour. Information is
+     * never lost to a failed extraction.
      */
     output: sql`CASE WHEN ${analysisPhaseState.phase} = 'extract_commit'
-                       OR ${analysisPhaseState.output}::text LIKE '%"parkReason"%'
-                       OR ${analysisPhaseState.output}::text LIKE '%"blockedGap"%'
-                       OR ${analysisPhaseState.output}::text LIKE '%"retryHistory"%'
+                       OR (${analysisPhaseState.output}::text LIKE '%"parkReason"%'
+                           AND substring(${analysisPhaseState.output}::text from ${PARK_REASON_RE}) IS NULL)
+                       OR (${analysisPhaseState.output}::text LIKE '%"blockedGap"%'
+                           AND substring(${analysisPhaseState.output}::text from ${BLOCKED_GAP_RE}) IS NULL)
+                       OR (${analysisPhaseState.output}::text LIKE '%"retryHistory"%'
+                           AND substring(${analysisPhaseState.output}::text from ${RETRY_HISTORY_RE}) IS NULL)
                      THEN ${analysisPhaseState.output} ELSE NULL END`.as("output"),
+    /** The extracted mark lexemes — string content (still JSON-escaped), object, array. */
+    parkRaw: sql<string | null>`substring(${analysisPhaseState.output}::text from ${PARK_REASON_RE})`.as("park_raw"),
+    gapRaw: sql<string | null>`substring(${analysisPhaseState.output}::text from ${BLOCKED_GAP_RE})`.as("gap_raw"),
+    retryRaw: sql<string | null>`substring(${analysisPhaseState.output}::text from ${RETRY_HISTORY_RE})`.as("retry_raw"),
   })
     .from(analysisPhaseState)
     .where(inArray(analysisPhaseState.runId, runIds))
@@ -535,7 +636,7 @@ export async function getPhaseStateForRuns(runIds: string[]) {
  * recorded 0 successes in 227 attempts before anyone noticed, because no
  * surface ever showed per-strategy results. This is that surface.
  */
-export async function getStrategyOutcomesForRun(runId: string): Promise<Array<{
+async function _getStrategyOutcomesForRun(runId: string): Promise<Array<{
   kind: string; strategy: string; outcome: string; attempts: number;
 }>> {
   const db = await getDb();
@@ -561,7 +662,7 @@ export async function getStrategyOutcomesForRun(runId: string): Promise<Array<{
 }
 
 /** Read a run's ledger rows (diagnostics / verification). */
-export async function getPhaseState(runId: string) {
+async function _getPhaseState(runId: string) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(analysisPhaseState)
@@ -593,7 +694,7 @@ export const READY_STATUSES = ["pending", "failed", "blocked"] as const;
  * could not carry a campaign to completion anyway. The boot loop lands with
  * enqueue-and-poll in S3b; this is the query it will drive.
  */
-export async function scanReadyWork(now: Date = new Date(), limit = 50) {
+async function _scanReadyWork(now: Date = new Date(), limit = 50) {
   const db = await getDb();
   if (!db) return [];
   // NARROW SELECT (egress incident, 2026-07-28): the drain reads only identity
@@ -1284,7 +1385,7 @@ export async function getEvidenceSnapshotsByRunId(runId: string) {
  * analyst can read exactly what the model received (structured inputs + the
  * verbatim extraction prompt, plus any longitudinal snapshot). Read-only.
  */
-export async function getEvidenceSnapshotByObservation(observationId: string) {
+async function _getEvidenceSnapshotByObservation(observationId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.select({
@@ -2090,7 +2191,7 @@ function authoritativeObservationIdSubquery(db: DbHandle, subjectId: string) {
  * answers "what is this subject's current profile?", which is not the pinned
  * question. Read path only — no caller's values change unless it passes opts.
  */
-export async function getCreatorProfileById(subjectId: string, opts?: { observationId?: string }) {
+async function _getCreatorProfileById(subjectId: string, opts?: { observationId?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -2508,11 +2609,24 @@ export type RunDiagnostics = {
   summary: string[];
 };
 
-export async function getRunDiagnostics(observationId: string): Promise<RunDiagnostics | null> {
+async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics | null> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const [obs] = await db.select().from(observations)
+  const [obs] = await db.select({
+    subjectId: observations.subjectId,
+    runId: observations.runId,
+    reviewStatus: observations.reviewStatus,
+    observedAt: observations.observedAt,
+    persistenceStatus: observations.persistenceStatus,
+    transcriptCount: observations.transcriptCount,
+    dataConfidenceLevel: observations.dataConfidenceLevel,
+    followerCount: observations.followerCount,
+    followingCount: observations.followingCount,
+    engagementRate: observations.engagementRate,
+    // Presence only — the bio text itself is never shipped from here.
+    bioPresent: sql<boolean>`${observations.bio} IS NOT NULL AND ${observations.bio} <> ''`,
+  }).from(observations)
     .where(eq(observations.id, observationId)).limit(1);
   if (!obs) return null;
 
@@ -2524,16 +2638,77 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const scrapeWhere = runId ? eq(scrapeEvents.runId, runId) : eq(scrapeEvents.observationId, observationId);
   const llmWhere = runId ? eq(llmInvocations.runId, runId) : eq(llmInvocations.observationId, observationId);
 
-  const [scrapeRows, llmRows, contentRows, creatorObsRows, signalCountRows, decodedCountRows] = await Promise.all([
-    db.select().from(scrapeEvents).where(scrapeWhere).orderBy(scrapeEvents.createdAt).limit(500),
-    db.select().from(llmInvocations).where(llmWhere).orderBy(llmInvocations.createdAt).limit(500),
-    db.select().from(contentItems).where(eq(contentItems.observationId, observationId)),
-    db.select().from(creatorObservations).where(eq(creatorObservations.observationId, observationId)).limit(1),
+  /*
+    ─── AGGREGATED FETCHES (egress, 2026-07-29) ──────────────────────────────
+    This pulled full rows — every scrape_events column, every llm_invocations
+    column, and full content_items INCLUDING transcript_text — to produce a
+    response that ships none of that: content rows exist here only as COUNTS
+    (by status, by transcript source, distinct buckets, caption presence), and
+    the event lists ship a fixed 8/9-field shape. The counting now happens in
+    SQL and only the consumed columns cross the wire. The RESPONSE is
+    byte-identical (proven against fixture observations on all three linkage
+    branches); only the fetch narrowed. Aggregate key order follows
+    min(created_at) so first-encounter object-key order is preserved.
+  */
+  const [scrapeRows, llmRows, creatorObsRows, signalCountRows, decodedCountRows,
+         contentStatusRows, transcriptSourceRows, bucketRows, contentCountRows] = await Promise.all([
+    db.select({
+      platform: scrapeEvents.platform,
+      scrapeMethod: scrapeEvents.scrapeMethod,
+      urlRequested: scrapeEvents.urlRequested,
+      httpStatus: scrapeEvents.httpStatus,
+      failureReason: scrapeEvents.failureReason,
+      silentFailureDetected: scrapeEvents.silentFailureDetected,
+      durationMs: scrapeEvents.durationMs,
+      createdAt: scrapeEvents.createdAt,
+    }).from(scrapeEvents).where(scrapeWhere).orderBy(scrapeEvents.createdAt).limit(500),
+    db.select({
+      purpose: llmInvocations.purpose,
+      model: llmInvocations.model,
+      inputTokens: llmInvocations.inputTokens,
+      outputTokens: llmInvocations.outputTokens,
+      temperature: llmInvocations.temperature,
+      status: llmInvocations.status,
+      errorMessage: llmInvocations.errorMessage,
+      durationMs: llmInvocations.durationMs,
+      createdAt: llmInvocations.createdAt,
+    }).from(llmInvocations).where(llmWhere).orderBy(llmInvocations.createdAt).limit(500),
+    db.select({
+      videoCount: creatorObservations.videoCount,
+      culturalVelocity: creatorObservations.culturalVelocity,
+      // Presence only — the diagnostics never ship these texts.
+      archetypePresent: sql<boolean>`${creatorObservations.archetype} IS NOT NULL`,
+      toneRegisterPresent: sql<boolean>`${creatorObservations.toneRegister} IS NOT NULL`,
+      barthesMythPresent: sql<boolean>`${creatorObservations.barthesMyth} IS NOT NULL`,
+      nicheTopicNodePresent: sql<boolean>`${creatorObservations.nicheTopicNode} IS NOT NULL`,
+      aiSummaryPresent: sql<boolean>`${creatorObservations.aiSummary} IS NOT NULL`,
+      symbolicSummaryPresent: sql<boolean>`${creatorObservations.symbolicSummary} IS NOT NULL`,
+    }).from(creatorObservations).where(eq(creatorObservations.observationId, observationId)).limit(1),
     db.select({ domain: signalValues.domain, count: sql<number>`count(*)::int` })
       .from(signalValues).where(eq(signalValues.observationId, observationId))
       .groupBy(signalValues.domain),
     db.select({ count: sql<number>`count(*)::int` })
       .from(decodedSignals).where(eq(decodedSignals.observationId, observationId)),
+    db.select({ status: contentItems.status, count: sql<number>`count(*)::int` })
+      .from(contentItems).where(eq(contentItems.observationId, observationId))
+      .groupBy(contentItems.status).orderBy(sql`min(${contentItems.createdAt})`),
+    // withTranscript in JS was TRUTHY transcript_text — so NULL and '' both
+    // count as absent; the SQL predicate says exactly that.
+    db.select({ source: sql<string>`COALESCE(${contentItems.transcriptSource}, 'unknown')`, count: sql<number>`count(*)::int` })
+      .from(contentItems)
+      .where(and(eq(contentItems.observationId, observationId),
+        sql`${contentItems.transcriptText} IS NOT NULL AND ${contentItems.transcriptText} <> ''`))
+      .groupBy(sql`COALESCE(${contentItems.transcriptSource}, 'unknown')`)
+      .orderBy(sql`min(${contentItems.createdAt})`),
+    db.select({ bucket: contentItems.temporalBucket })
+      .from(contentItems)
+      .where(and(eq(contentItems.observationId, observationId), sql`${contentItems.temporalBucket} IS NOT NULL`))
+      .groupBy(contentItems.temporalBucket).orderBy(sql`min(${contentItems.createdAt})`),
+    db.select({
+      total: sql<number>`count(*)::int`,
+      // JS was (caption ?? '').trim().length > 0 — any non-whitespace char.
+      withCaption: sql<number>`count(*) FILTER (WHERE COALESCE(${contentItems.caption}, '') ~ '[^[:space:]]')::int`,
+    }).from(contentItems).where(eq(contentItems.observationId, observationId)),
   ]);
 
   // ── Scrapes per platform ──
@@ -2635,20 +2810,14 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     scrapeConsequences.push("A YouTube fetch failed — channel stats or captions may be incomplete.");
   }
 
-  // ── Video funnel ──
+  // ── Video funnel — from the SQL aggregates ──
+  const contentTotal = contentCountRows[0]?.total ?? 0;
   const byStatus: Record<string, number> = {};
+  for (const r of contentStatusRows) byStatus[r.status] = r.count;
   const transcriptSources: Record<string, number> = {};
   let withTranscript = 0;
-  const temporalBuckets = new Set<string>();
-  for (const ci of contentRows) {
-    byStatus[ci.status] = (byStatus[ci.status] ?? 0) + 1;
-    if (ci.transcriptText) {
-      withTranscript++;
-      const src = ci.transcriptSource ?? "unknown";
-      transcriptSources[src] = (transcriptSources[src] ?? 0) + 1;
-    }
-    if (ci.temporalBucket) temporalBuckets.add(ci.temporalBucket);
-  }
+  for (const r of transcriptSourceRows) { transcriptSources[r.source] = r.count; withTranscript += r.count; }
+  const temporalBuckets = new Set<string>(bucketRows.map(r => r.bucket!));
 
   // ── Capture health (scraper-reliability Part 3, reporting only) ──
   // Source of truth: the assessment STORED at the run's terminal write
@@ -2668,7 +2837,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
       if (candidate && typeof candidate.status === "string") storedHealth = candidate;
     } catch { /* fall through to live derivation */ }
   }
-  const captionCount = contentRows.filter(ci => (ci.caption ?? "").trim().length > 0).length;
+  const captionCount = contentCountRows[0]?.withCaption ?? 0;
   const captureHealth = storedHealth ?? deriveCaptureHealth(
     scrapeRows.map(e => ({
       failureReason: e.failureReason,
@@ -2694,7 +2863,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   // so low coverage means those numbers describe a sample, not the channel.
   const channelVideoCount = creatorObsRows[0]?.videoCount ?? null;
   const coveragePct = channelVideoCount && channelVideoCount > 0
-    ? Math.round((contentRows.length / channelVideoCount) * 1000) / 10
+    ? Math.round((contentTotal / channelVideoCount) * 1000) / 10
     : null;
 
   // ── LLM ──
@@ -2754,16 +2923,16 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
   const signalCounts = Object.fromEntries(signalCountRows.map(r => [r.domain, r.count]));
   const decodedCount = decodedCountRows[0]?.count ?? 0;
   const fieldChecks: Array<[string, boolean]> = [
-    ["bio", obs.bio != null && obs.bio !== ""],
+    ["bio", obs.bioPresent],
     ["followerCount", obs.followerCount != null],
     ["followingCount", obs.followingCount != null],
     ["engagementRate", obs.engagementRate != null],
-    ["archetype", co?.archetype != null],
-    ["toneRegister", co?.toneRegister != null],
-    ["barthesMyth", co?.barthesMyth != null],
-    ["nicheTopicNode", co?.nicheTopicNode != null],
-    ["aiSummary", co?.aiSummary != null],
-    ["symbolicSummary", co?.symbolicSummary != null],
+    ["archetype", co?.archetypePresent ?? false],
+    ["toneRegister", co?.toneRegisterPresent ?? false],
+    ["barthesMyth", co?.barthesMythPresent ?? false],
+    ["nicheTopicNode", co?.nicheTopicNodePresent ?? false],
+    ["aiSummary", co?.aiSummaryPresent ?? false],
+    ["symbolicSummary", co?.symbolicSummaryPresent ?? false],
     ["contentThemes", (signalCounts["content_theme"] ?? 0) > 0],
     ["keywords", (signalCounts["keyword"] ?? 0) > 0],
     ["decodedSymbols", decodedCount > 0],
@@ -2849,8 +3018,8 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
       summary.push(`${p.platform}: ${p.failed} of ${p.attempts} scrapes failed (${reason})`);
     }
   }
-  if (contentRows.length > 0) {
-    summary.push(`${withTranscript} of ${contentRows.length} captured videos have transcripts`);
+  if (contentTotal > 0) {
+    summary.push(`${withTranscript} of ${contentTotal} captured videos have transcripts`);
   } else {
     // "no videos captured" is FALSE — and false in the dangerous direction —
     // when the run captured a full pool whose rows all collided onto an earlier
@@ -2890,10 +3059,10 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
     captureHealth,
     scrapes: { total: scrapeRows.length, failed: scrapesFailed, consequences: scrapeConsequences, byPlatform },
     videos: {
-      total: contentRows.length,
+      total: contentTotal,
       byStatus,
       withTranscript,
-      withoutTranscript: contentRows.length - withTranscript,
+      withoutTranscript: contentTotal - withTranscript,
       transcriptSources,
       channelVideoCount,
       coveragePct,
@@ -2916,7 +3085,7 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
       contentThemes: signalCounts["content_theme"] ?? 0,
       hashtags: signalCounts["hashtag"] ?? 0,
       decodedSignals: decodedCount,
-      contentItems: contentRows.length,
+      contentItems: contentTotal,
       transcripts: withTranscript,
       temporalBuckets: temporalBuckets.size,
     } },
@@ -2945,7 +3114,17 @@ export async function getRunDiagnostics(observationId: string): Promise<RunDiagn
  * written before run tagging. Nothing about what is COUNTED changes; the rows
  * that were always there are simply found.
  */
-export async function getProvenance(observationId: string) {
+/**
+ * ─── includeScrapes (egress, 2026-07-29) ────────────────────────────────────
+ * The response shipped BOTH row sets on every report §5 open, while the only
+ * live consumer (RunCostAndProcess) renders `llmCalls` alone — the scrape list
+ * is rendered by exactly one component, CreatorProfileCard's ProvenanceFooter,
+ * which mounts only on the non-compact card (currently unreachable from any
+ * page) and is click-gated besides. The scrape read now runs only when asked
+ * for. Nothing rendered changes anywhere: the footer passes includeScrapes and
+ * gets the identical list; the report page never read it.
+ */
+async function _getProvenance(observationId: string, opts?: { includeScrapes?: boolean }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -2958,6 +3137,7 @@ export async function getProvenance(observationId: string) {
   const llmWhere = runId ? eq(llmInvocations.runId, runId) : eq(llmInvocations.observationId, observationId);
   const scrapeWhere = runId ? eq(scrapeEvents.runId, runId) : eq(scrapeEvents.observationId, observationId);
 
+  const includeScrapes = opts?.includeScrapes ?? false;
   const [llmRows, scrapeRows, obsRow] = await Promise.all([
     db.select({
       purpose: llmInvocations.purpose,
@@ -2970,20 +3150,22 @@ export async function getProvenance(observationId: string) {
       .from(llmInvocations)
       .where(llmWhere)
       .orderBy(desc(llmInvocations.createdAt)),
-    db.select({
-      platform: scrapeEvents.platform,
-      scrapeMethod: scrapeEvents.scrapeMethod,
-      urlRequested: scrapeEvents.urlRequested,
-      httpStatus: scrapeEvents.httpStatus,
-      responseSizeBytes: scrapeEvents.responseSizeBytes,
-      silentFailureDetected: scrapeEvents.silentFailureDetected,
-      failureReason: scrapeEvents.failureReason,
-      durationMs: scrapeEvents.durationMs,
-      createdAt: scrapeEvents.createdAt,
-    })
-      .from(scrapeEvents)
-      .where(scrapeWhere)
-      .orderBy(desc(scrapeEvents.createdAt)),
+    includeScrapes
+      ? db.select({
+          platform: scrapeEvents.platform,
+          scrapeMethod: scrapeEvents.scrapeMethod,
+          urlRequested: scrapeEvents.urlRequested,
+          httpStatus: scrapeEvents.httpStatus,
+          responseSizeBytes: scrapeEvents.responseSizeBytes,
+          silentFailureDetected: scrapeEvents.silentFailureDetected,
+          failureReason: scrapeEvents.failureReason,
+          durationMs: scrapeEvents.durationMs,
+          createdAt: scrapeEvents.createdAt,
+        })
+          .from(scrapeEvents)
+          .where(scrapeWhere)
+          .orderBy(desc(scrapeEvents.createdAt))
+      : Promise.resolve([]),
     db.select({
       observedAt: observations.observedAt,
       dataConfidenceLevel: observations.dataConfidenceLevel,
@@ -3001,7 +3183,7 @@ export async function getProvenance(observationId: string) {
   };
 }
 
-export async function listCreatorProfiles(
+async function _listCreatorProfiles(
   search?: string,
   opts?: {
     /** true = accepted only (matching eligibility); default lists accepted + pending */
@@ -3287,7 +3469,7 @@ export async function insertAudienceMentions(
  * M1: `opts.observationId` pins the load to one specific observation — same
  * semantics and same reason as getCreatorProfileById's pinned mode.
  */
-export async function getBrandProfileById(subjectId: string, opts?: { observationId?: string }) {
+async function _getBrandProfileById(subjectId: string, opts?: { observationId?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -3520,7 +3702,7 @@ export async function getBrandProfileById(subjectId: string, opts?: { observatio
   };
 }
 
-export async function listBrandProfiles(search?: string) {
+async function _listBrandProfiles(search?: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -3896,7 +4078,7 @@ export async function deleteMatchRecord(matchId: string) {
  */
 export type MatchProfileProvenance = "scored" | "latest-fallback" | "missing";
 
-export async function getMatchWithProfiles(matchId: string) {
+async function _getMatchWithProfiles(matchId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -4008,7 +4190,7 @@ export async function getMatchWithProfiles(matchId: string) {
  * are also unlinked by design (they throw before their invocation id is
  * reachable); the degradation record names them.
  */
-export async function getMatchLlmInvocations(matchScoreId: string) {
+async function _getMatchLlmInvocations(matchScoreId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -4183,3 +4365,24 @@ export async function getComparablePartnerships(input: {
 
   return scored.slice(0, 5);
 }
+
+// ═══ METERED EXPORTS (egress, 2026-07-29) ════════════════════════════════════
+// Every significant reader leaves through the meter. Same functions, same
+// signatures — the wrapper only counts result bytes. Composed readers
+// double-count their components (documented at the meter).
+export const findIncompleteCampaigns = metered("findIncompleteCampaigns", _findIncompleteCampaigns);
+export const listRecentCampaigns = metered("listRecentCampaigns", _listRecentCampaigns);
+export const loadResumableBankedPhases = metered("loadResumableBankedPhases", _loadResumableBankedPhases);
+export const getPhaseStateForRuns = metered("getPhaseStateForRuns", _getPhaseStateForRuns);
+export const getStrategyOutcomesForRun = metered("getStrategyOutcomesForRun", _getStrategyOutcomesForRun);
+export const getPhaseState = metered("getPhaseState", _getPhaseState);
+export const scanReadyWork = metered("scanReadyWork", _scanReadyWork);
+export const getRunDiagnostics = metered("getRunDiagnostics", _getRunDiagnostics);
+export const getProvenance = metered("getProvenance", _getProvenance);
+export const getCreatorProfileById = metered("getCreatorProfileById", _getCreatorProfileById);
+export const getBrandProfileById = metered("getBrandProfileById", _getBrandProfileById);
+export const listCreatorProfiles = metered("listCreatorProfiles", _listCreatorProfiles);
+export const listBrandProfiles = metered("listBrandProfiles", _listBrandProfiles);
+export const getMatchWithProfiles = metered("getMatchWithProfiles", _getMatchWithProfiles);
+export const getMatchLlmInvocations = metered("getMatchLlmInvocations", _getMatchLlmInvocations);
+export const getEvidenceSnapshotByObservation = metered("getEvidenceSnapshotByObservation", _getEvidenceSnapshotByObservation);

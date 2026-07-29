@@ -768,7 +768,8 @@ function ProvenanceFooter({ profile }: { profile: CreatorProfile }) {
   const [expanded, setExpanded] = useState(false);
   const observationId = profile.observationId as string | undefined;
   const { data: provenance, isLoading } = trpc.creator.getProvenance.useQuery(
-    { observationId: observationId ?? "" },
+    // This footer is the ONE renderer of the scrape list — it asks for it.
+    { observationId: observationId ?? "", includeScrapes: true },
     { enabled: expanded && !!observationId },
   );
 

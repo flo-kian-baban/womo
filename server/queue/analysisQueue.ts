@@ -295,13 +295,45 @@ export function deriveCampaignState(phases: CampaignStatus["phases"]): CampaignR
  * the by-runId read and the list read both go through here, so the list can be
  * batched without the two drifting apart.
  */
-/** The park/gap/retry marks a phase's banked output may carry. */
-function phaseMarks(output: unknown): Pick<CampaignStatus["phases"][number], "parkReason" | "blockedGap" | "retryHistory"> {
-  const o = (output ?? null) as { parkReason?: string; blockedGap?: unknown; retryHistory?: unknown } | null;
+/**
+ * The park/gap/retry marks a phase's banked output may carry.
+ *
+ * TWO SOURCES, one result (egress, 2026-07-29). When the row arrived with its
+ * full `output` (the by-run full read, commit rows, and the extraction-failed
+ * fallback), the marks are read off the parsed object exactly as always. When
+ * the row arrived narrowed (the queue-view batch read), the marks come from
+ * the SQL-extracted lexemes instead — parkRaw is a JSON string's content
+ * (still escaped, so it re-enters JSON.parse wrapped in quotes), gapRaw and
+ * retryRaw are the mark's own JSON lexeme. Same values either way; the
+ * evidence bank no longer rides along to deliver them.
+ */
+function phaseMarks(row: {
+  output: unknown;
+  parkRaw?: string | null;
+  gapRaw?: string | null;
+  retryRaw?: string | null;
+}): Pick<CampaignStatus["phases"][number], "parkReason" | "blockedGap" | "retryHistory"> {
+  if (row.output != null) {
+    const o = row.output as { parkReason?: string; blockedGap?: unknown; retryHistory?: unknown };
+    return {
+      parkReason: o?.parkReason ?? null,
+      blockedGap: (o?.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
+      retryHistory: (o?.retryHistory ?? null) as CampaignStatus["phases"][number]["retryHistory"],
+    };
+  }
+  const parseLexeme = (raw: string | null | undefined): unknown => {
+    if (raw == null) return null;
+    try { return JSON.parse(raw); } catch (err) {
+      // Should be unreachable — the SQL belt ships the full document whenever
+      // extraction fails. Loud, and absent rather than wrong.
+      console.error("[queue] extracted mark failed to parse — treating as absent:", err);
+      return null;
+    }
+  };
   return {
-    parkReason: o?.parkReason ?? null,
-    blockedGap: (o?.blockedGap ?? null) as CampaignStatus["phases"][number]["blockedGap"],
-    retryHistory: (o?.retryHistory ?? null) as CampaignStatus["phases"][number]["retryHistory"],
+    parkReason: (parseLexeme(row.parkRaw != null ? `"${row.parkRaw}"` : null) as string | null) ?? null,
+    blockedGap: parseLexeme(row.gapRaw) as CampaignStatus["phases"][number]["blockedGap"],
+    retryHistory: parseLexeme(row.retryRaw) as CampaignStatus["phases"][number]["retryHistory"],
   };
 }
 
@@ -320,6 +352,10 @@ function shapeCampaign(
     createdAt: Date | null;
     updatedAt: Date | null;
     output: unknown;
+    /** SQL-extracted mark lexemes — present on the narrowed batch read. */
+    parkRaw?: string | null;
+    gapRaw?: string | null;
+    retryRaw?: string | null;
   }>,
 ): CampaignStatus | null {
   if (rows.length === 0) return null;
@@ -334,7 +370,7 @@ function shapeCampaign(
     updatedAt: r.updatedAt,
     // Read in JS, not SQL: see getPhaseStateForRuns — Postgres JSON operators
     // reject the lone surrogates that live in some scraped captions.
-    ...phaseMarks(r.output),
+    ...phaseMarks(r),
   }));
   const commit = rows.find(r => r.phase === "extract_commit");
   const out = commit?.output as {
@@ -394,7 +430,17 @@ export function firstFailedComponentReason(
 }
 
 export async function getCampaignStatus(runId: string): Promise<CampaignStatus | null> {
-  return shapeCampaign(runId, await getPhaseState(runId));
+  /*
+    ─── NARROW READ (egress, 2026-07-29) ────────────────────────────────────
+    This called getPhaseState — select() of every column, `output` included —
+    to render six phase rows: ~100-200KB per report open for a shape that
+    reads only identity fields, the three marks, and the commit row's keys.
+    The narrowed batch read carries exactly those (marks SQL-extracted, commit
+    output whole), so the by-run view now costs what it renders. Execution
+    paths (loadBankedPhases, requeueCampaignNow, loadResumableBankedPhases)
+    keep the full read — they genuinely consume `output`.
+  */
+  return shapeCampaign(runId, await getPhaseStateForRuns([runId]));
 }
 
 /**

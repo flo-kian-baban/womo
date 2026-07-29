@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure, router } from "./trpc";
+import { getEgressStats } from "../db";
 import { searchYouTube } from "../scraping/youtube/searchScraper";
 import { getContext, retireContext, getPoolSnapshot, getPoolStats } from "../scraping/browserClient";
 import { currentBounds, slotSnapshot } from "./resourceSlots";
@@ -100,6 +101,13 @@ async function probeYelp(): Promise<ApiStatusEntry> {
 }
 
 export const systemRouter = router({
+  /**
+   * The egress meter (2026-07-29): per-reader {calls, approxBytes} since boot
+   * plus the current hourly window's log line. The 75GB incident ran for
+   * weeks because nothing counted — this is the counter.
+   */
+  egressStats: publicProcedure.query(() => getEgressStats()),
+
   health: publicProcedure
     .input(
       z.object({

@@ -1386,9 +1386,14 @@ export const appRouter = router({
       }),
 
     getProvenance: publicProcedure
-      .input(z.object({ observationId: z.string() }))
+      .input(z.object({
+        observationId: z.string(),
+        /** egress 2026-07-29: the scrape list is fetched only when the caller
+         *  renders it (ProvenanceFooter). The report §5 renders llmCalls only. */
+        includeScrapes: z.boolean().optional(),
+      }))
       .query(async ({ input }) => {
-        return getProvenance(input.observationId);
+        return getProvenance(input.observationId, { includeScrapes: input.includeScrapes });
       }),
 
     getPipelineMetrics: publicProcedure
