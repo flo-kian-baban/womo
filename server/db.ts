@@ -2609,6 +2609,22 @@ export type RunDiagnostics = {
   summary: string[];
 };
 
+/**
+ * A POSIX bracket expression matching any character that JS
+ * `String.prototype.trim()` would NOT strip — i.e. `s.trim() !== ""` becomes
+ * `s ~ JS_KEPT_BY_TRIM`. Enumerated from the spec's WhiteSpace +
+ * LineTerminator sets rather than written as `[^[:space:]]`, which is a
+ * NARROWER set: `[:space:]` does not include U+00A0 or U+FEFF, so a caption of
+ * non-breaking spaces would count as present in SQL and absent in JS. Bound as
+ * a parameter, so no SQL-literal escaping is involved.
+ */
+const JS_TRIMMED_BY_JS = [
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+];
+const JS_KEPT_BY_TRIM = `[^${JS_TRIMMED_BY_JS.map(c => String.fromCharCode(c)).join("")}]`;
+
 async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics | null> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -2644,14 +2660,12 @@ async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics
     column, and full content_items INCLUDING transcript_text — to produce a
     response that ships none of that: content rows exist here only as COUNTS
     (by status, by transcript source, distinct buckets, caption presence), and
-    the event lists ship a fixed 8/9-field shape. The counting now happens in
-    SQL and only the consumed columns cross the wire. The RESPONSE is
-    byte-identical (proven against fixture observations on all three linkage
-    branches); only the fetch narrowed. Aggregate key order follows
-    min(created_at) so first-encounter object-key order is preserved.
+    the event lists ship a fixed 8/9-field shape. Only the consumed columns
+    cross the wire now; the RESPONSE is unchanged, proven reader-by-reader
+    against the pre-fix code on all 43 real observations.
   */
   const [scrapeRows, llmRows, creatorObsRows, signalCountRows, decodedCountRows,
-         contentStatusRows, transcriptSourceRows, bucketRows, contentCountRows] = await Promise.all([
+         contentRows] = await Promise.all([
     db.select({
       platform: scrapeEvents.platform,
       scrapeMethod: scrapeEvents.scrapeMethod,
@@ -2689,25 +2703,33 @@ async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics
       .groupBy(signalValues.domain),
     db.select({ count: sql<number>`count(*)::int` })
       .from(decodedSignals).where(eq(decodedSignals.observationId, observationId)),
-    db.select({ status: contentItems.status, count: sql<number>`count(*)::int` })
-      .from(contentItems).where(eq(contentItems.observationId, observationId))
-      .groupBy(contentItems.status).orderBy(sql`min(${contentItems.createdAt})`),
-    // withTranscript in JS was TRUTHY transcript_text — so NULL and '' both
-    // count as absent; the SQL predicate says exactly that.
-    db.select({ source: sql<string>`COALESCE(${contentItems.transcriptSource}, 'unknown')`, count: sql<number>`count(*)::int` })
-      .from(contentItems)
-      .where(and(eq(contentItems.observationId, observationId),
-        sql`${contentItems.transcriptText} IS NOT NULL AND ${contentItems.transcriptText} <> ''`))
-      .groupBy(sql`COALESCE(${contentItems.transcriptSource}, 'unknown')`)
-      .orderBy(sql`min(${contentItems.createdAt})`),
-    db.select({ bucket: contentItems.temporalBucket })
-      .from(contentItems)
-      .where(and(eq(contentItems.observationId, observationId), sql`${contentItems.temporalBucket} IS NOT NULL`))
-      .groupBy(contentItems.temporalBucket).orderBy(sql`min(${contentItems.createdAt})`),
+    /*
+      COUNTED IN JS, NOT SQL — and that is the second version of this fix.
+      Grouping in SQL changed what an analyst reads. Content rows are written
+      in one batch and SHARE a `created_at`, so `GROUP BY … ORDER BY
+      min(created_at)` ties and Postgres resolves the tie arbitrarily: on the
+      real corpus `byStatus` came back {mention, sampled} where the loop below
+      produces {sampled, mention}, and the temporal-bucket order feeds a
+      RENDERED SENTENCE ("…time buckets with transcripts: recent, mid,
+      anchor"). 22 of 43 observations differed. A fixture whose rows had
+      distinct timestamps never showed it.
+
+      So the loop keeps its original first-encounter semantics and only the
+      COLUMNS narrow: this query has the same shape and the same (absent) ORDER
+      BY as the full read it replaces, so it returns rows in the same order,
+      and `transcript_text` — the reason the old read was expensive — never
+      leaves the database.
+    */
     db.select({
-      total: sql<number>`count(*)::int`,
-      // JS was (caption ?? '').trim().length > 0 — any non-whitespace char.
-      withCaption: sql<number>`count(*) FILTER (WHERE COALESCE(${contentItems.caption}, '') ~ '[^[:space:]]')::int`,
+      status: contentItems.status,
+      transcriptSource: contentItems.transcriptSource,
+      temporalBucket: contentItems.temporalBucket,
+      // Presence, not the text. JS tested `if (ci.transcriptText)` — truthy —
+      // so NULL and '' are both absent, which is what this predicate says.
+      hasTranscript: sql<boolean>`${contentItems.transcriptText} IS NOT NULL AND ${contentItems.transcriptText} <> ''`,
+      // JS tested `(ci.caption ?? '').trim().length > 0`. JS_KEPT_BY_TRIM is
+      // the same question asked in SQL — see its definition.
+      hasCaption: sql<boolean>`COALESCE(${contentItems.caption}, '') ~ ${JS_KEPT_BY_TRIM}`,
     }).from(contentItems).where(eq(contentItems.observationId, observationId)),
   ]);
 
@@ -2810,14 +2832,23 @@ async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics
     scrapeConsequences.push("A YouTube fetch failed — channel stats or captions may be incomplete.");
   }
 
-  // ── Video funnel — from the SQL aggregates ──
-  const contentTotal = contentCountRows[0]?.total ?? 0;
+  // ── Video funnel ──
+  // Unchanged from the pre-fix loop, deliberately: object-key insertion order
+  // and Set order are RENDERED, so first-encounter order is behaviour.
+  const contentTotal = contentRows.length;
   const byStatus: Record<string, number> = {};
-  for (const r of contentStatusRows) byStatus[r.status] = r.count;
   const transcriptSources: Record<string, number> = {};
   let withTranscript = 0;
-  for (const r of transcriptSourceRows) { transcriptSources[r.source] = r.count; withTranscript += r.count; }
-  const temporalBuckets = new Set<string>(bucketRows.map(r => r.bucket!));
+  const temporalBuckets = new Set<string>();
+  for (const ci of contentRows) {
+    byStatus[ci.status] = (byStatus[ci.status] ?? 0) + 1;
+    if (ci.hasTranscript) {
+      withTranscript++;
+      const src = ci.transcriptSource ?? "unknown";
+      transcriptSources[src] = (transcriptSources[src] ?? 0) + 1;
+    }
+    if (ci.temporalBucket) temporalBuckets.add(ci.temporalBucket);
+  }
 
   // ── Capture health (scraper-reliability Part 3, reporting only) ──
   // Source of truth: the assessment STORED at the run's terminal write
@@ -2837,7 +2868,7 @@ async function _getRunDiagnostics(observationId: string): Promise<RunDiagnostics
       if (candidate && typeof candidate.status === "string") storedHealth = candidate;
     } catch { /* fall through to live derivation */ }
   }
-  const captionCount = contentCountRows[0]?.withCaption ?? 0;
+  const captionCount = contentRows.filter(ci => ci.hasCaption).length;
   const captureHealth = storedHealth ?? deriveCaptureHealth(
     scrapeRows.map(e => ({
       failureReason: e.failureReason,
