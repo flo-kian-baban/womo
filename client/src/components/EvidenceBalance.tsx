@@ -67,11 +67,30 @@ export function projectedSide(p: Brand): EvidenceSide {
  * long About page would drown out forty customers.
  */
 export function receivedSide(p: Brand): EvidenceSide {
-  const reviews = Number(p.totalReviews ?? 0);
+  /**
+   * WEIGHTED BY REVIEWS INGESTED, NOT FOUND (brand audit, 2026-07-29).
+   *
+   * `totalReviews` is the place's headline count; the pipeline holds a
+   * handful of excerpts. autorama read "86% received" from 3,248 — on NINE
+   * review texts. The bar is a claim about how much evidence exists, so it
+   * has to count evidence that exists. `reviewsIngested` is what was actually
+   * ingested; the headline is still PRINTED beside it (rule 1 above), because
+   * "9 of 3,248 reviews" is the honest sentence and neither number alone is.
+   *
+   * Falls back to the headline only when a profile predates the ingested
+   * count, where the old reading is still the best available.
+   */
+  const found = Number(p.totalReviews ?? 0);
+  const ingested = p.reviewsIngested == null ? null : Number(p.reviewsIngested);
+  const reviews = ingested ?? found;
   const mentions = Number(p.mentionTotalCount ?? 0);
   const authors = Number(p.mentionUniqueAuthors ?? 0);
   const parts: string[] = [];
-  if (reviews > 0) parts.push(`${reviews.toLocaleString()} review${reviews === 1 ? "" : "s"}`);
+  if (reviews > 0) {
+    parts.push(ingested != null && found > ingested
+      ? `${ingested.toLocaleString()} of ${found.toLocaleString()} reviews`
+      : `${reviews.toLocaleString()} review${reviews === 1 ? "" : "s"}`);
+  }
   if (mentions > 0) {
     parts.push(`${mentions.toLocaleString()} mention${mentions === 1 ? "" : "s"}`
       + (authors > 0 ? ` from ${authors} author${authors === 1 ? "" : "s"}` : ""));

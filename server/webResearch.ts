@@ -2692,12 +2692,54 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
   const snippets: string[] = [];
   const visited = new Set<string>();
 
+  /**
+   * ─── The crawl is instrumented (egress/brand audit, 2026-07-29) ───────────
+   * This is the source that produced the projected side for EVERY brand ever
+   * analysed, and it emitted no scrape_events at all — `insertScrapeEvent` was
+   * imported by this module and called zero times. So the one source that
+   * always works was the only one an analyst could not see, while Yelp (which
+   * has never once succeeded) was fully instrumented.
+   *
+   * `platform` is left NULL deliberately: the enum is tiktok/instagram/
+   * youtube/google_maps/yelp and a brand's own website is none of them.
+   * Widening it is a migration and this is not that. `scrape_method` carries
+   * the fact, and `run_id` comes from the ambient run context.
+   *
+   * WHICH STRATEGY RAN is tagged on the url fragment with the convention the
+   * scrapers already use — `#<kind>=<strategy>:<outcome>` — rather than a new
+   * `scrape_method` enum value, which would be a migration. That grammar is
+   * what `getStrategyOutcomesForRun` reads, so the HTTP crawl and its
+   * Playwright fallback appear per-strategy for free, which is exactly the
+   * question the Playwright fallback exists to answer.
+   *
+   * NEVER THROWS. Telemetry that can fail a crawl is worse than no telemetry.
+   */
+  const recordCrawlEvent = async (fields: {
+    url: string; strategy: "http" | "playwright_fallback"; outcome: "success" | "empty" | "failed";
+    durationMs: number; bytes?: number; failureReason?: string;
+  }): Promise<void> => {
+    try {
+      await insertScrapeEvent({
+        scrapeMethod: "website_crawl",
+        urlRequested: `${fields.url}#crawl=${fields.strategy}:${fields.outcome}`.slice(0, 1000),
+        responseSizeBytes: fields.bytes,
+        durationMs: fields.durationMs,
+        failureReason: fields.failureReason,
+      });
+    } catch { /* instrumentation must never break the crawl */ }
+  };
+
   const crawlPage = async (url: string): Promise<void> => {
     if (visited.has(url)) return;
     visited.add(url);
 
+    const pageStarted = Date.now();
     try {
       const html = await fetchHtml(url);
+      await recordCrawlEvent({
+        url, strategy: "http", outcome: html.length > 0 ? "success" : "empty",
+        durationMs: Date.now() - pageStarted, bytes: html.length,
+      });
       crawledPages.push(url);
 
       // Extract metadata (standard + Open Graph + keywords)
@@ -2749,6 +2791,10 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
         }
       }
     } catch (err) {
+      await recordCrawlEvent({
+        url, strategy: "http", outcome: "failed", durationMs: Date.now() - pageStarted,
+        failureReason: (err as Error).message?.slice(0, 500) || "crawl failed",
+      });
       console.warn(`[webResearch] Brand crawl failed for ${url}:`, (err as Error).message);
     }
   };
@@ -2760,6 +2806,7 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
   const httpWordCount = allTextParts.join(" ").split(/\s+/).filter(w => w.length > 0).length;
   if (httpWordCount < 100) {
     console.log(`[brandCrawl] HTTP returned ${httpWordCount} words, trying Playwright fallback`);
+    const pwStarted = Date.now();
     try {
       const { getContext } = await import("./scraping/browserClient");
       const ctx = await getContext("desktop-chrome");
@@ -2770,6 +2817,13 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
         const pwBodyText = extractTextFromHtml(pwHtml);
         const pwWordCount = pwBodyText.split(/\s+/).filter(w => w.length > 0).length;
         console.log(`[brandCrawl] Playwright returned ${pwWordCount} words`);
+        // "success" means it BEAT the HTTP attempt — a fallback that returns
+        // no more than what it was called to rescue did not rescue anything.
+        await recordCrawlEvent({
+          url: startUrl, strategy: "playwright_fallback",
+          outcome: pwWordCount > httpWordCount ? "success" : "empty",
+          durationMs: Date.now() - pwStarted, bytes: pwHtml.length,
+        });
 
         if (pwWordCount > httpWordCount) {
           // Replace root page content with richer Playwright result
@@ -2801,6 +2855,11 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
         await page.close().catch(() => {});
       }
     } catch (err) {
+      await recordCrawlEvent({
+        url: startUrl, strategy: "playwright_fallback", outcome: "failed",
+        durationMs: Date.now() - pwStarted,
+        failureReason: (err as Error).message?.slice(0, 500) || "playwright fallback failed",
+      });
       console.warn(`[brandCrawl] Playwright fallback failed:`, (err as Error).message);
     }
   }

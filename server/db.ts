@@ -3679,6 +3679,25 @@ async function _getBrandProfileById(subjectId: string, opts?: { observationId?: 
     googleReviewCount: row.brand_observations.googleReviewCount,
     overallRating: row.brand_observations.overallRating,
     totalReviews: row.brand_observations.totalReviews,
+    /**
+     * HOW MANY REVIEW TEXTS WE ACTUALLY HOLD (brand audit, 2026-07-29).
+     *
+     * `totalReviews` is the place's own headline count — 3,248 for autorama —
+     * while the API returns a handful of excerpts, 9 in that case. The report's
+     * received side was weighted by the headline, so a brand read "86%
+     * received" on nine sentences. This is the number of reviews the pipeline
+     * ingested, which is what the evidence actually consists of.
+     *
+     * Source is the trajectory computed at persist time, which already records
+     * it (`totalIngested`) for exactly this reason — nothing new is measured
+     * here, a stored number is simply surfaced. Null when a run predates the
+     * trajectory or discarded its research.
+     */
+    reviewsIngested: (() => {
+      const meta = (row.observations.persistenceStatus as Record<string, unknown> | null)?._meta;
+      const traj = (meta as { reviewTrajectory?: { totalIngested?: unknown } } | undefined)?.reviewTrajectory;
+      return typeof traj?.totalIngested === "number" ? traj.totalIngested : null;
+    })(),
     // TikTok
     tiktokChannelUrl: row.brand_observations.tiktokHandle ? `https://www.tiktok.com/@${row.brand_observations.tiktokHandle}` : null,
     tiktokEngagementRate: row.brand_observations.tiktokEngagementRate,
