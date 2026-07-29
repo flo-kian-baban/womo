@@ -22,7 +22,7 @@
  */
 
 import { invokeLLM } from "./_core/llm";
-import { scrapeTikTokUserInfo } from "./scraping/tiktok/profileScraper";
+import { scrapeTikTokProfile } from "./scraping/tiktok/profileScraper";
 import { searchTikTokVideos } from "./scraping/tiktok/searchScraper";
 import { fetchSingleTikTokTranscript } from "./webResearch";
 
@@ -558,14 +558,68 @@ export async function analyzeBrandTikTokChannel(
     let averageViews: number | undefined;
     let videos: any[] = [];
 
-    // Step 1: Fetch user info
-    try {
-      const userInfo = await scrapeTikTokUserInfo(handle) as any;
+    /*
+      ─── THE HARDENED ENTRY POINT (brand audit, 2026-07-29) ──────────────────
+      This called `scrapeTikTokUserInfo`, whose own docstring says it "returns
+      the same shape as the PHASE 1 version" — the pre-hardening API. Eleven
+      sessions of creator reliability work went into `scrapeTikTokProfile` and
+      the brand path never saw any of it, which is why brand channel capture
+      silent-failed on all six brands and has never produced a follower count.
 
-      if (userInfo?.userInfo?.user) {
-        followerCount = userInfo.userInfo.stats?.followerCount;
-        bioText = userInfo.userInfo.user.signature || userInfo.userInfo.user.desc;
-        console.info(`[analyzeBrandTikTokChannel] Found @${handle} with ${followerCount?.toLocaleString()} followers`);
+      Switching to the entry point `webResearch` and `platformTools` ALREADY
+      call adopts, with no new or shared code:
+        1. the bounded empty-capture retry (`retryEmptyCapture: true`)
+        2. XHR-first extraction (XHR user detail > rehydration > regex)
+        3. the capture assessment, which separates a transient empty capture
+           from a genuinely postless channel
+        4. the silent-failure verdict, READ HERE rather than ignored — the old
+           code proceeded to extraction after a detected block and wrote the
+           regex fallback's zeros as if they were facts, which is exactly how
+           "0 followers" became indistinguishable from "we were blocked".
+
+      The strategy chain (investigation item 5) is deliberately NOT duplicated
+      or shared: that is the one item that would require touching the creator
+      scrapers, and it stays deferred.
+    */
+    let captureAssessment: string | null = null;
+    try {
+      const profile = await scrapeTikTokProfile(handle);
+      const stats = profile?.userInfo?.userInfo?.stats;
+      const user = profile?.userInfo?.userInfo?.user;
+      const capture = profile?.capture;
+      captureAssessment = capture
+        ? `${capture.videosCaptured} videos, stated ${capture.statedVideoCount ?? "absent"}` +
+          ` via ${capture.statedCountSource ?? "none"}` +
+          `${capture.emptyCaptureRetried ? ", retried" : ""}` +
+          `${capture.genuineEmpty ? ", genuine-empty" : ""}`
+        : null;
+
+      /*
+        A DEGRADED CAPTURE MUST NOT BECOME "0 FOLLOWERS".
+        `statedCountSource` names where the profile's own numbers came from:
+        "xhr" and "rehydration" are healthy structured reads; "regex" is the
+        last-resort scrape of a page that did not give us its data, and null
+        means nothing was readable at all. A DataDome-style challenge page
+        yields exactly that shape, and the old code wrote its zeros as if they
+        were measurements — which is how "blocked" became indistinguishable
+        from "a brand with no followers". Only a structured read is trusted.
+      */
+      const structuredRead = capture?.statedCountSource === "xhr"
+        || capture?.statedCountSource === "rehydration";
+      const captureDegraded = capture != null && !structuredRead;
+
+      if (captureDegraded) {
+        console.warn(
+          `[analyzeBrandTikTokChannel] @${handle}: degraded capture (${captureAssessment}) — ` +
+          `refusing to record channel stats read by ${capture?.statedCountSource ?? "nothing"}`,
+        );
+      } else if (user) {
+        followerCount = stats?.followerCount;
+        bioText = user.signature || (user as Record<string, unknown>).desc as string | undefined;
+        console.info(
+          `[analyzeBrandTikTokChannel] Found @${handle} with ${followerCount?.toLocaleString()} followers` +
+          (captureAssessment ? ` (capture: ${captureAssessment})` : ""),
+        );
       }
     } catch (err) {
       console.warn(`[analyzeBrandTikTokChannel] Could not fetch user info for @${handle}:`, err);

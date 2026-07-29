@@ -461,22 +461,54 @@ export async function scrapeYelpReviews(brandName: string, cityHint: string): Pr
     const searchUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(brandName)}&find_loc=${encodeURIComponent(searchLoc)}`;
     const searchNav = await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
     searchNavStatus = searchNav?.status();
+    const navHeaders = searchNav?.headers() ?? {};
     await page.waitForTimeout(3000);
 
-    // Check for DataDome block
+    /*
+      ─── THE BLOCK IS READ FROM THE RESPONSE, NOT THE RENDERED TEXT ──────────
+      32 blocks were recorded as 32 EMPTY SEARCHES. The check below used to
+      test four rendered-text patterns, and the current block page matches none
+      of them: its <title> is "yelp.com" (not "Access Denied"), and its only
+      rendered text is "Please enable JS and disable any ad blocker". The
+      string "datadome" IS in the page — but inside a <script>, and
+      document.body.innerText excludes script contents, so the one check that
+      should have caught it never could. The block then fell through to "no
+      business results for X", blaming the query, while http_status 403 sat in
+      the same telemetry row contradicting it.
+
+      The response says so unambiguously and always did: HTTP 403 with
+      `server: DataDome` and `x-datadome: protected`. Headers are checked
+      FIRST; the rendered-text patterns are kept underneath because a future
+      interstitial served with HTTP 200 would still be caught by them.
+
+      THIS DOES NOT DEFEAT THE BLOCK, and is not meant to. Yelp is blocked and
+      stays blocked; this only makes the record say so.
+    */
+    const hdr = (k: string) => String(navHeaders[k] ?? navHeaders[k.toLowerCase()] ?? "");
+    const datadomeHeader = /datadome/i.test(hdr("server")) || hdr("x-datadome") !== "";
+    const blockedStatus = searchNavStatus === 403;
+
     const pageTitle = await page.title();
     const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 500));
-    if (
+    const blockedByText =
       pageTitle === "Access Denied" ||
       bodySnippet.includes("verify you are a human") ||
       bodySnippet.toLowerCase().includes("datadome") ||
-      bodySnippet.includes("are you a robot")
-    ) {
-      console.warn(`[yelp] Blocked by anti-bot protection for ${brandName}`);
+      bodySnippet.includes("are you a robot") ||
+      // The current DataDome stub's only rendered line.
+      bodySnippet.includes("Please enable JS and disable any ad blocker");
+
+    if (datadomeHeader || blockedStatus || blockedByText) {
+      const how = datadomeHeader
+        ? `DataDome edge block (HTTP ${searchNavStatus ?? "?"}, server: ${hdr("server") || "?"})`
+        : blockedStatus
+          ? `HTTP ${searchNavStatus} from Yelp (anti-bot block, no DataDome header)`
+          : "Yelp anti-bot interstitial (matched on page text)";
+      console.warn(`[yelp] BLOCKED for ${brandName} — ${how}. Not a query problem.`);
       recordScrapeEvent({
         platform: "yelp", scrapeMethod: "website_crawl", urlRequested: searchUrl,
         httpStatus: searchNavStatus, silentFailureDetected: true,
-        failureReason: "Yelp anti-bot (DataDome) block on search page",
+        failureReason: `Yelp blocked: ${how}`,
         durationMs: Date.now() - scrapeStart,
       });
       return null;
