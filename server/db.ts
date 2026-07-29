@@ -8,7 +8,7 @@ import {
   nicheTaxonomy, archetypeTransitions, audienceMentions,
   llmInvocations, scrapeEvents,
   matchScores, matchNarratives, matchWarnings, matchOverlaps, matchContentDirections,
-  semanticDocuments, pipelineRuns, platformHandles, analysisPhaseState,
+  semanticDocuments, pipelineRuns, platformHandles, analysisPhaseState, runInputs,
   type InsertSubject, type InsertObservation,
   type InsertCreatorObservation, type InsertBrandObservation,
   type InsertSignalValue, type InsertDecodedSignal, type InsertContentItem,
@@ -241,6 +241,56 @@ async function writePhaseState(db: DbHandle, w: PhaseStateWrite): Promise<void> 
 // holds a permit, and only rows that have gone quiet for longer than any
 // legitimate phase could take are reclaimable. Dead-vs-live becomes a timestamp
 // comparison rather than an inference about who booted when.
+
+// ─── Operator-submitted inputs (womo_0013) ───────────────────────────────────
+//
+// What the operator typed, stored where a phase can read it. Previously these
+// travelled inside `subject_hint` — a varchar(160) IDENTITY key — and six brand
+// runs truncated at exactly 160 chars, after which `decodeSubject`'s catch
+// dropped every locator SILENTLY. See the table comment in womo_0013.
+
+export interface RunInputs {
+  submittedSubject: string;
+  googleMapsUrl?: string | null;
+  instagramHandle?: string | null;
+  tiktokChannelUrl?: string | null;
+  brandName?: string | null;
+}
+
+/**
+ * Record what was submitted, once, at enqueue.
+ *
+ * THROWS on failure, deliberately and for the same reason `recordPhaseState`
+ * does: a campaign whose inputs were not durably recorded would run with
+ * locators silently missing, which is precisely the bug this table exists to
+ * end. Better to refuse the submission than to analyse the wrong thing.
+ */
+export async function recordRunInputs(runId: string, inputs: RunInputs): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(runInputs).values({
+    runId,
+    submittedSubject: inputs.submittedSubject,
+    googleMapsUrl: inputs.googleMapsUrl ?? null,
+    instagramHandle: inputs.instagramHandle ?? null,
+    tiktokChannelUrl: inputs.tiktokChannelUrl ?? null,
+    brandName: inputs.brandName ?? null,
+  }).onConflictDoNothing({ target: runInputs.runId });
+}
+
+/** What the operator submitted for this run, or null if nothing was recorded. */
+export async function getRunInputs(runId: string): Promise<RunInputs | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select({
+    submittedSubject: runInputs.submittedSubject,
+    googleMapsUrl: runInputs.googleMapsUrl,
+    instagramHandle: runInputs.instagramHandle,
+    tiktokChannelUrl: runInputs.tiktokChannelUrl,
+    brandName: runInputs.brandName,
+  }).from(runInputs).where(eq(runInputs.runId, runId)).limit(1);
+  return rows[0] ?? null;
+}
 
 /**
  * How long a `running` row may go without a heartbeat before it is presumed

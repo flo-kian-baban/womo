@@ -787,6 +787,22 @@ COMMENT ON COLUMN public.observations.run_id IS 'Correlation id for the analysis
 -- Name: pipeline_runs; Type: TABLE; Schema: public; Owner: -
 --
 
+-- womo_0013. run_id is PK and deliberately not an FK, same convention as
+-- analysis_phase_state. NULL in a locator column means the operator supplied
+-- none, NOT that capture failed.
+CREATE TABLE public.run_inputs (
+    run_id uuid NOT NULL,
+    submitted_subject text NOT NULL,
+    google_maps_url text,
+    instagram_handle text,
+    tiktok_channel_url text,
+    brand_name text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+
 CREATE TABLE public.pipeline_runs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     run_type character varying(64) NOT NULL,
@@ -960,6 +976,14 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 ALTER TABLE ONLY public.analysis_phase_state
     ADD CONSTRAINT analysis_phase_state_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: run_inputs run_inputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_inputs
+    ADD CONSTRAINT run_inputs_pkey PRIMARY KEY (run_id);
 
 
 --

@@ -904,6 +904,47 @@ export const analysisPhaseState = pgTable("analysis_phase_state", {
 }));
 
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// RUN INPUTS — what the operator actually submitted (womo_0013)
+// ═══════════════════════════════════════════════════════════════════════════════
+// One row per analysis run, written once at enqueue, read once when the
+// campaign starts.
+//
+// WHY IT EXISTS. The submitted locators used to travel inside
+// `analysisPhaseState.subjectHint` — a varchar(160) IDENTITY key — url-encoded
+// as a suffix. Six brand runs truncated at exactly 160 chars; `decodeSubject`'s
+// JSON.parse then failed and its catch returned the subject with NO extras,
+// silently. Every brand lost every locator before phase one ran, and
+// persistence recorded "no Instagram handle provided" for handles the operator
+// HAD supplied. That catch is right for an identity key — a corrupt suffix must
+// not make a campaign unreadable — and wrong for inputs. The two jobs are
+// separated here so it is no longer load-bearing.
+//
+// runId is the PRIMARY KEY and deliberately NOT a foreign key, same convention
+// as analysisPhaseState: pipeline_runs is written only at terminal time, and a
+// brand's subjects row does not exist at enqueue (persistence creates it).
+//
+// `text` throughout, no length ceilings — a length ceiling on operator data is
+// the entire defect this table removes.
+
+export const runInputs = pgTable("run_inputs", {
+  runId: uuid("run_id").primaryKey(),
+  /** The url-or-name as typed. The only thing always present. */
+  submittedSubject: text("submitted_subject").notNull(),
+  /**
+   * The optional locators. NULL means the operator SUPPLIED NONE — not that
+   * capture failed. That distinction is the point: it lets "this brand has no
+   * TikTok" be recorded as a fact instead of read as a capture failure.
+   */
+  googleMapsUrl: text("google_maps_url"),
+  instagramHandle: text("instagram_handle"),
+  tiktokChannelUrl: text("tiktok_channel_url"),
+  /** Optional operator-supplied human name; overrides the crawl-derived one. */
+  brandName: text("brand_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+
 export const pipelineRuns = pgTable("pipeline_runs", {
   id: uuid("id").defaultRandom().primaryKey(),
   runType: varchar("run_type", { length: 64 }).notNull(),

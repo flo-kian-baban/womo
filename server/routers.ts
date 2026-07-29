@@ -298,6 +298,13 @@ export function brandSubmitRequest(input: {
   googleMapsUrl?: string;
   tiktokChannelUrl?: string;
   instagramHandle?: string;
+  /**
+   * OPTIONAL human name. When the subject is a URL the pipeline can only derive
+   * a hostname stem until the crawl runs; this lets an operator who knows the
+   * name say so, and it overrides the crawl-derived one. Absent is the normal
+   * case — capture reads the site's own og:site_name/<title>.
+   */
+  brandName?: string;
 }): SubmitRequest {
   return {
     handle: input.brandNameOrUrl,
@@ -306,6 +313,7 @@ export function brandSubmitRequest(input: {
       ...(input.googleMapsUrl?.trim() ? { googleMapsUrl: input.googleMapsUrl.trim() } : {}),
       ...(input.tiktokChannelUrl?.trim() ? { tiktokChannelUrl: input.tiktokChannelUrl.trim() } : {}),
       ...(input.instagramHandle?.trim() ? { instagramHandle: input.instagramHandle.trim() } : {}),
+      ...(input.brandName?.trim() ? { brandName: input.brandName.trim() } : {}),
     },
   };
 }
@@ -1616,6 +1624,8 @@ export const appRouter = router({
         tiktokChannelUrl: z.string().optional().or(z.literal("")),
         instagramHandle: z.string().optional().or(z.literal("")),
         googleMapsUrl: z.string().optional().or(z.literal("")),
+        /** Optional; overrides the crawl-derived name. See brandSubmitRequest. */
+        brandName: z.string().optional().or(z.literal("")),
       }))
       .mutation(async ({ input }) => {
         const campaigns = await submitCampaigns([brandSubmitRequest(input)]);

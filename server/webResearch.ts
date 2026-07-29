@@ -2680,17 +2680,41 @@ function extractSemanticLinks(html: string, baseUrl: string): string[] {
  * Recursively crawl a brand website to collect 2,000+ words of semantic content.
  * Follows internal links to About, Story, Blog, Mission pages.
  */
+/**
+ * A page's own name for itself → the brand name a customer would type.
+ *
+ * `og:site_name` is preferred because it is the only one of the three that
+ * MEANS the site's name; the others mean "this page's title" and carry a
+ * tagline more often than not ("Senso Café & Bites | Brunch in Markham").
+ * Hence the split: everything after the first separator is marketing, not the
+ * name. Returns null rather than a guess when nothing usable is present — the
+ * caller falls back to the hostname stem, which is what it used before.
+ */
+export function siteNameFromHtml(html: string): string | null {
+  const ogSite = html.match(/<meta\s+property="og:site_name"\s+content="([^"]+)"/i)?.[1];
+  const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1];
+  const title = html.match(/<title>([^<]+)<\/title>/i)?.[1];
+  const raw = (ogSite || ogTitle || title || "").trim();
+  if (!raw) return null;
+  const name = raw.split(/\s+[|–—·:]\s+/)[0]!.trim();
+  // A bare separator-led title ("| Home") or a runaway string is not a name.
+  return name.length >= 2 && name.length <= 80 ? name : null;
+}
+
 export async function crawlBrandWebsite(startUrl: string): Promise<{
   allText: string;
   snippets: string[];
   crawledPages: string[];
   wordCount: number;
+  /** The site's own name for itself — see siteNameFromHtml. Root page only. */
+  siteName: string | null;
 }> {
   const TARGET_WORDS = 2000;
   const crawledPages: string[] = [];
   const allTextParts: string[] = [];
   const snippets: string[] = [];
   const visited = new Set<string>();
+  let siteName: string | null = null;
 
   /**
    * ─── The crawl is instrumented (egress/brand audit, 2026-07-29) ───────────
@@ -2748,6 +2772,9 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
       const keywords = html.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i)?.[1] ?? "";
       const title = html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
       const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1] ?? "";
+
+      // Root page only: a sub-page's title names the PAGE, not the brand.
+      if (crawledPages.length === 1) siteName = siteNameFromHtml(html);
 
       if (metaDesc) snippets.push(`Page description (${new URL(url).pathname}): ${metaDesc}`);
       if (ogDesc && ogDesc !== metaDesc) snippets.push(`OG description: ${ogDesc}`);
@@ -2840,6 +2867,9 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
           const kw = pwHtml.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i)?.[1] ?? "";
           const title = pwHtml.match(/<title>([^<]+)<\/title>/i)?.[1] ?? "";
 
+          // The rendered DOM is the better source when HTTP gave us nothing.
+          siteName = siteNameFromHtml(pwHtml) ?? siteName;
+
           if (metaDesc) snippets.push(`Page description (/): ${metaDesc}`);
           if (ogDesc && ogDesc !== metaDesc) snippets.push(`OG description: ${ogDesc}`);
           if (kw) snippets.push(`Keywords: ${kw}`);
@@ -2868,7 +2898,7 @@ export async function crawlBrandWebsite(startUrl: string): Promise<{
   const wordCount = allText.split(/\s+/).length;
   console.log(`[webResearch] Brand crawl complete: ${crawledPages.length} pages, ${wordCount} words`);
 
-  return { allText, snippets, crawledPages, wordCount };
+  return { allText, snippets, crawledPages, wordCount, siteName };
 }
 
 // ─── Brand Research ───────────────────────────────────────────────────────────

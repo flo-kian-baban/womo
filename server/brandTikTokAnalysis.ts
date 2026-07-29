@@ -158,6 +158,70 @@ function extractChallengeHashtags(challenges: any[]): string[] {
  * Searches TikTok for brand name mentions and extracts all available signals.
  * This is the primary data source for audience perception analysis.
  */
+/**
+ * ─── THE CONTAINMENT GATE (brand audit, 2026-07-29) ─────────────────────────
+ *
+ * TikTok's search is fuzzy, and for a non-distinctive token it returns things
+ * that have nothing to do with the brand. `q=bludental` for a Markham dental
+ * clinic returned D1 dental-school hauls, a Dollarama makeup haul, and a
+ * back-to-school supplies video — 34 of them, scored "positive", rendered as
+ * "34 mentions from 31 authors" on the brand's received side. That is not thin
+ * evidence, it is somebody else's evidence.
+ *
+ * The check is deliberately CONTAINMENT, not "distinctiveness". Distinctiveness
+ * has no measurable definition without a reference corpus, so any threshold on
+ * it would be invented. Whether a specific video mentions the brand is checkable
+ * per item: the brand token appears in the caption, in a hashtag, or in the
+ * author's handle — or the caption @-mentions the brand's own handle.
+ *
+ * The brand's own handle is NOT required. A genuine organic mention often names
+ * a brand in text without tagging it, and that unprompted naming is exactly the
+ * perception worth capturing.
+ *
+ * WHAT IT CANNOT DO: tell two businesses that share a name apart. The Spanish
+ * "Bludental" posts DO contain the token and survive this gate. Containment
+ * removes noise, not homonyms.
+ */
+function normalizeForContainment(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function mentionContainsBrand(
+  video: { caption?: string; hashtags?: string[]; authorHandle?: string },
+  brandName: string,
+  brandHandle?: string,
+): boolean {
+  const token = normalizeForContainment(brandName);
+  // A token under 3 chars matches almost anything once punctuation is stripped;
+  // treat it as uncheckable rather than let it wave everything through.
+  if (token.length < 3) return false;
+
+  if (normalizeForContainment(video.caption ?? "").includes(token)) return true;
+  if ((video.hashtags ?? []).some(h => normalizeForContainment(h).includes(token))) return true;
+  if (normalizeForContainment(video.authorHandle ?? "").includes(token)) return true;
+
+  if (brandHandle) {
+    const h = normalizeForContainment(brandHandle);
+    if (h.length >= 3) {
+      if (normalizeForContainment(video.caption ?? "").includes(h)) return true;
+      if ((video.hashtags ?? []).some(t => normalizeForContainment(t).includes(h))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Below this many surviving mentions, the honest answer is NONE.
+ *
+ * A handful of surviving videos cannot characterise an audience, and reporting
+ * "3 mentions from 3 authors" as received evidence overstates what the brand
+ * actually has — the failure this whole gate exists to end. The old 34-mention
+ * Blu Dental result already carried `confidence: low`, which nothing acted on.
+ *
+ * REVIEW THIS NUMBER. It is a judgement, not a measurement.
+ */
+export const MIN_SURVIVING_MENTIONS = 5;
+
 export async function fetchBrandMentionData(
   brandName: string,
   brandHandle?: string
@@ -237,6 +301,22 @@ export async function fetchBrandMentionData(
 
   if (allVideos.length === 0) {
     console.info(`[fetchBrandMentionData] No mention videos found for "${brandName}"`);
+    return null;
+  }
+
+  // ── The containment gate. See mentionContainsBrand. ────────────────────────
+  const retrieved = allVideos.length;
+  const surviving = allVideos.filter(v => mentionContainsBrand(v, brandName, brandHandle));
+  allVideos.length = 0;
+  allVideos.push(...surviving);
+  console.info(
+    `[fetchBrandMentionData] containment gate: ${surviving.length} of ${retrieved} retrieved videos mention "${brandName}"`,
+  );
+
+  if (allVideos.length < MIN_SURVIVING_MENTIONS) {
+    console.info(
+      `[fetchBrandMentionData] ${allVideos.length} surviving < ${MIN_SURVIVING_MENTIONS} — reporting NO audience mentions for "${brandName}" rather than a thin set`,
+    );
     return null;
   }
 

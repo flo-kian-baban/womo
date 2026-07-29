@@ -243,7 +243,26 @@ export function brandSearchName(brandNameOrUrl: string): string {
   return registrable.replace(/[-_]+/g, " ").trim() || host;
 }
 
-export function makeBrandCapturePhase(brandNameOrUrl: string): AnalysisPhase<{ subject: string }, BrandCaptureOutput> {
+/**
+ * ─── What the off-site searches are given (brand audit, 2026-07-29) ─────────
+ * `brandSearchName` works exactly as designed, but for a URL subject it can
+ * only ever yield the hostname stem — `https://sensocafe.ca/` becomes
+ * `sensocafe`, and "Senso Café & Bites" never reached Yelp, Places, the
+ * mention search or the web fallbacks. The human name simply did not exist in
+ * the system at search time: it first appears as an LLM extraction output in
+ * extract_commit, which runs AFTER every search.
+ *
+ * Capture runs BEFORE augment and already fetches the site, so the site's own
+ * name for itself is available in time and costs nothing extra. Precedence:
+ *   1. the operator's `brandName`, if they supplied one — they know best
+ *   2. the crawl's og:site_name / og:title / <title>
+ *   3. the hostname stem, which is what it used to be
+ * so this can only ever ADD a name where there was none.
+ */
+export function makeBrandCapturePhase(
+  brandNameOrUrl: string,
+  operatorBrandName?: string,
+): AnalysisPhase<{ subject: string }, BrandCaptureOutput> {
   return {
     name: "capture",
     tool: "brand:website_crawl",
@@ -258,7 +277,7 @@ export function makeBrandCapturePhase(brandNameOrUrl: string): AnalysisPhase<{ s
 
       const base: BrandCaptureOutput = {
         brandName,
-        searchName: brandSearchName(input.subject),
+        searchName: operatorBrandName?.trim() || brandSearchName(input.subject),
         websiteUrl: isUrl ? input.subject : null,
         description: "",
         snippets: [],
@@ -288,6 +307,8 @@ export function makeBrandCapturePhase(brandNameOrUrl: string): AnalysisPhase<{ s
             snippets: crawl.snippets,
             semanticWordCount: crawl.wordCount,
             crawledPages: crawl.crawledPages,
+            // Operator name still wins; the crawl only beats the hostname stem.
+            searchName: operatorBrandName?.trim() || crawl.siteName || base.searchName,
           },
           attempts: [{ tool: "brand:website_crawl", outcome: "complete", durationMs: Date.now() - started }],
         };
@@ -894,7 +915,11 @@ export function brandGate(input: GateInput): GateVerdict {
  */
 export async function runBrandCollection(
   brandNameOrUrl: string,
-  extras: { googleMapsUrl?: string; tiktokChannelUrl?: string; instagramHandle?: string } = {},
+  extras: {
+    googleMapsUrl?: string; tiktokChannelUrl?: string; instagramHandle?: string;
+    /** Optional operator-supplied human name; overrides the crawl-derived one. */
+    brandName?: string;
+  } = {},
   initialPhases?: CampaignState["phases"],
 ): Promise<BrandCollectionCampaign> {
   return runPhaseCollection<BrandCollectionCampaign>({
@@ -902,7 +927,7 @@ export async function runBrandCollection(
     platform: BRAND_PSEUDO_PLATFORM,
     initialPhases,
     phases: [
-      makeBrandCapturePhase(brandNameOrUrl),
+      makeBrandCapturePhase(brandNameOrUrl, extras.brandName),
       makeBrandAugmentPhase(extras.googleMapsUrl),
       makeBrandTranscribePhase(extras.tiktokChannelUrl),
       makeBrandInstagramPhase(extras.instagramHandle),

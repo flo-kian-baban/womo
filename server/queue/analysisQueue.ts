@@ -43,6 +43,8 @@ import {
   heartbeatPhase,
   reclaimStaleRunning,
   recordPhaseState,
+  recordRunInputs,
+  getRunInputs,
   scanReadyWork,
   HEARTBEAT_MS,
 } from "../db";
@@ -142,9 +144,33 @@ export async function submitCampaigns(requests: SubmitRequest[]): Promise<Submit
     // DURABLE — recordPhaseState throws. A campaign missing from the ledger
     // would be invisible to the worker and to the analyst, so a failed enqueue
     // must fail the submission rather than pretend.
+    /*
+      ─── INPUTS FIRST, and not in the identity key (womo_0013) ──────────────
+      The locators used to be encoded INTO `subject_hint` and read back out of
+      it at run time. That column is varchar(160); six brand runs truncated at
+      exactly 160 chars, `decodeSubject`'s JSON.parse then failed, and its catch
+      returned the subject with NO extras — silently. Every brand lost every
+      locator before phase one, and persistence blamed the operator for not
+      supplying handles the operator HAD supplied.
+
+      So they are written to their own table, before the ledger row: a campaign
+      that is visible to the worker but whose inputs were lost is the exact
+      failure being fixed, and ordering it this way makes that state
+      unreachable. Both writes throw.
+    */
+    if (req.extras && Object.keys(req.extras).length > 0) {
+      await recordRunInputs(runId, {
+        submittedSubject: req.handle,
+        googleMapsUrl: req.extras.googleMapsUrl,
+        instagramHandle: req.extras.instagramHandle,
+        tiktokChannelUrl: req.extras.tiktokChannelUrl,
+        brandName: req.extras.brandName,
+      });
+    }
     await recordPhaseState({
       runId,
-      subjectHint: encodeSubject({ handle: req.handle, platform: req.platform, extras: req.extras }),
+      // NO EXTRAS. `subject_hint` is an identity key and carries identity only.
+      subjectHint: encodeSubject({ handle: req.handle, platform: req.platform }),
       phase: "capture",
       status: "pending",
       attemptCount: 0,
@@ -622,7 +648,29 @@ async function processCampaign(
   subjectHint: string,
   deps: QueueDeps,
 ): Promise<CampaignOutcome<unknown> | null> {
-  const { handle, platform, extras } = decodeSubject(subjectHint);
+  const { handle, platform, extras: hintExtras } = decodeSubject(subjectHint);
+  /*
+    ─── Inputs come from run_inputs now (womo_0013) ──────────────────────────
+    BACKWARD-COMPATIBILITY FALLBACK: rows enqueued BEFORE womo_0013 still carry
+    their locators in the hint, and a campaign already in flight must resume
+    with them rather than lose them mid-run. So run_inputs wins and the hint is
+    the fallback.
+
+    DELETE THE FALLBACK once no pre-migration run is resumable — i.e. once every
+    ledger row older than the migration has reached a terminal status (the
+    resumable window is RESUMABLE_AGE_MS = 24h, so a day after the migration
+    nothing can still need it). At that point `hintExtras` and the `extras`
+    field of SubjectIdentity have no readers left.
+  */
+  const stored = await getRunInputs(runId);
+  const extras: Record<string, string> | undefined = stored
+    ? Object.fromEntries(Object.entries({
+        googleMapsUrl: stored.googleMapsUrl,
+        instagramHandle: stored.instagramHandle,
+        tiktokChannelUrl: stored.tiktokChannelUrl,
+        brandName: stored.brandName,
+      }).filter(([, v]) => v != null && v !== "")) as Record<string, string>
+    : hintExtras;
   /**
    * Brand is a different KIND of subject, not another platform: it resolves no
    * toolset, brings its own five phases and supplies its own gate. So it is
