@@ -773,6 +773,169 @@ export { fetchOEmbed };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// ─── Leg: profile_embed_json ─────────────────────────────────────────────────
+//
+// THE PRIMARY BASE-FIELD LEG. A plain HTTP GET of the EMBED page, which
+// carries the user payload as JSON while the profile URL does not.
+//
+// Why the embed and not the profile page: profile_xhr_scroll — the only leg
+// that ever supplied base fields — went from 85% to 5% between 27 and 30 July.
+// The obvious replacement, a direct GET of /@handle, is the leg this codebase
+// ALREADY deleted once ("Path A desktop HTTP: dead code since FIX 3.4") and it
+// is still dead: it returns a 1,462-byte JS shell with no state container at
+// all, measured on gordonramsayofficial, markrober and jamescharles. The embed
+// endpoint returns 317-330KB with the payload intact for the same handles, in
+// the same minute — it is refused independently of both the profile page and
+// the XHR endpoint, which is exactly what makes it a leg rather than a retry.
+//
+// THE PARSER MUST NOT SILENTLY ACCEPT THE WRONG CONTAINER. If no known state
+// container is present, that is `shape_change` — a DISTINCT outcome from "the
+// profile is empty" and from "we were blocked". Conflating them is how the last
+// drift went unnoticed for fourteen days. This taxonomy earned its keep on its
+// first run: pointed at the dead profile URL it correctly reported `blocked` on
+// a 1,462-byte stub rather than inventing a TikTok redesign.
+
+export type ProfileLegOutcome =
+  | "success"
+  | "blocked"        // the platform refused us (403/429/5xx, or a stub body)
+  | "shape_change"   // we got a page and neither known container was in it
+  | "empty";         // containers present, no user payload — a real absence
+
+export interface ProfileLegResult {
+  leg: string;
+  outcome: ProfileLegOutcome;
+  durationMs: number;
+  fields: TikTokBaseFields | null;
+  detail?: string;
+}
+
+/** The base fields a profile leg can supply. Null = this leg did not carry it. */
+export interface TikTokBaseFields {
+  uniqueId: string | null;
+  nickname: string | null;
+  signature: string | null;
+  followerCount: number | null;
+  followingCount: number | null;
+  heartCount: number | null;
+  videoCount: number | null;
+  verified: boolean | null;
+  secUid: string | null;
+}
+
+const EMBED_BUDGET_MS = 20_000;
+
+/**
+ * Pull base fields out of a rehydration document (profile-page shape).
+ *
+ * Returns `null` when the container exists but carries no user-detail payload,
+ * which the caller reports as `empty` — a fact about the account — as opposed
+ * to the container being missing entirely, which is a fact about US.
+ */
+export function baseFieldsFromRehydration(data: RehydrationData | null): TikTokBaseFields | null {
+  const detail = data?.__DEFAULT_SCOPE__?.["webapp.user-detail"];
+  const info = (detail as { userInfo?: Record<string, unknown> } | undefined)?.userInfo;
+  if (!info) return null;
+  const user = (info.user ?? {}) as Record<string, unknown>;
+  const stats = (info.stats ?? info.statsV2 ?? {}) as Record<string, unknown>;
+  const num = (v: unknown): number | null => {
+    const n = typeof v === "string" ? Number(v) : v;
+    return typeof n === "number" && Number.isFinite(n) ? n : null;
+  };
+  return {
+    uniqueId: (user.uniqueId as string) ?? null,
+    nickname: (user.nickname as string) ?? null,
+    signature: (user.signature as string) ?? null,
+    followerCount: num(stats.followerCount),
+    followingCount: num(stats.followingCount),
+    heartCount: num(stats.heartCount ?? stats.heart),
+    videoCount: num(stats.videoCount),
+    verified: typeof user.verified === "boolean" ? user.verified : null,
+    secUid: (user.secUid as string) ?? null,
+  };
+}
+
+/** Does this page carry EITHER known state container? */
+function hasKnownContainer(html: string): boolean {
+  return html.includes("__UNIVERSAL_DATA_FOR_REHYDRATION__") || html.includes("SIGI_STATE");
+}
+
+/**
+ * The embed page's own payload shape.
+ *
+ * It is NOT the profile page's `webapp.user-detail` tree — the embed inlines a
+ * flatter user object. Parsed with the same null-means-absent discipline so a
+ * missing field is never silently a zero.
+ *
+ * KNOWN GAPS, measured not assumed: the embed carries no `videoCount` and no
+ * `secUid`. secUid matters — it is what cursor pagination keys on — so the
+ * embed can supply a profile but cannot replace profile_xhr_scroll for pooling.
+ */
+export function baseFieldsFromEmbed(html: string): TikTokBaseFields | null {
+  const pick = (k: string): string | null => {
+    const m = html.match(new RegExp(`"${k}":"((?:[^"\\\\]|\\\\.)*)"`));
+    return m ? m[1]! : null;
+  };
+  const pickNum = (k: string): number | null => {
+    const m = html.match(new RegExp(`"${k}":(\\d+)`));
+    return m ? Number(m[1]) : null;
+  };
+  const uniqueId = pick("uniqueId");
+  const followerCount = pickNum("followerCount");
+  // Neither present => this is not an embed payload we understand.
+  if (uniqueId === null && followerCount === null) return null;
+  const verifiedMatch = html.match(/"verified":(true|false)/);
+  return {
+    uniqueId,
+    nickname: pick("nickname"),
+    signature: pick("signature"),
+    followerCount,
+    followingCount: pickNum("followingCount"),
+    heartCount: pickNum("heartCount"),
+    videoCount: pickNum("videoCount"),
+    verified: verifiedMatch ? verifiedMatch[1] === "true" : null,
+    secUid: pick("secUid"),
+  };
+}
+
+export async function attemptProfileEmbedJson(handle: string): Promise<ProfileLegResult> {
+  const started = Date.now();
+  const leg = "profile_embed_json";
+  const url = `https://www.tiktok.com/embed/@${handle}`;
+  const record = (outcome: ProfileLegOutcome, fields: TikTokBaseFields | null, detail?: string): ProfileLegResult => {
+    recordScrapeEvent({
+      platform: "tiktok",
+      scrapeMethod: "tiktok_desktop_http",
+      urlRequested: `${url}#profile=${leg}:${outcome}`,
+      silentFailureDetected: outcome === "shape_change",
+      failureReason: outcome === "success" ? undefined : `profile ${leg}: ${outcome}${detail ? ` — ${detail}` : ""}`,
+      durationMs: Date.now() - started,
+    });
+    return { leg, outcome, durationMs: Date.now() - started, fields, detail };
+  };
+
+  try {
+    await requestGovernor("tiktok");
+    const html = await fetchHtml(url, { timeout: EMBED_BUDGET_MS, maxRetries: 1 });
+    if (!html || html.length < 5_000) {
+      return record("blocked", null, `body ${html?.length ?? 0} bytes — stub/challenge page`);
+    }
+    const fields = baseFieldsFromEmbed(html);
+    if (!fields) {
+      // A full-size embed page carrying neither uniqueId nor followerCount is
+      // a shape we do not recognise — report it as such, loudly, not as empty.
+      return record("shape_change", null,
+        `embed page ${html.length} bytes with no uniqueId or followerCount`);
+    }
+    console.log(
+      `[profileScraper] @${handle}: ${leg} — followers=${fields.followerCount} following=${fields.followingCount} ` +
+      `hearts=${fields.heartCount} videos=${fields.videoCount ?? "ABSENT"} secUid=${fields.secUid ? "yes" : "ABSENT"}`,
+    );
+    return record("success", fields);
+  } catch (err) {
+    return record("blocked", null, ((err as Error).message ?? String(err)).slice(0, 140));
+  }
+}
+
 function extractRehydrationData(html: string): RehydrationData | null {
   const match = html.match(
     /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/,
