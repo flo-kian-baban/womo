@@ -101,8 +101,14 @@ export interface SubmitRequest {
  * own gate, which is why it can be queueable without being registered.
  *
  * Read docs/BRAND_PSEUDO_PLATFORM.md before adding a second one.
+ *
+ * "Match" IS that second one (S6), added by explicit operator ruling rather
+ * than by drift — see MATCH_PSEUDO_PLATFORM in _core/analysisPhase.ts for the
+ * decision record. Like Brand it resolves no toolset and brings its own phases
+ * (prepare → derive → persist); unlike Brand it has no subject at all, only a
+ * pair of committed observation ids carried in the handle slot.
  */
-export type QueueablePlatform = "TikTok" | "Instagram" | "Brand";
+export type QueueablePlatform = "TikTok" | "Instagram" | "Brand" | "Match";
 
 /**
  * Can this subject actually be run by the worker?

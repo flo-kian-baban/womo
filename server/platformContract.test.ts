@@ -179,6 +179,8 @@ describe("the shared layers never learn a platform's name", () => {
     // agreed to.
     expect(PHASE_NAMES).toEqual([
       "capture", "augment", "transcribe", "channel_instagram", "derive", "extract_commit",
+      // S6 — match campaigns (prepare → derive → persist); `derive` reused.
+      "prepare", "persist",
     ]);
   });
 });

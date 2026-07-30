@@ -72,6 +72,14 @@ export function classForPhase(phase: PhaseName): ResourceClass {
     case "derive":
     case "extract_commit":
       return "llm";
+    // Match phases (S6). Neither opens a browser nor calls a model: `prepare`
+    // reads two committed observations, `persist` writes match_scores and its
+    // satellites. Bounding them against `browser` or `llm` would hold a permit
+    // that exists to cap a scarcity they do not consume. A match's ONE model
+    // phase is `derive`, already classified `llm` above.
+    case "prepare":
+    case "persist":
+      return "compute";
   }
 }
 

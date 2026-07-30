@@ -29,6 +29,10 @@ describe("phase names", () => {
       "channel_instagram",
       "derive",
       "extract_commit",
+      // S6 — match campaigns. `derive` is REUSED, not duplicated; only the two
+      // phases a subject pipeline has no equivalent for are new.
+      "prepare",
+      "persist",
     ]);
   });
 });

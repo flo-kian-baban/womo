@@ -71,6 +71,26 @@
  * assert this array literally. That visibility is the point — a phase list that
  * can grow silently is a ledger whose shape nobody agreed to.
  */
+/**
+ * ─── `prepare` and `persist` were added for MATCH (S6) ──────────────────────
+ * A match campaign runs `prepare → derive → persist`. It REUSES `derive`
+ * rather than minting a fourth LLM phase name: derive already means "the LLM
+ * calls that run from banked evidence", already classifies as the `llm`
+ * resource, and the ledger keys on (run_id, phase), so a match's derive row
+ * cannot collide with a creator's.
+ *
+ * The two new names are the ones a subject pipeline has no equivalent for:
+ *   prepare — read two COMMITTED observations and bank the engine's inputs.
+ *             No capture, no network: a match gathers nothing, it reads.
+ *   persist — write match_scores and its five satellites atomically. Kept as
+ *             ONE phase deliberately: the retry unit is coarser here on
+ *             purpose, because a torn write across the satellite tables is a
+ *             worse failure than re-paying a retry (operator ruling, S6).
+ *
+ * ORDER IN THIS ARRAY IS A REGISTRY, NOT AN EXECUTION ORDER. Each campaign
+ * kind supplies its own ordered phase list; these are appended so the five
+ * existing entries keep their positions and diff cleanly.
+ */
 export const PHASE_NAMES = [
   "capture",
   "augment",
@@ -78,6 +98,8 @@ export const PHASE_NAMES = [
   "channel_instagram",
   "derive",
   "extract_commit",
+  "prepare",
+  "persist",
 ] as const;
 
 export type PhaseName = (typeof PHASE_NAMES)[number];
@@ -136,9 +158,41 @@ export type PlatformName = "TikTok" | "Instagram" | "YouTube";
  */
 export const BRAND_PSEUDO_PLATFORM = "Brand" as PlatformName;
 
+/**
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║ THE SECOND PSEUDO-PLATFORM — added KNOWINGLY, against the standing rule.  ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ *
+ * docs/BRAND_PSEUDO_PLATFORM.md rule 3 reads: "Do not grow the pattern. A
+ * second pseudo-platform is the signal that Option B is overdue." This IS that
+ * second one, and the rule was overridden deliberately by the operator (S6)
+ * rather than missed. It is recorded here so the next reader sees a decision,
+ * not an accident.
+ *
+ * A match is not a subject at all: it has no handle, no platform, and gathers
+ * nothing. It reads two COMMITTED observations and scores the pair. What it
+ * fills this slot with is a PAIR IDENTITY — `{creatorObsId}+{brandObsId}` —
+ * keyed on observation ids so that a re-analysis of either side produces a
+ * DIFFERENT campaign rather than colliding with the old one. That preserves
+ * the score-time evidence identity M1 established.
+ *
+ * WHY NOT the literal `match::{creatorObsId}::{brandObsId}` originally
+ * specified: `::` is already `EXTRAS_SEP` in subjectIdentity.ts, so that string
+ * splits at its FIRST separator and degrades to an unrunnable
+ * `{handle:"match", platform:""}`. The `+`-joined pair in the handle slot needs
+ * no change to `encodeSubject`/`decodeSubject` whatsoever, which keeps the
+ * byte-identical invariant that no harness can arbitrate.
+ */
+export const MATCH_PSEUDO_PLATFORM = "Match" as PlatformName;
+
 /** True for a subject occupying a platform slot without being a platform. */
 export function isPseudoPlatform(platform: string): boolean {
-  return platform === BRAND_PSEUDO_PLATFORM;
+  return platform === BRAND_PSEUDO_PLATFORM || platform === MATCH_PSEUDO_PLATFORM;
+}
+
+/** True only for the match kind — a campaign with no subject at all. */
+export function isMatchPlatform(platform: string): boolean {
+  return platform === MATCH_PSEUDO_PLATFORM;
 }
 
 /**

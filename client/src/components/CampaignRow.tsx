@@ -56,6 +56,10 @@ const PHASE_LABEL: Record<PhaseName, { label: string; hint: string }> = {
   channel_instagram: { label: "Instagram channel", hint: "the subject's own posts" },
   derive: { label: "Derive", hint: "themes and symbols" },
   extract_commit: { label: "Extract & commit", hint: "cultural profile, saved" },
+  // S6 — match campaigns. `derive` above is shared with subject campaigns; its
+  // hint stays subject-neutral because a match derives narratives, not themes.
+  prepare: { label: "Prepare", hint: "both sides' committed evidence" },
+  persist: { label: "Persist", hint: "score and narratives, saved" },
 };
 
 /**
