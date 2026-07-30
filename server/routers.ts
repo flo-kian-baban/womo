@@ -25,7 +25,7 @@ import {
   getCreatorProfileById, listCreatorProfiles, deleteCreatorProfile, listArchivedCreatorRuns,
   getContentItemsBySubject, getProvenance,
   getBrandProfileById, listBrandProfiles, deleteBrandProfile,
-  listMatchRecords, deleteMatchRecord, getMatchWithProfiles,
+  listMatchRecords, listMatchPairs, deleteMatchRecord, getMatchWithProfiles,
   getComparablePartnerships,
   type ContentItemsWriteResult,
 } from "./db";
@@ -2300,6 +2300,18 @@ Write ONLY the 2-3 sentence paragraph. No headers. No lists. No quotes.`,
 
     list: publicProcedure.query(async () => {
       return listMatchRecords();
+    }),
+
+    /**
+     * Which pairings have already been scored, and when (S6).
+     *
+     * Feeds the selection surface's match awareness. Deliberately separate from
+     * `list`: that one is limit(50) and returns whole match rows, so using it
+     * here would make "never matched" a LIE the moment the corpus passes 50
+     * matches. Four columns, unlimited, newest first.
+     */
+    pairs: publicProcedure.query(async () => {
+      return listMatchPairs();
     }),
 
     delete: publicProcedure

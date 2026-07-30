@@ -3329,6 +3329,41 @@ async function _getProvenance(observationId: string, opts?: { includeScrapes?: b
   };
 }
 
+/**
+ * ─── CAPTURE HEALTH FOR A PAGE OF SUBJECTS (S6, selection surface) ──────────
+ *
+ * `captureHealth` is derived at terminal time and banked inside
+ * `pipeline_runs.error_log` (see recordRunOutcome). The selection surface wants
+ * its three-tier `status` — clean / degraded / thin — so an analyst can tell a
+ * rich profile from one whose capture limped.
+ *
+ * DELIBERATELY NOT A JOIN. Both list queries are unprojected `db.select()`
+ * calls; adding `pipeline_runs` to one would drag `error_log` — a whole run's
+ * banked failure detail — across the wire for every row. That is precisely the
+ * shape of the 2026-07-28 egress incident, where a per-tick unprojected select
+ * shipped megabytes to read a label. This reads TWO scalar columns for at most
+ * one page of run ids, and never ships the document it extracts from.
+ *
+ * Returns a map keyed by run id; a run with no banked health is simply absent,
+ * and the caller renders that as unknown rather than inventing "clean".
+ */
+async function captureHealthByRunId(
+  db: DbHandle,
+  runIds: Array<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const ids = Array.from(new Set(runIds.filter((r): r is string => Boolean(r))));
+  if (ids.length === 0) return new Map();
+  const rows = await db.select({
+    id: pipelineRuns.id,
+    status: sql<string | null>`${pipelineRuns.errorLog} -> 'captureHealth' ->> 'status'`,
+  })
+    .from(pipelineRuns)
+    .where(inArray(pipelineRuns.id, ids));
+  const out = new Map<string, string>();
+  for (const r of rows) if (r.status) out.set(r.id, r.status);
+  return out;
+}
+
 async function _listCreatorProfiles(
   search?: string,
   opts?: {
@@ -3381,6 +3416,8 @@ async function _listCreatorProfiles(
     .orderBy(desc(observations.observedAt))
     .limit(50);
 
+  const health = await captureHealthByRunId(db, rows.map(r => r.observations?.runId));
+
   return rows.map(row => ({
     id: row.subjects.id,
     handle: row.subjects.primaryHandle,
@@ -3416,6 +3453,12 @@ async function _listCreatorProfiles(
     totalViews: row.creator_observations?.totalViews ?? null,
     avgViews: row.creator_observations?.avgViews ?? null,
     dataConfidenceLevel: row.observations?.dataConfidenceLevel ?? null,
+    /**
+     * clean | degraded | thin, from the run's banked captureHealth (S6).
+     * NULL means no health was banked for this run — rendered as unknown, never
+     * as "clean", because absence of a record is not evidence of a good one.
+     */
+    captureHealth: row.observations?.runId ? health.get(row.observations.runId) ?? null : null,
   }));
 }
 
@@ -3884,7 +3927,16 @@ async function _listBrandProfiles(search?: string) {
   const baseCondition = search
     ? and(
         eq(subjects.subjectType, "brand"),
-        like(subjects.displayName ?? '', `%${search}%`),
+        or(
+          like(subjects.displayName ?? '', `%${search}%`),
+          /**
+           * S6: a brand is as often known by its domain as its name — the
+           * corpus literally holds "nike.com", "patagonia.ca", "bludental.ca".
+           * Searching only displayName meant typing the thing written on the
+           * row failed to find it whenever the two differ.
+           */
+          like(subjects.websiteUrl ?? '', `%${search}%`),
+        ),
       )
     : eq(subjects.subjectType, "brand");
 
@@ -3903,6 +3955,8 @@ async function _listBrandProfiles(search?: string) {
      */
     .orderBy(desc(observations.observedAt))
     .limit(50);
+
+  const health = await captureHealthByRunId(db, rows.map(r => r.observations?.runId));
 
   return rows.map(row => ({
     id: row.subjects.id,
@@ -3936,6 +3990,19 @@ async function _listBrandProfiles(search?: string) {
     mentionSentimentConfidence: row.brand_observations?.mentionSentimentConfidence ?? null,
     brandUrl: row.subjects.websiteUrl ?? null,
     dataConfidenceLevel: row.observations?.dataConfidenceLevel ?? null,
+    /**
+     * The brand's ACTUAL captured audience size (S6).
+     *
+     * `tiktokFollowerCount` above is the only follower number this shape used
+     * to carry, and it is NULL on every brand in the corpus — brand TikTok
+     * capture has never produced one. The number that DOES exist lives on the
+     * observation, written by the Instagram channel leg (e.g. 8.6M for
+     * gymshark). Shipping only the TikTok field made every brand look like it
+     * had no audience at all.
+     */
+    followerCount: row.observations?.followerCount ?? null,
+    /** clean | degraded | thin — see captureHealthByRunId. NULL = unknown. */
+    captureHealth: row.observations?.runId ? health.get(row.observations.runId) ?? null : null,
   }));
 }
 
@@ -4234,6 +4301,41 @@ export async function listMatchRecords() {
     radarWarnings: warningMap.get(row.match.id) ?? [],
   }));
 }
+
+/**
+ * ─── WHICH PAIRS HAVE BEEN SCORED, AND WHEN (S6, selection surface) ─────────
+ *
+ * The selection surface marks a pairing that already has a match so a re-run is
+ * a DELIBERATE act rather than a silent duplicate — re-running is allowed by
+ * ruling, it just must not be invisible.
+ *
+ * WHY NOT REUSE `listMatchRecords`: that reader is `limit(50)` ordered by
+ * created_at desc, and it returns every column of match_scores plus warnings.
+ * Both are wrong here. The limit would make the mark LIE at scale — once the
+ * corpus passes 50 matches, an older pair would render as "never matched",
+ * which is worse than showing nothing because it reads as a fact. And the wide
+ * row is pure waste for a lookup that needs four values.
+ *
+ * So: four narrow columns, no limit, newest-first so a caller keeping the first
+ * hit per pair gets the LATEST score. At 8 matches this is a few hundred bytes;
+ * at 75 creators x 30 brands fully matched it is still well under a megabyte,
+ * because nothing wide is selected.
+ */
+async function _listMatchPairs() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select({
+    creatorSubjectId: matchScores.creatorSubjectId,
+    brandSubjectId: matchScores.brandSubjectId,
+    fitScore: matchScores.fitScore,
+    fitStatus: matchScores.fitStatus,
+    createdAt: matchScores.createdAt,
+  })
+    .from(matchScores)
+    .orderBy(desc(matchScores.createdAt));
+}
+
+export const listMatchPairs = metered("listMatchPairs", _listMatchPairs);
 
 export async function deleteMatchRecord(matchId: string) {
   const db = await getDb();
