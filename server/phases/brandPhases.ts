@@ -97,6 +97,21 @@ export interface BrandCaptureOutput {
    * pass anyway.
    */
   searchName?: string;
+  /**
+   * WHAT A PERSON TYPES, as opposed to what the business is registered as.
+   *
+   * One derived name cannot serve both kinds of source. Yelp and Google Places
+   * resolve REGISTERED ENTITIES, so "Patagonia Outdoor Clothing & Gear" is
+   * exactly right for them. TikTok mention search and the web fallbacks match
+   * what people write, and nobody writes that — they write "patagonia". The
+   * earlier "Nike.com" -> "Nike" reduction was one symptom of this same split
+   * being missing; see brandSearchToken for the rule.
+   *
+   * Optional for the same reason `searchName` is: a campaign banked before this
+   * field existed still assembles, and the reader falls back to `searchName`,
+   * which is what those searches used to receive.
+   */
+  searchToken?: string;
   /** Null when the subject was a NAME rather than a URL — `isUrl` in the monolith. */
   websiteUrl: string | null;
   description: string;
@@ -259,6 +274,87 @@ export function brandSearchName(brandNameOrUrl: string): string {
  *   3. the hostname stem, which is what it used to be
  * so this can only ever ADD a name where there was none.
  */
+/**
+ * An entity name + the submitted URL → the SEARCH TOKEN a person would type.
+ *
+ * ─── Why the domain is the arbiter ──────────────────────────────────────────
+ * The obvious rule — "take the first word" — is a disaster, and it is worth
+ * stating exactly how, because it looks reasonable until you try it on real
+ * subjects. It turns "Blu Dental" into "Blu", "Reset Wellness Club" into
+ * "Reset", and "Senso Cafe & Bites" into "Senso": three local businesses whose
+ * whole name IS the identifier, reduced to words that identify nothing. For a
+ * global brand the first word usually is the name; for a small business it
+ * usually is not, and no property of the STRING tells you which case you are
+ * in.
+ *
+ * The submitted URL does. It is operator-supplied ground truth about which
+ * word actually identifies the business, so a name is only ever shortened when
+ * the domain independently agrees. `patagonia.ca` licenses "Patagonia
+ * Outdoor Clothing & Gear" -> "Patagonia". `bludental.ca` refuses to license
+ * "Blu Dental" -> "Blu", because the domain names BOTH words. That refusal is
+ * the load-bearing part of this function; the shortening is the easy part.
+ *
+ * The rules, in order:
+ *   1. a WORD matches the registrable label   -> that word, human spelling
+ *   2. the first N words concatenated match it -> those N words
+ *   3. no confident match                      -> the entity name, unchanged
+ *   4. no entity name at all                   -> the label (prior behaviour)
+ *
+ * Rule 1 also subsumes the standalone "Nike.com" -> "Nike" reduction, since a
+ * word is TLD-stripped before comparison. That reduction stays where it is on
+ * the entity name as well: moving it here would change what Yelp and Places
+ * receive for Nike, and this split is not allowed to change what any source
+ * gets beyond the routing itself.
+ */
+export function brandSearchToken(entityName: string | undefined, brandNameOrUrl: string): string {
+  const label = norm(brandSearchName(brandNameOrUrl));
+  const entity = (entityName ?? "").trim();
+  // Rule 4: nothing to reduce. The label is what the searches used to get.
+  if (!entity || !label) return entity || brandSearchName(brandNameOrUrl);
+
+  const words = entity.split(/\s+/).filter(Boolean);
+
+  // Rule 1 — one word IS the label.
+  for (const w of words) {
+    if (norm(stripTld(w)) === label) return stripTld(w);
+  }
+
+  /*
+    Rule 2 — the SHORTEST leading run of words that accounts for the label.
+
+    Ascending, and the direction is the whole correctness argument. A run that
+    is merely a PREFIX OF the label means the domain names more than we have
+    read so far, so we must keep adding words: `bludental` vs "Blu" would
+    otherwise return "Blu" on the first iteration, which is precisely the
+    reduction the domain is here to refuse. Only two things license a stop:
+    the run EQUALS the label ("Blu Dental" -> bludental), or the run has
+    OVERRUN it ("Senso Cafe" -> sensocafe, with "& Bites" left as descriptor).
+  */
+  for (let n = 1; n <= words.length; n++) {
+    const run = words.slice(0, n);
+    const joined = norm(run.join(""));
+    if (!joined) continue;
+    if (joined === label || joined.startsWith(label)) return run.join(" ");
+  }
+
+  // Rule 3 — the domain does not vouch for any reduction, so none is made.
+  return entity;
+}
+
+/** Comparison form only: lowercase, accents folded, non-alphanumerics dropped. */
+function norm(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** "Nike.com" -> "Nike". Leaves a word that merely contains a dot alone. */
+function stripTld(w: string): string {
+  if (!/^[^\s]+\.[a-z]{2,3}$/i.test(w)) return w;
+  const labels = w.split(".").filter(Boolean);
+  while (labels.length > 1 && labels[labels.length - 1]!.length <= 3) labels.pop();
+  return labels[labels.length - 1] ?? w;
+}
+
 export function makeBrandCapturePhase(
   brandNameOrUrl: string,
   operatorBrandName?: string,
@@ -278,6 +374,7 @@ export function makeBrandCapturePhase(
       const base: BrandCaptureOutput = {
         brandName,
         searchName: operatorBrandName?.trim() || brandSearchName(input.subject),
+        searchToken: brandSearchToken(operatorBrandName?.trim(), input.subject),
         websiteUrl: isUrl ? input.subject : null,
         description: "",
         snippets: [],
@@ -309,6 +406,10 @@ export function makeBrandCapturePhase(
             crawledPages: crawl.crawledPages,
             // Operator name still wins; the crawl only beats the hostname stem.
             searchName: operatorBrandName?.trim() || crawl.siteName || base.searchName,
+            searchToken: brandSearchToken(
+              operatorBrandName?.trim() || crawl.siteName || base.searchName,
+              input.subject,
+            ),
           },
           attempts: [{ tool: "brand:website_crawl", outcome: "complete", durationMs: Date.now() - started }],
         };
@@ -348,6 +449,16 @@ export function makeBrandAugmentPhase(
        * searches used to receive, so a resumed old run behaves as it did.
        */
       const searchName = capture.searchName ?? capture.brandName;
+      /*
+        TWO FORMS, ROUTED BY WHAT THE SOURCE RESOLVES.
+        `searchName` is the registered ENTITY: Yelp and Google Places look up
+        businesses, and "Patagonia Outdoor Clothing & Gear" is what they hold.
+        `searchToken` is what a PERSON TYPES: TikTok mention search and the web
+        fallbacks match written language, where that title appears nowhere and
+        "Patagonia" appears constantly. Older banked captures have no token, so
+        they fall back to the entity name — exactly what they used to receive.
+      */
+      const searchToken = capture.searchToken ?? searchName;
 
       // CONSTRAINT 1 + 2: extend what capture banked; never rebuild it.
       const snippets = [...capture.snippets];
@@ -360,7 +471,7 @@ export function makeBrandAugmentPhase(
       if (!isUrl || capture.semanticWordCount < 500) {
         googleFallbackRan = true;
         try {
-          const res = await searchWeb(`${searchName} company about mission values`) as unknown as Record<string, unknown>;
+          const res = await searchWeb(`${searchToken} company about mission values`) as unknown as Record<string, unknown>;
           for (const result of ((res?.results as unknown[]) ?? []).slice(0, 3)) {
             const item = result as Record<string, unknown>;
             const title = (item?.title as string) ?? "";
@@ -379,7 +490,7 @@ export function makeBrandAugmentPhase(
       if (!isUrl || (snippets.length < 3 && capture.semanticWordCount < 300)) {
         youtubeFallbackRan = true;
         try {
-          const yt = await searchYouTube(`${searchName} brand about`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
+          const yt = await searchYouTube(`${searchToken} brand about`, { hl: "en", gl: "US" }) as unknown as Record<string, unknown>;
           for (const item of ((yt?.contents as unknown[]) ?? []).slice(0, 5)) {
             const video = (item as Record<string, unknown>)?.video as Record<string, unknown>;
             if (!video) continue;
@@ -414,7 +525,7 @@ export function makeBrandAugmentPhase(
       // ── Perception B: mentions. Becomes an APPENDED block (constraint 4). ──
       let mentions: AudienceMentionData | null = null;
       try {
-        mentions = await fetchBrandMentionData(searchName);
+        mentions = await fetchBrandMentionData(searchToken);
       } catch (err) {
         console.warn("[brandPhases] Mention fetch failed (non-fatal):", err);
       }
