@@ -43,6 +43,27 @@ export interface InstagramScrapedProfile {
   posts: InstagramPostData[];
   source: string;
   confidence: "high" | "medium" | "low";
+  /**
+   * Set when base fields came from the RENDERED PAGE rather than a structured
+   * payload. Instagram displays "268M" for 268,937,250, so these values carry
+   * the page's display precision (~+/-0.5%), not the account's exact figures.
+   * The raw strings are kept beside them because the string is the evidence:
+   * a number can be re-derived from "268M", but "268M" cannot be recovered
+   * from 268000000.
+   */
+  baseFieldRead?: RenderedBaseFields;
+}
+
+/** What a rendered-page read produced, string and parse side by side. */
+export interface RenderedBaseFields {
+  strategy: string;
+  precision: "display";
+  followersRaw: string | null;
+  followingRaw: string | null;
+  postsRaw: string | null;
+  followers: number | null;
+  following: number | null;
+  posts: number | null;
 }
 
 // ─── Empty Defaults ───────────────────────────────────────────────────────────

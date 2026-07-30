@@ -16,7 +16,7 @@
 
 import { fetchHtml, detectSilentFailure, requestGovernor, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession, retireContext } from "../browserClient";
-import type { InstagramProfileData, InstagramPostData, InstagramScrapedProfile } from "./types";
+import type { InstagramProfileData, InstagramPostData, InstagramScrapedProfile, RenderedBaseFields } from "./types";
 import { emptyProfile } from "./types";
 
 // ─── Path A: Playwright Mobile Web ───────────────────────────────────────────
@@ -525,6 +525,195 @@ async function scrapeViaPlaywrightDesktop(handle: string): Promise<InstagramScra
  * so removing the probe changes what is GATHERED not at all — only how long it
  * takes to start gathering.
  */
+// ─── Leg C: profile_rendered_text ────────────────────────────────────────────
+//
+// THE BASE FIELDS ARE ON THE PAGE, AND NOTHING WAS READING THEM.
+//
+// Instagram renders followers, following, display name and bio as ordinary
+// text to a clean anonymous context. The two Playwright legs above load that
+// exact page and then look only at GraphQL/XHR payloads and og: meta — so a
+// creator whose GraphQL nodes carry no counts banks follower_count 0, and 0
+// becomes NULL at persist. Three creators in the corpus read "no followers"
+// for a page that says "2M followers" in plain text.
+//
+// WHY NOT A SCREENSHOT AND A VISION MODEL. That was the proposal this leg
+// replaced, and it was measured: ~$0.00035 and ~7s per profile to return the
+// SAME displayed strings this reads for free — "268M", "2M", "194", "626" —
+// because a vision model reading a rendered page and innerText of the same
+// rendered page are reading the identical characters. It also would not have
+// helped with the posts count, which is not drawn on the anonymous mobile
+// header at all: a screenshot cannot recover what the page never renders.
+//
+// WHEN VISION WOULD EARN ITS COST: if Instagram ever paints these counts into
+// a canvas, an <img>, or otherwise removes them from the text layer, this leg
+// starts returning `no_counts` on a page that visibly HAS them — and at that
+// point the screenshot leg becomes the only way to read them and is worth
+// every cent. `no_counts` exists partly to make that day obvious.
+//
+// PRECISION IS DISPLAY PRECISION. "268M" is 268,937,250. Roughly +/-0.5%,
+// which is adequate for archetype and audience reasoning and wrong for
+// anything implying exactness. The raw string travels with the number so a
+// reader can always see what was actually on the page.
+
+export type BaseFieldOutcome = "success" | "no_render" | "no_counts" | "blocked";
+
+export interface BaseFieldAttempt {
+  strategy: string;
+  outcome: BaseFieldOutcome;
+  durationMs: number;
+  fields: RenderedBaseFields | null;
+  detail?: string;
+}
+
+/** Budget for the rendered read. One navigation plus a settle wait. */
+const RENDERED_TEXT_BUDGET_MS = 35_000;
+/** How long the header needs to paint after domcontentloaded. */
+const RENDER_SETTLE_MS = 4_000;
+
+/**
+ * Parse the profile header out of rendered text.
+ *
+ * The header is a flat run of lines — handle, count, label, count, label — so
+ * the count is the line BEFORE its label. Matching that way rather than with a
+ * single greedy regex keeps a bio containing the word "followers" from being
+ * read as a count.
+ *
+ * Exported for the harness: this is the whole extraction and it is worth
+ * pinning directly rather than inferring it from a live page.
+ */
+export function parseRenderedHeader(innerText: string): {
+  followersRaw: string | null; followingRaw: string | null;
+} {
+  const lines = innerText.split("\n").map(l => l.trim());
+  const COUNT = /^[\d.,]+\s*[KMB]?$/i;
+  let followersRaw: string | null = null;
+  let followingRaw: string | null = null;
+  for (let i = 1; i < lines.length; i++) {
+    const label = lines[i]!.toLowerCase();
+    const prev = lines[i - 1]!;
+    if (!COUNT.test(prev)) continue;
+    if (label === "followers" && followersRaw === null) followersRaw = prev;
+    if (label === "following" && followingRaw === null) followingRaw = prev;
+  }
+  return { followersRaw, followingRaw };
+}
+
+/** The posts count from og:description — the render omits it, the tag has it. */
+export function parsePostsFromMetaDescription(description: string): string | null {
+  return (description.match(/([\d,.]+\s*[KkMmBb]?)\s*Posts/i) || [])[1]?.trim() ?? null;
+}
+
+/**
+ * Read base fields off the rendered profile page. Individually instrumented
+ * and individually budgeted, per the transcriptStrategies pattern.
+ *
+ * NOTHING IS PERSISTED beyond the parsed values: no screenshot is taken, no
+ * image exists at any point, and the page is discarded with its context.
+ */
+export async function attemptRenderedTextBaseFields(handle: string): Promise<BaseFieldAttempt> {
+  const started = Date.now();
+  const strategy = "profile_rendered_text";
+  const url = `https://www.instagram.com/${handle}/`;
+  let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  let navStatus: number | undefined;
+
+  const record = (outcome: BaseFieldOutcome, fields: RenderedBaseFields | null, detail?: string): BaseFieldAttempt => {
+    const durationMs = Date.now() - started;
+    recordScrapeEvent({
+      platform: "instagram",
+      scrapeMethod: "instagram_playwright",
+      urlRequested: `${url}#base=${strategy}:${outcome}`,
+      httpStatus: navStatus,
+      silentFailureDetected: outcome === "no_counts",
+      failureReason: outcome === "success" ? undefined : `base ${strategy}: ${outcome}${detail ? ` — ${detail}` : ""}`,
+      durationMs,
+    });
+    return { strategy, outcome, durationMs, fields, detail };
+  };
+
+  try {
+    await requestGovernor("instagram");
+    ctx = await getContext("mobile-ios", 1);
+    const { page } = ctx;
+    const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: RENDERED_TEXT_BUDGET_MS });
+    navStatus = resp?.status();
+    if (navStatus && navStatus >= 400) {
+      return record("blocked", null, `HTTP ${navStatus}`);
+    }
+    await page.waitForTimeout(RENDER_SETTLE_MS);
+
+    // String-form evaluate deliberately: a function argument is instrumented by
+    // the bundler and arrives in the page as `__name is not defined`.
+    const innerText = (await page.evaluate("document.body.innerText")) as string | null;
+    if (!innerText || innerText.length < 20) {
+      return record("no_render", null, `body text ${innerText?.length ?? 0} chars`);
+    }
+
+    const { followersRaw, followingRaw } = parseRenderedHeader(innerText);
+    const description = (await page.evaluate(
+      "(document.querySelector('meta[property=\"og:description\"]')||{}).content || ''",
+    )) as string;
+    const postsRaw = parsePostsFromMetaDescription(description || "");
+
+    if (followersRaw === null && followingRaw === null) {
+      // The page rendered and the header did not. This is a SHAPE change, not
+      // a block, and it is the outcome that matters for future drift.
+      return record("no_counts", null, `rendered ${innerText.length} chars, no follower/following pair`);
+    }
+
+    const fields: RenderedBaseFields = {
+      strategy,
+      precision: "display",
+      followersRaw, followingRaw, postsRaw,
+      followers: followersRaw === null ? null : parseHumanCount(followersRaw),
+      following: followingRaw === null ? null : parseHumanCount(followingRaw),
+      posts: postsRaw === null ? null : parseHumanCount(postsRaw),
+    };
+    console.log(
+      `[instagramScraper] @${handle}: ${strategy} read followers="${followersRaw}"->${fields.followers}, ` +
+      `following="${followingRaw}"->${fields.following}, posts="${postsRaw}"->${fields.posts} (display precision)`,
+    );
+    return record("success", fields);
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    return record(/timeout|timed out/i.test(msg) ? "no_render" : "blocked", null, msg.slice(0, 140));
+  } finally {
+    if (ctx) await retireContext(ctx.context).catch(() => {});
+  }
+}
+
+/**
+ * Fill base fields from the rendered page when the structured legs did not.
+ *
+ * PLACED LAST DELIBERATELY. The GraphQL/XHR legs are cheaper when they work
+ * and they carry EXACT counts; this one costs a second navigation and returns
+ * display precision. It runs only when the cheap legs left the counts at zero,
+ * so a healthy capture never pays for it and never loses precision to it.
+ */
+async function supplementBaseFields(
+  handle: string,
+  result: InstagramScrapedProfile,
+): Promise<InstagramScrapedProfile> {
+  if (result.profile.follower_count > 0) return result;
+
+  console.log(`[instagramScraper] @${handle}: base fields absent after structured legs — trying profile_rendered_text`);
+  const attempt = await attemptRenderedTextBaseFields(handle);
+  if (attempt.outcome !== "success" || !attempt.fields) {
+    console.warn(`[instagramScraper] @${handle}: profile_rendered_text ${attempt.outcome}${attempt.detail ? ` — ${attempt.detail}` : ""}`);
+    return result;
+  }
+
+  const f = attempt.fields;
+  // Only FILL, never overwrite: a structured read that produced a real number
+  // is exact and outranks a displayed one.
+  if (result.profile.follower_count <= 0 && f.followers != null) result.profile.follower_count = f.followers;
+  if (result.profile.following_count <= 0 && f.following != null) result.profile.following_count = f.following;
+  if (result.profile.media_count <= 0 && f.posts != null) result.profile.media_count = f.posts;
+  result.baseFieldRead = f;
+  result.source = `${result.source}+${f.strategy}`;
+  return result;
+}
+
 export async function scrapeInstagramProfile(handle: string): Promise<InstagramScrapedProfile> {
   // ── Phase 1: Playwright mobile — the primary path ──
   console.log(`[instagramScraper] @${handle}: Phase 1 — Playwright for profile and posts`);
@@ -542,7 +731,7 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
         if (supplementedPosts.length > 0) {
           playwrightResult.posts = supplementedPosts;
           playwrightResult.source = `${playwrightResult.source}+oembed-posts`;
-          return playwrightResult;
+          return supplementBaseFields(handle, playwrightResult);
         }
 
         // If still 0 posts, try desktop Playwright before giving up
@@ -553,10 +742,10 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
           playwrightResult.posts = desktopForPosts.posts;
           playwrightResult.source = `${playwrightResult.source}+desktop-posts`;
           playwrightResult.confidence = desktopForPosts.posts.length >= 6 ? "high" : "medium";
-          return playwrightResult;
+          return supplementBaseFields(handle, playwrightResult);
         }
       }
-      return playwrightResult;
+      return supplementBaseFields(handle, playwrightResult);
     }
   }
 
@@ -564,7 +753,7 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
   console.log(`[instagramScraper] @${handle}: Phase 2 — trying desktop Playwright`);
   const desktopResult = await scrapeViaPlaywrightDesktop(handle);
   if (desktopResult && (desktopResult.posts.length > 0 || desktopResult.profile.follower_count > 0)) {
-    return desktopResult;
+    return supplementBaseFields(handle, desktopResult);
   }
 
   // ── Last resort: oEmbed metadata ──
