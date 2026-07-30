@@ -67,6 +67,34 @@ export interface BrandReviewFields {
    * banked review fields and cannot be recomputed differently downstream.
    */
   trajectory: ReviewTrajectory;
+  /**
+   * WHICH LISTING ANSWERED. Recorded, NOT read by the model.
+   *
+   * Google Places is queried by text or by a submitted Maps URL, and for a
+   * chain either can resolve to A location rather than THE location. The old
+   * corpus recorded Glossier at 247, 248, 40, 0 and 248 reviews across runs
+   * and nobody could say which listing produced which number, because the
+   * place's own identity was fetched and then dropped here. This keeps it.
+   *
+   * It does NOT fix resolution — it makes a wrong resolution visible.
+   */
+  resolution: ReviewResolution;
+}
+
+/** What each review platform actually resolved to, for verification. */
+export interface ReviewResolution {
+  google: ResolvedListing | null;
+  yelp: ResolvedListing | null;
+}
+export interface ResolvedListing {
+  placeName: string | null;
+  address: string | null;
+  listingUrl: string | null;
+  /** The headline count the listing reports. */
+  reviewCount: number | null;
+  rating: number | null;
+  /** How many review TEXTS we actually ingested from it. */
+  ingested: number;
 }
 
 /**
@@ -173,6 +201,22 @@ export function selectBrandReviewFields(result: AudiencePerceptionResult): Brand
     overallRating: result.overallRating,
     totalReviews: result.totalReviews,
     trajectory: computeReviewTrajectory(result.sources.flatMap(s => s.reviews)),
+    resolution: {
+      google: describeListing(googleSource),
+      yelp: describeListing(yelpSource),
+    },
+  };
+}
+
+function describeListing(src: ReviewSource | null): ResolvedListing | null {
+  if (!src) return null;
+  return {
+    placeName: (src as { placeName?: string }).placeName || null,
+    address: (src as { address?: string }).address || null,
+    listingUrl: src.listingUrl || null,
+    reviewCount: src.reviewCount ?? null,
+    rating: src.rating ?? null,
+    ingested: src.reviews?.length ?? 0,
   };
 }
 
@@ -181,6 +225,7 @@ export const EMPTY_BRAND_REVIEW_FIELDS: BrandReviewFields = {
   yelpRating: null, yelpReviewCount: null, yelpReviewExcerpts: "",
   googleRating: null, googleReviewCount: null, googleReviewExcerpts: "",
   combinedReviewText: "", overallRating: null, totalReviews: 0,
+  resolution: { google: null, yelp: null },
   trajectory: {
     datedReviews: 0, totalIngested: 0, recentCount: 0, olderCount: 0,
     recentAvgRating: null, olderAvgRating: null, ratingDelta: null,

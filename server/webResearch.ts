@@ -2681,6 +2681,28 @@ function extractSemanticLinks(html: string, baseUrl: string): string[] {
  * Follows internal links to About, Story, Blog, Mission pages.
  */
 /**
+ * The named HTML entities that actually appear in page titles, plus numeric
+ * escapes. Deliberately small: this decodes a NAME, not a document — the full
+ * entity table would be dead weight and `extractTextFromHtml` already covers
+ * body text with the same short list.
+ */
+export function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#0*38;/g, "&")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * A page's own name for itself → the brand name a customer would type.
  *
  * `og:site_name` is preferred because it is the only one of the three that
@@ -2694,7 +2716,13 @@ export function siteNameFromHtml(html: string): string | null {
   const ogSite = html.match(/<meta\s+property="og:site_name"\s+content="([^"]+)"/i)?.[1];
   const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1];
   const title = html.match(/<title>([^<]+)<\/title>/i)?.[1];
-  const raw = (ogSite || ogTitle || title || "").trim();
+  /*
+    ENTITIES ARE DECODED FIRST. A site's own name for itself is HTML, and
+    Patagonia's og:site_name is "Patagonia Outdoor Clothing &amp; Gear" — which
+    shipped verbatim into all four TikTok mention queries and the Yelp query.
+    An ampersand in a brand name is ordinary; "&amp;" in a search term is not.
+  */
+  const raw = decodeHtmlEntities((ogSite || ogTitle || title || "").trim());
   if (!raw) return null;
   let name = raw.split(/\s+[|–—·:]\s+/)[0]!.trim();
 

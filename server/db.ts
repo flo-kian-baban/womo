@@ -3743,6 +3743,16 @@ async function _getBrandProfileById(subjectId: string, opts?: { observationId?: 
      * here, a stored number is simply surfaced. Null when a run predates the
      * trajectory or discarded its research.
      */
+    /**
+     * WHICH LISTING ANSWERED (womo review-resolution, 2026-07-29). Surfaced so
+     * an analyst can check a 40-review 3.0-star result against a 248-review
+     * 4.6-star one instead of guessing which Glossier answered. Recorded, never
+     * modelled. Null for observations written before it was captured.
+     */
+    reviewResolution: (() => {
+      const meta = (row.observations.persistenceStatus as Record<string, unknown> | null)?._meta;
+      return (meta as { reviewResolution?: unknown } | undefined)?.reviewResolution ?? null;
+    })(),
     reviewsIngested: (() => {
       const meta = (row.observations.persistenceStatus as Record<string, unknown> | null)?._meta;
       const traj = (meta as { reviewTrajectory?: { totalIngested?: unknown } } | undefined)?.reviewTrajectory;

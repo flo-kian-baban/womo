@@ -843,6 +843,7 @@ export function buildBrandPersistParams(args: {
     // Recorded, not read: travels to persistence_status._meta, never to the
     // evidence string. See computeReviewTrajectory.
     reviewTrajectory: researchDiscarded ? undefined : r.trajectory,
+    reviewResolution: researchDiscarded ? undefined : r.resolution,
     dataConfidenceLevel: researchDiscarded
       ? undefined
       : brandDataConfidence(capture.semanticWordCount, augment.perception.totalReviews),

@@ -712,6 +712,30 @@ export default function BrandReport({
               <TrustLine label="Evidence reaching the model" tone={CHIP_NEUTRAL}
                 value={`${d.fields.counts.contentItems} content item${d.fields.counts.contentItems === 1 ? "" : "s"}`}
                 detail={`${d.fields.counts.keywords} keywords · ${d.fields.counts.contentThemes} themes · ${d.fields.counts.decodedSignals} decoded signals`} />
+              {/*
+                WHICH LISTING THE REVIEWS CAME FROM. Google Places resolves a
+                chain query to A location, not necessarily THE location, and the
+                same brand has recorded 247, 248, 40, 0 and 248 reviews across
+                runs with no way to tell which listing answered. Printing the
+                place beside the count does not fix resolution — it makes a
+                wrong resolution visible, which is the whole of this line's job.
+              */}
+              {(() => {
+                const g = (profile.reviewResolution as { google?: {
+                  placeName?: string | null; address?: string | null;
+                  reviewCount?: number | null; rating?: number | null; ingested?: number;
+                } | null } | null)?.google;
+                if (!g) return null;
+                const counted = g.reviewCount != null
+                  ? `${g.ingested ?? 0} of ${g.reviewCount.toLocaleString()} reviews read`
+                  : `${g.ingested ?? 0} reviews read`;
+                return (
+                  <TrustLine label="Reviews resolved to" tone={CHIP_NEUTRAL}
+                    value={g.placeName || "an unnamed Google listing"}
+                    detail={[g.address, counted, g.rating != null ? `${g.rating}★ listed` : null]
+                      .filter(Boolean).join(" · ")} />
+                );
+              })()}
             </div>
 
             {(d.scrapes.consequences.length > 0 || d.llm.failed > 0 || !d.exactRunLinkage

@@ -866,6 +866,8 @@ export async function persistBrandToV2(params: {
    * Jason's question 20 decides whether it ever should.
    */
   reviewTrajectory?: unknown;
+  /** Which listing answered — see ReviewResolution. Recorded, never modelled. */
+  reviewResolution?: unknown;
 }): Promise<PersistResult> {
   try {
     const { brandName, brandUrl, category, extracted, weights, reviewFields, tiktokMetadata, instagramMetadata, mentionFields, symbolFields } = params;
@@ -1178,8 +1180,14 @@ export async function persistBrandToV2(params: {
     // its component loop). The review trajectory rides there because it is a
     // FACT ABOUT THE EVIDENCE, not an enrichment outcome — and because putting
     // it anywhere the model reads would be a ruling nobody has made.
-    const brandPersistenceWithMeta = params.reviewTrajectory
-      ? { ...persistence, _meta: { reviewTrajectory: params.reviewTrajectory } }
+    const reviewMeta = {
+      ...(params.reviewTrajectory ? { reviewTrajectory: params.reviewTrajectory } : {}),
+      // Which listing answered. Same reasoning as the trajectory: a FACT ABOUT
+      // THE EVIDENCE, recorded beside it, read by no model.
+      ...(params.reviewResolution ? { reviewResolution: params.reviewResolution } : {}),
+    };
+    const brandPersistenceWithMeta = Object.keys(reviewMeta).length > 0
+      ? { ...persistence, _meta: reviewMeta }
       : persistence;
     try {
       await updateObservationPersistenceStatus(observationId, brandPersistenceWithMeta);
