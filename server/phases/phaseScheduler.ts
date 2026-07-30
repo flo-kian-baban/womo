@@ -166,7 +166,24 @@ export function decideRetry(args: {
    * omitted delayMs. It is now the documented intent.)
    */
   if (failureClass === "structural") {
-    return { action: "park", reason: "structural — retrying a changed/removed path is futile; parked for a human" };
+    /*
+      SAY WHAT FAILED, NOT WHO IS AT FAULT.
+      This used to read "retrying a changed/removed path is futile", which
+      asserts OUR PARSER CHANGED. It was the first line an operator saw on
+      jamescharles (39.3M followers), gordonramsayofficial (40.8M) and markrober
+      (3.9M) — three live public accounts refused while the TikTok scrapers were
+      byte-identical to their last 85%-success commit. Nothing of ours had
+      changed; a capture strategy had been refused.
+
+      What is actually known at this point is narrow and worth stating exactly:
+      a strategy failed in a way a timer will not fix. Whether the SUBJECT is
+      unavailable is a different claim, it requires a page that genuinely
+      renders nothing, and it is not established here — so it is not said here.
+    */
+    return {
+      action: "park",
+      reason: "capture strategy failed and a retry will not clear it — needs a look, not a wait",
+    };
   }
 
   const maxAttempts = policy?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;

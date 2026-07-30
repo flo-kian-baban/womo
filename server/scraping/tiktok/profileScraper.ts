@@ -448,6 +448,8 @@ interface FetchResult {
   xhrUserDetail?: Record<string, unknown>;
   /** Present when video capture ran (retryEmptyCapture callers). */
   capture?: ProfileCaptureAssessment;
+  /** Base fields from a leg that reads them directly. See profile_embed_json. */
+  baseFields?: TikTokBaseFields | null;
 }
 
 /** Record one profile_xhr_scroll attempt event (see module-header contract). */
@@ -489,6 +491,22 @@ async function fetchProfileHtml(
   handle: string,
   opts?: { retryEmptyCapture?: boolean },
 ): Promise<FetchResult> {
+  /*
+    ── Leg 1: profile_embed_json ────────────────────────────────────────────
+    FIRST because it is the only source that returned base fields for every
+    account tested while the other two legs were being refused: 3/3 on the
+    handles the pipeline had just parked, in the same minute they 403'd here.
+    It hits a DIFFERENT endpoint from the other two (which both target
+    tiktok.com/@handle and therefore share one refusal), so it is a leg rather
+    than a third attempt at the same door.
+
+    It supplies base fields ONLY — no video list, no secUid — so it never
+    short-circuits the rest of the chain. Phases 1 and 2 still run for the pool
+    and for the exact counts they carry when they work.
+  */
+  const embed = await attemptProfileEmbedJson(handle);
+  let embedFields = embed.outcome === "success" ? embed.fields : null;
+
   // ── Phase 1: Fast HTTP for user info (bio, stats, secUid) ──
   let httpHtml: string | null = null;
   let httpSource = "";
@@ -548,6 +566,7 @@ async function fetchProfileHtml(
       xhrVideoItems: attempt.result.xhrVideoItems,
       xhrUserDetail: attempt.result.xhrUserDetail,
       capture,
+      baseFields: embedFields,
     };
   }
 
@@ -557,7 +576,32 @@ async function fetchProfileHtml(
   // (The Google-webcache last resort that used to follow was removed — see
   // module header: 3/12 lifetime, 429-walled, webcache retired by Google.)
   if (httpHtml) {
-    return { html: httpHtml, source: httpSource, capture };
+    return { html: httpHtml, source: httpSource, capture, baseFields: embedFields };
+  }
+
+  /*
+    THE EMBED LEG IS A FLOOR. If both page-based legs were refused but the embed
+    answered, we have a real profile — followers, following, hearts, bio — and
+    throwing here would discard it and park a live account as unreachable, which
+    is exactly the failure this leg was added to end. No html means no video
+    pool, and the gate will still refuse a campaign with no content; but it will
+    refuse holding the base fields rather than holding nothing.
+  */
+  /*
+    LAST LEG. Only reached when the embed and both page legs produced nothing —
+    at which point one evaluate() on a page we were going to load anyway is the
+    difference between a base profile and none.
+  */
+  if (!embedFields) {
+    const rendered = await attemptProfileRenderedText(handle);
+    if (rendered.outcome === "success") embedFields = rendered.fields;
+  }
+
+  if (embedFields) {
+    console.warn(
+      `[profileScraper] @${handle}: page legs refused — continuing on profile_embed_json base fields alone`,
+    );
+    return { html: "", source: "profile_embed_json", capture, baseFields: embedFields };
   }
 
   throw new Error(`[profileScraper] All scrape paths failed for @${handle}`);
@@ -721,6 +765,26 @@ export async function scrapeTikTokProfile(handle: string): Promise<{
     };
   } else {
     userInfo = extractUserInfoFromRegex(html, handle);
+  }
+
+  /*
+    MERGE, NEVER OVERWRITE. The XHR and rehydration reads are EXACT; the embed
+    is a separate fetch that may be seconds stale. So the embed only fills a
+    field the structured reads left at zero — which, when they are being
+    refused, is all of them.
+  */
+  const bf = fetchResult.baseFields;
+  if (bf) {
+    const st = userInfo.userInfo.stats;
+    const us = userInfo.userInfo.user;
+    if (!(st.followerCount > 0) && bf.followerCount != null) st.followerCount = bf.followerCount;
+    if (!(st.followingCount > 0) && bf.followingCount != null) st.followingCount = bf.followingCount;
+    if (!(st.heartCount > 0) && bf.heartCount != null) st.heartCount = bf.heartCount;
+    if (!(st.videoCount > 0) && bf.videoCount != null) st.videoCount = bf.videoCount;
+    if (!us.signature && bf.signature) us.signature = bf.signature;
+    if (!us.nickname || us.nickname === handle) us.nickname = bf.nickname ?? us.nickname;
+    if (!us.secUid && bf.secUid) us.secUid = bf.secUid;
+    if (bf.verified != null && !us.verified) us.verified = bf.verified;
   }
 
   // ── Post List ──
@@ -895,6 +959,120 @@ export function baseFieldsFromEmbed(html: string): TikTokBaseFields | null {
     verified: verifiedMatch ? verifiedMatch[1] === "true" : null,
     secUid: pick("secUid"),
   };
+}
+
+// ─── Leg: profile_rendered_text ──────────────────────────────────────────────
+//
+// THE FLOOR. Reads base fields out of the rendered page's own text, on a page
+// the browser leg is loading anyway — so it costs one evaluate() and nothing
+// else. Last in the chain deliberately: it yields fewer fields than the embed
+// and none of the exactness of the XHR, and it exists for the case where both
+// of those are refused and the alternative is nothing at all.
+//
+// It reads TEXT, not the JSON containers. That is the point: on 30 July
+// jamescharles rendered a full page with 30 video links and its identity block
+// in innerText at the same moment profile_xhr_scroll was getting 403/39B on the
+// same handle. The render path and the data-fetch paths are refused
+// independently, and text survives a container rename that would break both
+// JSON readers at once.
+//
+// HONEST ABOUT ITS OWN RELIABILITY: on the same run markrober rendered an
+// 81-character shell and yielded nothing. This leg is a floor, not a fix — it
+// reports `blocked` on a shell rather than pretending, and the chain moves on.
+const RENDERED_TEXT_SETTLE_MS = 4_000;
+
+/**
+ * Parse the profile header out of rendered text.
+ *
+ * TikTok renders the counts as `<count>\nFollowing`, `<count>\nFollowers`,
+ * `<count>\nLikes` — the number is the line BEFORE its label, so matching that
+ * way keeps a bio containing the word "followers" from being read as a count.
+ * Exported for the harness: this is the whole extraction.
+ */
+export function parseTikTokRenderedHeader(innerText: string): {
+  followersRaw: string | null; followingRaw: string | null; likesRaw: string | null;
+} {
+  const lines = innerText.split("\n").map(l => l.trim());
+  const COUNT = /^[\d.,]+\s*[KMB]?$/i;
+  let followersRaw: string | null = null, followingRaw: string | null = null, likesRaw: string | null = null;
+  for (let i = 1; i < lines.length; i++) {
+    const label = lines[i]!.toLowerCase();
+    const prev = lines[i - 1]!;
+    if (!COUNT.test(prev)) continue;
+    if (label === "followers" && followersRaw === null) followersRaw = prev;
+    if (label === "following" && followingRaw === null) followingRaw = prev;
+    if (label === "likes" && likesRaw === null) likesRaw = prev;
+  }
+  return { followersRaw, followingRaw, likesRaw };
+}
+
+/** "1.6B" -> 1600000000. Display precision: TikTok rounds what it renders. */
+export function parseDisplayCount(raw: string | null): number | null {
+  if (!raw) return null;
+  const m = raw.replace(/,/g, "").trim().match(/^([\d.]+)\s*([KMB])?$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]!);
+  if (!Number.isFinite(n)) return null;
+  const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] ?? "").toUpperCase()] ?? 1;
+  return Math.round(n * mult);
+}
+
+export async function attemptProfileRenderedText(handle: string): Promise<ProfileLegResult> {
+  const started = Date.now();
+  const leg = "profile_rendered_text";
+  const url = `https://www.tiktok.com/@${handle}`;
+  let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const record = (outcome: ProfileLegOutcome, fields: TikTokBaseFields | null, detail?: string): ProfileLegResult => {
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_playwright",
+      urlRequested: `${url}#profile=${leg}:${outcome}`,
+      silentFailureDetected: outcome === "shape_change",
+      failureReason: outcome === "success" ? undefined : `profile ${leg}: ${outcome}${detail ? ` — ${detail}` : ""}`,
+      durationMs: Date.now() - started,
+    });
+    return { leg, outcome, durationMs: Date.now() - started, fields, detail };
+  };
+
+  try {
+    await requestGovernor("tiktok");
+    ctx = await getContext("desktop-chrome", 1);
+    const resp = await ctx.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const status = resp?.status();
+    if (status && status >= 400) return record("blocked", null, `HTTP ${status}`);
+    await ctx.page.waitForTimeout(RENDERED_TEXT_SETTLE_MS);
+
+    // String-form evaluate: a function argument is instrumented by the bundler
+    // and arrives in the page as `__name is not defined`.
+    const text = (await ctx.page.evaluate("document.body.innerText")) as string | null;
+    if (!text || text.length < 200) {
+      return record("blocked", null, `rendered ${text?.length ?? 0} chars — shell page`);
+    }
+    const { followersRaw, followingRaw, likesRaw } = parseTikTokRenderedHeader(text);
+    if (followersRaw === null && followingRaw === null) {
+      return record("shape_change", null, `rendered ${text.length} chars with no count/label pair`);
+    }
+    const fields: TikTokBaseFields = {
+      uniqueId: handle,
+      nickname: null,
+      signature: null,
+      followerCount: parseDisplayCount(followersRaw),
+      followingCount: parseDisplayCount(followingRaw),
+      heartCount: parseDisplayCount(likesRaw),
+      videoCount: null,
+      verified: null,
+      secUid: null,
+    };
+    console.log(
+      `[profileScraper] @${handle}: ${leg} — followers="${followersRaw}"->${fields.followerCount} ` +
+      `following="${followingRaw}" likes="${likesRaw}" (display precision)`,
+    );
+    return record("success", fields);
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    return record(/timeout|timed out/i.test(msg) ? "blocked" : "blocked", null, msg.slice(0, 140));
+  } finally {
+    if (ctx) await retireContext(ctx.context).catch(() => {});
+  }
 }
 
 export async function attemptProfileEmbedJson(handle: string): Promise<ProfileLegResult> {
