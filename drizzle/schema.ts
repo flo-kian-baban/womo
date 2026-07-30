@@ -739,6 +739,22 @@ export const matchScores = pgTable("match_scores", {
   scoreDegraded: boolean("score_degraded").notNull().default(false),
   degradationReasons: json("degradation_reasons").$type<string[]>(),
 
+  /**
+   * The campaign that produced this match (womo_0014, S6).
+   *
+   * NO FOREIGN KEY, deliberately — the same convention analysisPhaseState.runId
+   * and runInputs.runId already state: run_id is a CORRELATION id, not a
+   * relationship. pipeline_runs is written only at terminal time, so an FK here
+   * would make a match row un-writable before its own run had finished.
+   *
+   * Nullable because the rows written by the synchronous fit.calculate path
+   * predate campaigns and stay valid untouched. A partial unique index
+   * (`ms_run_unique ... WHERE run_id IS NOT NULL`) is what makes the `persist`
+   * phase idempotent: a retried persist claims the same row instead of
+   * appending a second one.
+   */
+  runId: uuid("run_id"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   creatorIdx: index("ms_creator_idx").on(t.creatorSubjectId),
