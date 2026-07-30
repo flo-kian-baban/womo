@@ -293,6 +293,71 @@ export async function getRunInputs(runId: string): Promise<RunInputs | null> {
 }
 
 /**
+ * DELETE ONE CAMPAIGN RECORD. Ledger + operator inputs, and nothing else.
+ *
+ * ─── What this removes ──────────────────────────────────────────────────────
+ *   analysis_phase_state — the campaign itself
+ *   run_inputs           — the operator's submitted locators (womo_0013)
+ *
+ * ─── What it NEVER touches, and why that is safe by construction ────────────
+ * `subjects` and `observations` are not referenced here at all. It is not a
+ * check that could be got wrong: `observations.run_id` is a CORRELATION id
+ * with no foreign key (same convention as the ledger itself), so removing
+ * ledger rows cannot cascade into a profile even by accident. A committed
+ * campaign's profile stays in the library, whole, and profile removal is a
+ * separate action in a separate place — `deleteCreatorProfile` /
+ * `deleteBrandProfile`.
+ *
+ * vnillalondon is the case this exists for: three campaigns, one of which
+ * committed and owns a library profile. An operator wants the two failed
+ * attention rows gone and the profile kept. REFUSING to delete a committed
+ * campaign would leave a permanent unresolvable row, so it is deliberately
+ * allowed — the caller is told `committed` so the UI can say what survives
+ * BEFORE the click rather than after.
+ *
+ * ─── Telemetry is RETAINED, deliberately ────────────────────────────────────
+ * scrape_events / llm_invocations / semantic_documents keep their run_id and
+ * are left alone. That leaves rows whose run_id no longer resolves, which is
+ * already the normal state of this schema — run_id is a correlation id
+ * everywhere, and the brand purge left thousands of such rows on purpose.
+ * They are the failure-taxonomy record: for the four parked TikTok campaigns
+ * the 403/39-byte signature is the ONLY evidence of why they failed, and it is
+ * worth more once the campaign is gone, not less.
+ *
+ * NOTE: `pipeline_runs` carries no run_id column at all, so a campaign cannot
+ * reach it. Nothing to delete there.
+ */
+export async function deleteCampaign(runId: string): Promise<{
+  phaseRowsDeleted: number;
+  runInputsDeleted: number;
+  /** True when this campaign produced a library profile, which SURVIVES. */
+  committed: boolean;
+  subjectId: string | null;
+}> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return withTransaction(async (tx) => {
+    // Read the committed state FIRST, inside the transaction, so what the
+    // caller is told matches what was actually left behind.
+    const obs = await tx.select({ subjectId: observations.subjectId })
+      .from(observations).where(eq(observations.runId, runId)).limit(1);
+
+    const phases = await tx.delete(analysisPhaseState)
+      .where(eq(analysisPhaseState.runId, runId)).returning({ id: analysisPhaseState.id });
+    const inputs = await tx.delete(runInputs)
+      .where(eq(runInputs.runId, runId)).returning({ runId: runInputs.runId });
+
+    return {
+      phaseRowsDeleted: phases.length,
+      runInputsDeleted: inputs.length,
+      committed: obs.length > 0,
+      subjectId: obs[0]?.subjectId ?? null,
+    };
+  });
+}
+
+/**
  * How long a `running` row may go without a heartbeat before it is presumed
  * dead. The longest legitimate phase is transcribe, budgeted at 120s; ten
  * minutes clears that by 5x, so a slow-but-alive phase is never stolen.

@@ -26,6 +26,8 @@ import { Link } from "wouter";
 import { ArrowRight, Inbox } from "lucide-react";
 import { CampaignRow } from "@/components/CampaignRow";
 import { acknowledgedRunIds } from "@/lib/acknowledgements";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   classifyCampaign, staysUntilAcknowledged, GROUP_OF,
   type Campaign, type DisplayState,
@@ -71,6 +73,35 @@ export function CampaignQueue({ campaigns, isLoading, emptyLabel }: CampaignQueu
   const [ackVersion, setAckVersion] = useState(0);
   const acked = acknowledgedRunIds();
   void ackVersion;
+
+  /*
+    DELETE is the OTHER action, and the difference is worth stating where it is
+    wired as well as where it is clicked. Acknowledge is local and reversible
+    in effect — the campaign is still there for everyone else. Delete removes
+    the campaign record for every analyst, permanently, and is the only way to
+    clear a parked campaign whose account is dead: those have no library
+    profile, so there is nothing to delete from the library instead.
+
+    It never removes a profile. A committed campaign's subject and observation
+    are untouched by the mutation and stay in the library; the confirmation
+    says so before the click.
+  */
+  const utils = trpc.useUtils();
+  const del = trpc.creator.deleteCampaign.useMutation();
+  const deleteCampaign = async (runId: string) => {
+    try {
+      const r = await del.mutateAsync({ runId });
+      toast.success(
+        `Campaign deleted — ${r.phaseRowsDeleted} ledger row${r.phaseRowsDeleted === 1 ? "" : "s"} removed`,
+        { description: r.committed
+          ? "Its profile is still in the library. Telemetry kept as the failure record."
+          : "No profile existed. Telemetry kept as the failure record." },
+      );
+      await utils.creator.queueStatus.invalidate();
+    } catch (e) {
+      toast.error("Could not delete the campaign", { description: (e as Error).message });
+    }
+  };
 
   const classified = campaigns.map(c => ({ campaign: c, view: classifyCampaign(c, now) }));
 
@@ -122,10 +153,11 @@ export function CampaignQueue({ campaigns, isLoading, emptyLabel }: CampaignQueu
             <Section
               title="Needs attention"
               titleCls="text-amber-400"
-              note="these will not advance without you"
+              note="these will not advance without you · ✓ hides on this machine · 🗑 deletes for everyone"
               rows={attention}
               now={now}
               onAcknowledged={() => setAckVersion(v => v + 1)}
+              onDeleted={deleteCampaign}
             />
           )}
           {flight.length > 0 && (
@@ -144,7 +176,7 @@ export function CampaignQueue({ campaigns, isLoading, emptyLabel }: CampaignQueu
 }
 
 function Section({
-  title, titleCls, note, rows, now, onAcknowledged,
+  title, titleCls, note, rows, now, onAcknowledged, onDeleted,
 }: {
   title: string;
   titleCls: string;
@@ -152,6 +184,7 @@ function Section({
   rows: Array<{ campaign: Campaign; view: ReturnType<typeof classifyCampaign> }>;
   now: number;
   onAcknowledged?: () => void;
+  onDeleted?: (runId: string) => Promise<void>;
 }) {
   // Counted by display state, so a mixed group cannot hide its composition.
   const tally = new Map<DisplayState, number>();
@@ -180,6 +213,7 @@ function Section({
             campaign={campaign}
             now={now}
             onAcknowledged={onAcknowledged}
+            onDeleted={onDeleted ? () => onDeleted(campaign.runId) : undefined}
           />
         ))}
       </div>

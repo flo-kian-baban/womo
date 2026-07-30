@@ -18,6 +18,7 @@ import {
   insertScrapeEvent, insertLlmInvocation, getLlmTokenUsageByTimeWindow, getLlmTokenUsageBySubject,
   getLlmTokenUsageByRunId, getLatestObservationRun,
   setObservationReviewStatus, getRunDiagnostics, getStrategyOutcomesForRun, getEvidenceSnapshotByObservation,
+  deleteCampaign,
   getLatestObservationId,
   recordPhaseObservation, getPhaseState,
   // V2 read functions
@@ -1304,6 +1305,26 @@ export const appRouter = router({
             includeTerminal: input.includeTerminal,
           }),
         };
+      }),
+
+    /**
+     * Delete ONE campaign record — the ledger rows and the operator's inputs.
+     *
+     * NEVER touches subjects or observations. A committed campaign's profile
+     * survives in the library untouched; removing a profile is a separate
+     * action in a separate place (creator.delete / brand.delete). The response
+     * reports `committed` so the caller can state what survives.
+     */
+    deleteCampaign: publicProcedure
+      .input(z.object({ runId: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        const result = await deleteCampaign(input.runId);
+        console.log(
+          `[queue] deleted campaign ${input.runId}: ${result.phaseRowsDeleted} phase rows, ` +
+          `${result.runInputsDeleted} run_inputs` +
+          (result.committed ? ` — profile ${result.subjectId} RETAINED` : " — no profile existed"),
+        );
+        return result;
       }),
 
     /**

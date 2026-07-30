@@ -29,7 +29,7 @@ import { useState } from "react";
 import {
   CheckCircle2, Loader2, AlertTriangle, Clock, PauseCircle, XCircle,
   ChevronRight, ArrowRight, Circle, CircleDashed, CircleDot, Ban, Wrench,
-  ShieldX, CircleSlash, RotateCw, Check,
+  ShieldX, CircleSlash, RotateCw, Check, Trash2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
@@ -134,8 +134,9 @@ function useCachedCaptureHealth(observationId: string | null) {
 }
 
 export function CampaignRow({
-  campaign, now, onAcknowledged,
-}: { campaign: Campaign; now: number; onAcknowledged?: () => void }) {
+  campaign, now, onAcknowledged, onDeleted,
+}: { campaign: Campaign; now: number; onAcknowledged?: () => void; onDeleted?: () => Promise<void> }) {
+  const [deleting, setDeleting] = useState(false);
   const [open, setOpen] = useState(false);
   const view = classifyCampaign(campaign, now);
   const s = STATE[view.state];
@@ -220,16 +221,57 @@ export function CampaignRow({
           their own copy against the same database.
         */}
         {staysUntilAcknowledged(view.state) && onAcknowledged && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { acknowledge(campaign.runId); onAcknowledged(); }}
-            title="Acknowledge — remove from this machine's attention list. The campaign and its ledger are untouched; other analysts' lists are unaffected."
-            aria-label="Acknowledge — remove from this machine's attention list"
-            className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-foreground flex-shrink-0"
-          >
-            <Check className="w-3.5 h-3.5" />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { acknowledge(campaign.runId); onAcknowledged(); }}
+              title="Acknowledge — hides this row on THIS MACHINE only. The campaign is kept and other analysts still see it."
+              aria-label="Acknowledge — hides this row on this machine only; the campaign is kept"
+              className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-foreground flex-shrink-0"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </Button>
+            {/*
+              DELETE — the other action, and deliberately not the same one.
+              Acknowledge hides a row for one analyst and keeps the campaign;
+              delete removes the campaign record for everyone and permanently.
+              A parked campaign for a dead account has no library profile to
+              delete from, so without this it would sit in every analyst's
+              attention list forever.
+
+              The confirmation states what SURVIVES before the click, not
+              after: a committed campaign's profile stays in the library, and
+              removing that is a different action in a different place.
+            */}
+            {onDeleted && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={deleting}
+                onClick={async () => {
+                  const committed = !!campaign.subjectId;
+                  const ok = window.confirm(
+                    `Delete the campaign record for @${campaign.handle || campaign.runId.slice(0, 8)}?\n\n`
+                    + "This removes the campaign from the queue for EVERY analyst, permanently. "
+                    + "Its scrape and model telemetry is kept as the failure record.\n\n"
+                    + (committed
+                      ? "This campaign produced a profile. THE PROFILE IS NOT DELETED — it stays in "
+                        + "the library, whole. Remove it there if you want it gone."
+                      : "This campaign never produced a profile, so nothing leaves the library."),
+                  );
+                  if (!ok) return;
+                  setDeleting(true);
+                  try { await onDeleted(); } finally { setDeleting(false); }
+                }}
+                title="Delete the campaign record — permanent, affects every analyst. Any profile it produced is kept."
+                aria-label="Delete the campaign record permanently; any profile it produced is kept"
+                className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-destructive flex-shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </>
         )}
       </div>
 
