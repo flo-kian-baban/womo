@@ -45,7 +45,11 @@ import {
   extractHashtags,
 } from "../webResearch";
 import { emptyCaptureMessage } from "../webResearch";
-import { isSpeechTranscript } from "@shared/transcriptSource";
+import { isSpeechTranscript, TRANSCRIPT_SOURCE } from "@shared/transcriptSource";
+// TikTok's caption rule, reused VERBATIM on Instagram — one threshold, one
+// place. See the fallback in `instagramTranscribe`.
+import { captionFallbackDecision } from "../scraping/tiktok/transcriptStrategies";
+import { recordScrapeEvent } from "../scraping/httpClient";
 import { scrapeTikTokProfile } from "../scraping/tiktok/profileScraper";
 import { scrapeInstagramProfile } from "../scraping/instagram/profileScraper";
 import { fetchPostViaOEmbed } from "../scraping/instagram/postScraper";
@@ -507,6 +511,9 @@ function instagramPostToPoolItem(p: InstagramPostData): PoolVideoItem {
     stitchEnabled: false,
     isAd: false,
     durationMs: p.video_duration ? Math.round(p.video_duration * 1000) : 0,
+    // Parsed on every post and, until now, dropped right here — the one field
+    // that tells a photograph apart from a reel whose transcription failed.
+    mediaType: p.media_type,
   };
 }
 
@@ -629,25 +636,79 @@ const instagramTranscribe: TranscribeTool = {
   platform: "Instagram",
   name: "instagram:reel_speech_to_text",
   selectSample(handle, pool) {
-    // The monolith took the first 6 video/reel posts in feed order and stopped
-    // once 5 transcripts landed. NOT temporal: there is no recent/mid/anchor
-    // stratification to report, so the sample says `unbucketed` rather than
-    // claiming a bucket the sampler never chose.
-    //
-    // The video test is URL presence, NOT duration: `video_duration` is never
-    // populated by the scrape paths in use (verified across two live captures —
-    // every post came back durationSec 0), so filtering on it would select
-    // nothing and silently yield zero transcripts. A reel with no CDN URL cannot
-    // be transcribed anyway, which is the same set the monolith skipped.
+    /*
+      ─── The sample is the POOL now, not the first six reels ─────────────────
+      The monolith took the first 6 video posts and stopped once 5 transcripts
+      landed. Those two caps made a target of 8 transcripts structurally
+      unreachable: 6 candidates, 5 accepted, before any of them had to succeed.
+      Measured 2026-07-30 — natgeo 5 transcripts, nadinebaggott 4,
+      rachael.pazan 2, none above 5.
+
+      So every post in the pool is a candidate, bounded by the 12-post capture
+      cap that already bounds the pool. Reels first, in feed order, because a
+      reel can yield SPEECH and a photo can only ever yield its caption — the
+      order decides who gets the expensive path when both are present.
+
+      NOT temporal, still: there is no recent/mid/anchor stratification to
+      report, so the sample says `unbucketed` rather than claiming a bucket the
+      sampler never chose.
+
+      The video test is URL presence, NOT duration: `video_duration` is never
+      populated by the scrape paths in use (verified across two live captures —
+      every post came back durationSec 0), so filtering on it would select
+      nothing and silently yield zero transcripts.
+    */
     const urls = instagramVideoUrls.get(handle);
-    return pool
-      .filter(v => Boolean(urls?.get(v.id)))
-      .slice(0, 6)
+    const withVideo = pool.filter(v => Boolean(urls?.get(v.id)));
+    const withoutVideo = pool.filter(v => !urls?.get(v.id));
+    return [...withVideo, ...withoutVideo]
       .map(item => ({ item, bucket: "unbucketed" as const }));
   },
-  transcribe(handle, sampled) {
+  async transcribe(handle, sampled) {
     const urls = instagramVideoUrls.get(handle) ?? new Map<string, string>();
-    return transcribeInstagramReels(handle, sampled, urls);
+    const speech = await transcribeInstagramReels(handle, sampled, urls);
+
+    /*
+      ─── The caption fallback TikTok has had all along ───────────────────────
+      TikTok's `caption_fallback` produced 7 of 21 TikTok transcripts in the
+      audit run. Instagram had NO equivalent: a reel whose download failed, or
+      whose audio the model could not hear, and every photo and carousel in the
+      pool, contributed nothing at all — on the platform whose captions are
+      typically the LONGER of the two.
+
+      The rule is TikTok's, unchanged and deliberately not re-tuned: at least 8
+      non-hashtag words (`captionFallbackDecision`), stored under the same
+      `post_caption` source, which `isSpeechTranscript` already classes as
+      caption rather than speech everywhere downstream. A caption is weaker
+      evidence than speech and the source label is what says so.
+    */
+    const done = new Set(speech.map(t => t.videoId));
+    const fallback: TranscriptEntry[] = [];
+    for (const { item, bucket } of sampled) {
+      if (done.has(item.id)) continue;
+      const decision = captionFallbackDecision(item.caption ?? "");
+      if (!decision.ok) continue;
+      fallback.push({
+        videoId: item.id,
+        videoUrl: `https://www.instagram.com/p/${item.id}/`,
+        caption: (item.caption ?? "").slice(0, 100),
+        transcript: (item.caption ?? "").trim(),
+        wordCount: decision.words.length,
+        transcriptSource: TRANSCRIPT_SOURCE.postCaption,
+        bucket,
+      } as TranscriptEntry);
+      recordScrapeEvent({
+        platform: "instagram",
+        scrapeMethod: "instagram_playwright",
+        urlRequested: `instagram:post:${item.id}#transcript=caption_fallback:success`,
+      });
+    }
+    if (fallback.length > 0) {
+      console.log(`[platformTools] @${handle}: caption fallback added ${fallback.length} transcript(s)`);
+    }
+    // Speech first: the assembly and the evidence summary both read this order,
+    // and the stronger evidence should lead.
+    return [...speech, ...fallback];
   },
   assemble(_handle, pool, transcripts, sampled) {
     // Instagram computes NO engagement signals and NO longitudinal sample — it
@@ -683,6 +744,7 @@ const instagramTranscribe: TranscribeTool = {
           transcriptText: t?.transcript,
           transcriptWordCount: t?.wordCount,
           transcriptSource: t?.transcriptSource,
+          mediaType: v.mediaType,
         };
       }),
     };

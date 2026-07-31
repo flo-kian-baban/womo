@@ -122,33 +122,58 @@ describe("instagram collection identity harness", () => {
     expect(pool.videoItems.map(v => v.id)).toEqual(fx!.expected.poolAfterAugment.videoItems.map(v => v.id));
   });
 
-  it("BOUNDARY 3 — the sampler picks the SAME reels, and calls them unbucketed", async () => {
+  /*
+    ─── The sampler DELIBERATELY changed, and these boundaries changed with it ─
+    It used to take the first 6 reels and the transcribe loop stopped at 5
+    transcripts. Those caps put a ceiling of 5 on a target of 8, and the audit
+    measured exactly that ceiling: natgeo 5, nadinebaggott 4, rachael.pazan 2.
+
+    The sample is now the whole pool — reels first, then the rest — bounded by
+    the 12-post capture cap. What these boundaries still pin is everything that
+    did NOT change: the recorded reels are all still selected, still in feed
+    order, still ahead of the non-reels, and still `unbucketed`. The fixture's
+    recorded sample is a PREFIX of the new one rather than the whole of it, and
+    that is the change, stated.
+  */
+  it("BOUNDARY 3 — every recorded reel is still sampled, in order, still unbucketed", async () => {
     const pool = freshPoolState();
     await toolsetFor("Instagram").capture.seedPool(fx!.handle, capturedFromFixture(fx!), pool);
 
     const sample = toolsetFor("Instagram").transcribe.selectSample(fx!.handle, pool.videoItems, 0);
+    const recorded = fx!.expected.sample.map(s => s.id);
 
-    expect(sample.map(s => ({ id: s.item.id, bucket: s.bucket })))
-      .toEqual(fx!.expected.sample.map(s => ({ id: s.id, bucket: s.bucket })));
+    // The recorded reels lead the sample, in their recorded order. A widened
+    // cap must not re-pick or re-order what it already chose.
+    expect(sample.slice(0, recorded.length).map(s => s.item.id)).toEqual(recorded);
     // The claim the whole `unbucketed` extension exists to make: feed order is
     // not a temporal stratification, and the ledger must not say otherwise.
     expect(new Set(sample.map(s => s.bucket))).toEqual(new Set(["unbucketed"]));
   });
 
-  it("BOUNDARY 3b — the sample is bounded at 6 and only includes fetchable reels", async () => {
+  it("BOUNDARY 3b — the sample is the pool, reels first, and never exceeds it", async () => {
     const pool = freshPoolState();
     await toolsetFor("Instagram").capture.seedPool(fx!.handle, capturedFromFixture(fx!), pool);
     const sample = toolsetFor("Instagram").transcribe.selectSample(fx!.handle, pool.videoItems, 0);
 
-    expect(sample.length).toBeLessThanOrEqual(6);
-    // A reel with no CDN URL cannot be transcribed; selecting one would burn a
-    // sample slot on a guaranteed miss.
+    // The pool is the only bound. Capture caps it at 12 posts; the sampler
+    // invents nothing beyond what capture collected.
+    expect(sample.length).toBe(pool.videoItems.length);
+    expect(new Set(sample.map(s => s.item.id))).toEqual(new Set(pool.videoItems.map(v => v.id)));
+
+    /*
+      REELS FIRST, and this is the ordering that matters. A reel can yield
+      SPEECH; a photo can only ever yield its caption. The expensive
+      speech path must reach the reels before anything else, so every
+      fetchable reel has to sort ahead of every post without a CDN URL.
+    */
     const withUrl = new Set(
       fx!.raw.prefetchedProfile!.posts
         .filter(p => Boolean(p.video_url))
         .map(p => String(p.shortcode ?? p.id)),
     );
-    for (const s of sample) expect(withUrl.has(s.item.id)).toBe(true);
+    const lastReel = sample.reduce((acc, s, i) => (withUrl.has(s.item.id) ? i : acc), -1);
+    const firstNonReel = sample.findIndex(s => !withUrl.has(s.item.id));
+    if (firstNonReel !== -1) expect(lastReel).toBeLessThan(firstNonReel);
   });
 
   it("BOUNDARY 4 — recorded transcripts are speech-to-text, in order, non-empty", async () => {

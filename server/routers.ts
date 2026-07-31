@@ -690,7 +690,7 @@ export async function persistCreatorToV2(params: {
         : () => insertDecodedSignals(subjectId, observationId, decodedRows));
 
     // 7. insertContentItems (discoveredVideoPool with engagement stats)
-    type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string; temporalBucket?: string };
+    type PoolVideo = { id: string; url: string; caption: string; createTime: number; views: number; likes: number; comments: number; saves: number; shares: number; musicOriginal: boolean; musicTitle?: string; musicArtist?: string; durationSec: number; videoUrl?: string; transcriptText?: string; transcriptWordCount?: number; transcriptSource?: string; temporalBucket?: string; mediaType?: string };
     const rawPool = researchData.discoveredVideoPoolJson as PoolVideo[] ?? [];
     console.log(`[persist] discoveredVideoPool received: ${rawPool.length} videos`);
     const contentRows = rawPool.map(v => ({
@@ -716,6 +716,9 @@ export async function persistCreatorToV2(params: {
       // (updateContentItemTranscript), so subtitle-less creators lost their
       // longitudinal structure. status semantics unchanged (transcript-derived).
       temporalBucket: v.temporalBucket,
+      // womo_0015 — Instagram only; TikTok leaves it undefined and it persists
+      // NULL. Without it a photo and a failed reel are the same stored row.
+      mediaType: v.mediaType,
       status: v.transcriptText ? "sampled" : "discovered",
     }));
     await runEnrichment(persistence, "content_items",

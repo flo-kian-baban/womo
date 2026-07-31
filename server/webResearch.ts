@@ -50,7 +50,7 @@ import { decodeCreatorSymbols, formatDecodedSymbolsBlock } from "./symbolDecoder
 import { fetchBrandReviews, selectBrandReviewFields } from "./reviewResearch";
 import { fetchBrandMentionData, formatAudienceMentionEvidenceBlock, type AudienceMentionData } from "./brandTikTokAnalysis";
 import { decodeBrandSymbols, formatBrandDecodedSymbolsBlock, type BrandDecodedSymbols } from "./brandSymbolDecoder";
-import { transcribeAudio } from "./_core/voiceTranscription";
+import { transcribeAudio, activeTranscriptionEngine } from "./_core/voiceTranscription";
 import { insertScrapeEvent, recordPhaseObservation, type PhaseStateWrite } from "./db";
 import { currentRunId, currentDeadlineAt } from "./_core/runContext";
 import { runPhases, bankedOutput } from "./phases/phaseRunner";
@@ -667,6 +667,21 @@ export interface PoolVideoItem {
   stitchEnabled: boolean;
   isAd: boolean;
   durationMs: number;      // video duration in milliseconds
+  /**
+   * Instagram only: `photo | video | reel | carousel`.
+   *
+   * OPTIONAL, and absent on TikTok on purpose — TikTok has no such distinction
+   * and a fabricated "video" everywhere would say nothing. Because it is
+   * absent there, `JSON.stringify` omits it and the TikTok collection-identity
+   * byte comparison is untouched.
+   *
+   * It exists because Instagram parses this on every post
+   * (`instagram/profileScraper.ts:904,:1113,:1321`) and then dropped it one
+   * function later, so nothing downstream could tell "no transcript because
+   * this is a photograph" from "the reel's transcription failed" — the first
+   * being a fact about the post and the second a fact about our capture.
+   */
+  mediaType?: string;
 }
 
 /** Shared mutable state the collection stages accumulate into (was closure vars). */
@@ -1107,7 +1122,17 @@ export async function transcribeInstagramReels(
     const { context: browserCtx } = dlCtx;
 
     const batchSize = 3;
-    for (let i = 0; i < sampled.length && transcripts.length < 5; i += batchSize) {
+    /*
+      THE 5-TRANSCRIPT STOP IS GONE. It was the monolith's, and together with
+      the sampler's old 6-reel cap it made a target of 8 transcripts
+      unreachable before a single reel had to fail. The bound that remains is
+      the real one: the pool, which capture already caps at 12 posts.
+
+      Reels that carry no CDN URL are skipped inside the batch (they cannot be
+      downloaded), and the caption fallback in `instagramTranscribe` picks up
+      everything this loop does not transcribe.
+    */
+    for (let i = 0; i < sampled.length; i += batchSize) {
       const batch = sampled.slice(i, i + batchSize);
 
       const batchResults = await Promise.allSettled(
@@ -1168,7 +1193,12 @@ export async function transcribeInstagramReels(
               // session; Instagram's transcription leg emitted nothing.
               recordScrapeEvent({
                 platform: "instagram", scrapeMethod: "whisper_transcription",
-                urlRequested: `instagram:reel:${item.id}#transcribe=speech:success`,
+                // The `scrape_method` enum covers both engines, so the ENGINE
+                // that actually ran is named here. It has been Gemini audio for
+                // the whole corpus (OPENAI_API_KEY unset) while every label said
+                // whisper — the strategy token stays `speech` so the existing
+                // `#transcribe=<strategy>:<outcome>` parse is unchanged.
+                urlRequested: `instagram:reel:${item.id}#transcribe=speech:success&engine=${activeTranscriptionEngine()}`,
                 durationMs: Date.now() - transcribeStart,
               });
               return {
@@ -1192,8 +1222,8 @@ export async function transcribeInstagramReels(
             console.log(`[webResearch] Instagram reel ${item.id}: transcription failed — ${errDetail}`);
             recordScrapeEvent({
               platform: "instagram", scrapeMethod: "whisper_transcription",
-              urlRequested: `instagram:reel:${item.id}#transcribe=speech`,
-              failureReason: `transcript speech: ${errDetail}`.slice(0, 500),
+              urlRequested: `instagram:reel:${item.id}#transcribe=speech&engine=${activeTranscriptionEngine()}`,
+              failureReason: `transcript speech (${activeTranscriptionEngine()}): ${errDetail}`.slice(0, 500),
               durationMs: Date.now() - transcribeStart,
             });
             return null;
@@ -1201,8 +1231,8 @@ export async function transcribeInstagramReels(
             console.log(`[webResearch] Instagram reel ${item.id}: download/transcribe error — ${(err as Error).message}`);
             recordScrapeEvent({
               platform: "instagram", scrapeMethod: "whisper_transcription",
-              urlRequested: `instagram:reel:${item.id}#transcribe=speech`,
-              failureReason: `transcript speech: ${(err as Error).message}`.slice(0, 500),
+              urlRequested: `instagram:reel:${item.id}#transcribe=speech&engine=${activeTranscriptionEngine()}`,
+              failureReason: `transcript speech (${activeTranscriptionEngine()}): ${(err as Error).message}`.slice(0, 500),
             });
             return null;
           }

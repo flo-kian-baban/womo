@@ -33,7 +33,168 @@
  * ```
  */
 import { ENV } from "./env";
-import { recordScrapeEvent } from "../scraping/httpClient";
+import { spawn } from "node:child_process";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+/**
+ * WHICH ENGINE IS ACTUALLY RUNNING.
+ *
+ * `transcribeAudioInner` routes to Gemini whenever OPENAI_API_KEY is absent,
+ * and it has been absent — so every Instagram transcript in the corpus came
+ * from Gemini audio while the telemetry said `whisper` and its failures read
+ * "transcript whisper: FILE_TOO_LARGE". The label named a path that was not
+ * running.
+ *
+ * The `scrape_method` ENUM value stays `whisper_transcription` — it is a
+ * database enum covering both variants, and this module's contract has always
+ * been that provenance detail lives in the failure reason and the URL. This is
+ * what lets a caller put the real engine there.
+ */
+export type TranscriptionEngine = "whisper" | "gemini_audio";
+
+export function activeTranscriptionEngine(): TranscriptionEngine {
+  return ENV.openaiApiKey ? "whisper" : "gemini_audio";
+}
+
+// ─── Audio extraction ────────────────────────────────────────────────────────
+//
+// WHY: Instagram reels are sent to the model as the WHOLE MP4. Measured
+// 2026-07-30 across five creators: 6 of 26 transcription attempts were refused
+// at 15.7–57.0 MB against a 15 MB ceiling — AFTER the file had been fully
+// downloaded (294 MB of reel video pulled in one run). The video track is
+// ~99% of those bytes and the model only ever listens to the audio.
+//
+// HOW, and what it costs: the system `ffmpeg`, spawned, no npm dependency
+// added. 16 kHz mono MP3 at 64 kbps — the canonical speech-to-text input, and
+// roughly 0.5 MB per minute of reel against tens of MB of video. The Gemini
+// path base64-encodes its payload inline (+33%), so this cuts the upload by
+// about two orders of magnitude as well as clearing the ceiling.
+//
+// IT IS OPTIONAL BY CONSTRUCTION. If ffmpeg is absent, or the demux fails, or
+// it produces nothing, this returns null and the caller sends what it already
+// had — exactly today's behaviour. That matters twice over: this repo is
+// heading for a packaged Electron app, where a system ffmpeg is NOT guaranteed
+// (see electron/README.md), and a transcription path must never become
+// dependent on a binary that may not ship.
+const FFMPEG_TIMEOUT_MS = 30_000;
+
+/**
+ * ─── Resolving the binary, including inside a packaged app ──────────────────
+ *
+ * `ffmpeg-static` is a DEPENDENCY, not a system assumption: the extraction has
+ * to work on every machine that runs this, and "the analyst happened to brew
+ * install ffmpeg" is not a property we can rely on.
+ *
+ * THE PACKAGING TRAP, solved here rather than when the .dmg is built.
+ * electron-builder packs `node_modules` into `app.asar`, and `ffmpeg-static`
+ * resolves its path at runtime by joining `__dirname` — so in a packaged app it
+ * hands back `…/app.asar/node_modules/ffmpeg-static/ffmpeg`. asar is a virtual
+ * archive: a path inside it can be READ by Electron's patched fs, but it is not
+ * a real file on disk and `spawn` cannot execute it. This is the same class as
+ * the Playwright unpacking already on the packaging list (electron/README.md).
+ *
+ * Two halves, and BOTH are required:
+ *   1. HERE — rewrite `app.asar` → `app.asar.unpacked` in the resolved path.
+ *   2. PACKAGING — `asarUnpack` must include ffmpeg-static so that directory
+ *      actually exists. Recorded in electron/README.md next to Playwright's.
+ *
+ * The system binary remains a fallback for a dev machine with no install step,
+ * and null (extraction skipped, whole video sent) remains the floor. A
+ * transcription path must never harden into a dependency on a binary that may
+ * not ship.
+ */
+let ffmpegPathResolved: string | null | undefined;
+
+async function resolveFfmpeg(): Promise<string | null> {
+  if (ffmpegPathResolved !== undefined) return ffmpegPathResolved;
+
+  const candidates: string[] = [];
+  try {
+    const mod = await import("ffmpeg-static");
+    const raw = ((mod as { default?: unknown }).default ?? mod) as unknown;
+    if (typeof raw === "string" && raw.length > 0) {
+      // The asar rewrite. Harmless when unpacked — no `app.asar` in the path.
+      candidates.push(raw.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`));
+      if (!candidates.includes(raw)) candidates.push(raw);
+    }
+  } catch {
+    // Module absent — fall through to the system binary.
+  }
+  candidates.push("ffmpeg"); // PATH lookup, the dev-machine fallback
+
+  for (const candidate of candidates) {
+    const works = await new Promise<boolean>((resolve) => {
+      try {
+        const p = spawn(candidate, ["-version"], { stdio: "ignore" });
+        p.on("error", () => resolve(false));
+        p.on("close", (code) => resolve(code === 0));
+      } catch { resolve(false); }
+    });
+    if (works) {
+      ffmpegPathResolved = candidate;
+      console.log(`[voiceTranscription] ffmpeg: ${candidate === "ffmpeg" ? "system binary on PATH" : candidate}`);
+      return ffmpegPathResolved;
+    }
+  }
+
+  ffmpegPathResolved = null;
+  console.warn("[voiceTranscription] no usable ffmpeg — reels will be sent as whole video files");
+  return null;
+}
+
+/**
+ * Strip everything but the speech. Returns null when extraction is not possible,
+ * which the caller must treat as "send the original".
+ *
+ * A temp FILE rather than a stdin pipe on purpose: an MP4 whose `moov` atom sits
+ * at the end is not demuxable from a non-seekable stream, and Instagram's CDN
+ * does not guarantee faststart. A pipe would work most of the time, which is the
+ * worst property a fallback can have.
+ */
+export async function extractAudioTrack(
+  video: Buffer,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const ffmpeg = await resolveFfmpeg();
+  if (!ffmpeg) return null;
+
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(path.join(tmpdir(), "womo-audio-"));
+    const inPath = path.join(dir, "in.mp4");
+    const outPath = path.join(dir, "out.mp3");
+    await writeFile(inPath, video);
+
+    const ok = await new Promise<boolean>((resolve) => {
+      const p = spawn(ffmpeg, [
+        "-nostdin", "-loglevel", "error", "-y",
+        "-i", inPath,
+        "-vn",                    // drop the video track — the whole point
+        "-ac", "1",               // mono
+        "-ar", "16000",           // 16 kHz: what speech models want
+        "-b:a", "64k",
+        "-f", "mp3", outPath,
+      ], { stdio: "ignore" });
+      const timer = setTimeout(() => { try { p.kill("SIGKILL"); } catch { /* */ } resolve(false); }, FFMPEG_TIMEOUT_MS);
+      p.on("error", () => { clearTimeout(timer); resolve(false); });
+      p.on("close", (code) => { clearTimeout(timer); resolve(code === 0); });
+    });
+    if (!ok) return null;
+
+    const audio = await readFile(outPath);
+    // A silent or video-only reel yields a near-empty file; that is not an
+    // extraction we should send, and the caller's own empty check would only
+    // see it after paying for the upload.
+    if (audio.length < 1024) return null;
+    return { buffer: audio, mimeType: "audio/mpeg" };
+  } catch (err) {
+    console.warn(`[voiceTranscription] audio extraction failed: ${(err as Error).message}`);
+    return null;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => { /* temp dir */ });
+  }
+}
 
 /**
  * fetch() with an AbortController timeout so a stalled download or transcription
@@ -103,23 +264,22 @@ export type TranscriptionError = {
 export async function transcribeAudio(
   options: TranscribeOptions
 ): Promise<TranscriptionResponse | TranscriptionError> {
-  // Session 7 telemetry: every transcription attempt records a scrape_event
-  // (method whisper_transcription — the enum value covers both the Whisper and
-  // Gemini-audio variants; provenance detail lives in failureReason/URL).
-  const start = Date.now();
-  const result = await transcribeAudioInner(options);
-  recordScrapeEvent({
-    scrapeMethod: "whisper_transcription",
-    urlRequested: options.audioUrl?.slice(0, 1000),
-    durationMs: Date.now() - start,
-    // "transcript "-classed: "No speech detected" in one reel is a fact about
-    // that video, not a broken transcription path. Unprefixed, these read as
-    // path failures and degraded every Instagram run's capture health.
-    failureReason: "error" in result
-      ? `transcript whisper: ${result.code}: ${result.error}${result.details ? ` — ${result.details.slice(0, 300)}` : ""}`
-      : undefined,
-  }, "transcription");
-  return result;
+  /*
+    ─── This used to emit a scrape_event of its own. It was a DUPLICATE ───────
+    Every Instagram transcription was logged twice: once here with a null
+    platform and the raw CDN URL, and once by the caller
+    (`transcribeInstagramReels`) with the platform, the reel id and the
+    `#transcribe=speech:<outcome>` attempt fragment — 2 ms apart, with identical
+    `duration_ms`. Measured: 52 rows for 26 attempts, doubling every per-method
+    count anyone tried to read.
+
+    The caller's row is the one kept: it is the only one that knows WHICH reel
+    and WHICH platform, and it carries the attempt-class prefix `deriveCaptureHealth`
+    reads. What this layer knows and the caller does not — which engine ran — is
+    published as `activeTranscriptionEngine()` instead, so the surviving row can
+    name it. One attempt, one event.
+  */
+  return transcribeAudioInner(options);
 }
 
 async function transcribeAudioInner(
@@ -340,8 +500,29 @@ async function transcribeWithGemini(
       // Pre-downloaded buffer provided — skip network fetch
       audioBuffer = options.audioBuffer;
       mimeType = options.mimeType || "video/mp4";
+      const rawMB = audioBuffer.length / (1024 * 1024);
+      console.log(`[voiceTranscription] Gemini: using pre-downloaded buffer (${rawMB.toFixed(1)}MB, ${mimeType})`);
+
+      /*
+        STRIP THE VIDEO BEFORE THE SIZE CHECK, not after it refuses.
+        The model listens to audio; the video track is ~99% of the bytes and
+        100% of the reason 6 of 26 attempts were refused over the ceiling. When
+        ffmpeg is unavailable this returns null and everything below behaves
+        exactly as it did.
+      */
+      if (mimeType.startsWith("video/")) {
+        const extracted = await extractAudioTrack(audioBuffer);
+        if (extracted) {
+          audioBuffer = extracted.buffer;
+          mimeType = extracted.mimeType;
+          console.log(
+            `[voiceTranscription] Gemini: extracted audio ${rawMB.toFixed(1)}MB video → ` +
+            `${(audioBuffer.length / (1024 * 1024)).toFixed(2)}MB ${mimeType}`,
+          );
+        }
+      }
+
       const sizeMB = audioBuffer.length / (1024 * 1024);
-      console.log(`[voiceTranscription] Gemini: using pre-downloaded buffer (${sizeMB.toFixed(1)}MB, ${mimeType})`);
       if (sizeMB > 15) {
         return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 15MB limit` };
       }
@@ -366,8 +547,13 @@ async function transcribeWithGemini(
         mimeType = response.headers.get("content-type") || "audio/mpeg";
         if (mimeType.includes("video/mp4")) mimeType = "video/mp4";
         if (mimeType.includes("octet-stream")) mimeType = "video/mp4";
+        console.log(`[voiceTranscription] Gemini: downloaded ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB, mimeType=${mimeType}`);
+        // Same strip as the pre-downloaded branch — see the note there.
+        if (mimeType.startsWith("video/")) {
+          const extracted = await extractAudioTrack(audioBuffer);
+          if (extracted) { audioBuffer = extracted.buffer; mimeType = extracted.mimeType; }
+        }
         const sizeMB = audioBuffer.length / (1024 * 1024);
-        console.log(`[voiceTranscription] Gemini: downloaded ${sizeMB.toFixed(1)}MB, mimeType=${mimeType}`);
         if (sizeMB > 15) {
           return { error: "Audio file too large", code: "FILE_TOO_LARGE", details: `${sizeMB.toFixed(1)}MB exceeds 15MB limit` };
         }

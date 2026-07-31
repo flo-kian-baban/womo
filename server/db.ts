@@ -1920,6 +1920,8 @@ export async function insertContentItems(
     createTime?: number; // Unix seconds
     region?: string;
     temporalBucket?: string;
+    /** womo_0015 — Instagram post kind. Absent on TikTok, which has none. */
+    mediaType?: string;
     likeCount?: number;
     commentCount?: number;
     shareCount?: number;
@@ -1949,6 +1951,7 @@ export async function insertContentItems(
     createTime: item.createTime ? new Date(item.createTime * 1000) : null,
     region: item.region ?? null,
     temporalBucket: item.temporalBucket ?? null,
+    mediaType: item.mediaType ?? null,
     likeCount: item.likeCount ?? null,
     commentCount: item.commentCount ?? null,
     shareCount: item.shareCount ?? null,

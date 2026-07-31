@@ -745,7 +745,7 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
           return supplementBaseFields(handle, playwrightResult);
         }
       }
-      return supplementBaseFields(handle, playwrightResult);
+      return supplementBaseFields(handle, await supplementWithReels(handle, playwrightResult));
     }
   }
 
@@ -753,7 +753,7 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
   console.log(`[instagramScraper] @${handle}: Phase 2 — trying desktop Playwright`);
   const desktopResult = await scrapeViaPlaywrightDesktop(handle);
   if (desktopResult && (desktopResult.posts.length > 0 || desktopResult.profile.follower_count > 0)) {
-    return supplementBaseFields(handle, desktopResult);
+    return supplementBaseFields(handle, await supplementWithReels(handle, desktopResult));
   }
 
   // ── Last resort: oEmbed metadata ──
@@ -791,6 +791,167 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramS
     source: "none",
     confidence: "low",
   };
+}
+
+// ─── Leg: the /reels/ tab ────────────────────────────────────────────────────
+//
+// WHY IT EXISTS. The main grid mixes photos, carousels and reels, and only a
+// reel can ever yield SPEECH. Measured 2026-07-31 on the same two profiles, in
+// the same minute:
+//
+//     natgeo         grid: 7 photos + 5 reels      /reels/: 12 reels
+//     rachael.pazan  grid: 9 photos + 3 reels      /reels/: 12 reels
+//
+// So a 12-post cap was never a 12-video pool. rachael.pazan's three reels were
+// its entire speech ceiling, and no amount of audio extraction or caption
+// fallback can raise a ceiling set by how many videos we collected — those
+// raise the SUCCESS RATE on videos already in hand. This is the only leg that
+// adds videos.
+//
+// IT SUPPLEMENTS, IT DOES NOT REPLACE. The grid's photos and carousels carry
+// captions, and captions produced 20 of 31 transcripts in the verification run
+// — dropping them to take 12 reels would trade one evidence type for another.
+// Reels lead, the grid fills the remaining slots, and the 12-post cap is
+// unchanged.
+//
+// IT DEGRADES TO A NO-OP. A private account, an account with no reels tab, a
+// block, a shape change, or simply fewer than 12 reels — every one of those
+// returns what it found (possibly nothing) and the grid result stands. This leg
+// can only ADD videos; it can never subtract evidence or fail a capture.
+//
+// AND IT IS SKIPPED WHEN IT CANNOT HELP: a pool that already holds 12
+// transcribable posts pays no navigation at all.
+async function scrapeReelsTab(handle: string): Promise<InstagramPostData[]> {
+  let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  const started = Date.now();
+  const url = `https://www.instagram.com/${handle}/reels/`;
+  try {
+    await requestGovernor("instagram");
+    ctx = await getContext("mobile-ios", 5);
+    const { page } = ctx;
+
+    // The SAME interception the grid path uses — the reels tab issues its own
+    // media query, and its edges carry `video_versions`/`video_url`, which is
+    // the whole point. Shortcodes scraped from the DOM would not be
+    // transcribable: `selectSample` filters on CDN-URL presence.
+    const edges: unknown[] = [];
+    page.on("response", async (response) => {
+      try {
+        const u = response.url();
+        if (!u.includes("graphql") && !u.includes("api/v1")) return;
+        if (response.status() !== 200) return;
+        const body = await response.json().catch(() => null);
+        if (!body) return;
+        const found = findMediaEdges(body);
+        if (found.length > 0) edges.push(...found);
+      } catch { /* body read failure — ignore */ }
+    });
+
+    const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    const status = resp?.status();
+    if (status && status >= 400) {
+      recordScrapeEvent({
+        platform: "instagram", scrapeMethod: "instagram_playwright",
+        urlRequested: `${url}#posts=reels_tab:blocked`, httpStatus: status,
+        failureReason: `profile reels_tab: blocked — HTTP ${status}`,
+        durationMs: Date.now() - started,
+      });
+      return [];
+    }
+    await page.waitForTimeout(3500 + Math.floor(Math.random() * 1500));
+    // Two short scrolls, matching the grid path's pattern — enough to trigger
+    // the tab's own pagination without turning this into a crawl.
+    await page.evaluate("window.scrollTo(0, 900)");
+    await page.waitForTimeout(1500);
+    await page.evaluate("window.scrollTo(0, 1800)");
+    await page.waitForTimeout(1200);
+
+    const posts = parseMediaEdgesToPosts(edges, handle).filter(p => Boolean(p.video_url));
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright",
+      urlRequested: `${url}#posts=reels_tab:${posts.length > 0 ? "success" : "empty"}`,
+      httpStatus: status,
+      // "profile "-classed when empty: a creator with no reels is a FACT about
+      // the account, not a broken path, and capture health must not read it as
+      // a failure.
+      failureReason: posts.length > 0 ? undefined : "profile reels_tab: empty — no reels with a video URL",
+      durationMs: Date.now() - started,
+    });
+    console.log(`[instagramScraper] @${handle}: reels tab yielded ${posts.length} reel(s) with a video URL (${Date.now() - started}ms)`);
+    return posts;
+  } catch (err) {
+    console.log(`[instagramScraper] @${handle}: reels tab failed — ${(err as Error).message?.slice(0, 90)}`);
+    recordScrapeEvent({
+      platform: "instagram", scrapeMethod: "instagram_playwright",
+      urlRequested: `${url}#posts=reels_tab:error`,
+      failureReason: `profile reels_tab: ${(err as Error).message}`.slice(0, 400),
+      durationMs: Date.now() - started,
+    });
+    return [];
+  } finally {
+    if (ctx) await retireContext(ctx.context).catch(() => {});
+  }
+}
+
+/** The 12-post capture cap. Unchanged — this is where it is now stated once. */
+const INSTAGRAM_POST_CAP = 12;
+
+/**
+ * Merge the reels tab into a grid result: reels first, grid fills the rest,
+ * deduped, capped. Returns the input untouched when the tab added nothing.
+ */
+export function mergeReelsFirst(
+  gridPosts: InstagramPostData[],
+  reels: InstagramPostData[],
+  cap = INSTAGRAM_POST_CAP,
+): InstagramPostData[] {
+  if (reels.length === 0) return gridPosts;
+  const merged: InstagramPostData[] = [];
+  const seen = new Set<string>();
+  for (const p of [...reels, ...gridPosts]) {
+    const key = p.shortcode || p.id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(p);
+    if (merged.length >= cap) break;
+  }
+  return merged;
+}
+
+/** Posts that could yield speech: a reel we hold a CDN URL for. */
+function transcribableCount(posts: InstagramPostData[]): number {
+  return posts.filter(p => Boolean(p.video_url)).length;
+}
+
+/**
+ * Add reels to a scraped profile when — and only when — they could raise the
+ * transcript ceiling. Never throws, never subtracts.
+ */
+async function supplementWithReels(
+  handle: string,
+  result: InstagramScrapedProfile,
+): Promise<InstagramScrapedProfile> {
+  const already = transcribableCount(result.posts);
+  if (already >= INSTAGRAM_POST_CAP) {
+    // Every slot is already a video. The tab could not add one, so it is not
+    // navigated — the cost is paid only where there is something to gain.
+    console.log(`[instagramScraper] @${handle}: ${already} transcribable posts already — skipping the reels tab`);
+    return result;
+  }
+
+  const reels = await scrapeReelsTab(handle);
+  if (reels.length === 0) return result;   // no tab, blocked, or no reels — grid stands
+
+  const before = result.posts.length;
+  const merged = mergeReelsFirst(result.posts, reels);
+  const gained = transcribableCount(merged) - already;
+  result.posts = merged;
+  result.source = `${result.source}+reels_tab`;
+  console.log(
+    `[instagramScraper] @${handle}: reels tab merged — ${before} grid post(s) + ${reels.length} reel(s) ` +
+    `→ ${merged.length} post(s), transcribable ${already} → ${transcribableCount(merged)} (+${gained})`,
+  );
+  return result;
 }
 
 // ─── Post Extraction from Profile Page HTML ──────────────────────────────────

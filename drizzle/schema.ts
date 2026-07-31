@@ -470,6 +470,15 @@ export const contentItems = pgTable("content_items", {
   createTime: timestamp("create_time", { withTimezone: true }),
   region: varchar("region", { length: 128 }),
   temporalBucket: varchar("temporal_bucket", { length: 16 }),
+  /**
+   * womo_0015. Instagram post kind — `photo | video | reel | carousel`.
+   *
+   * NULL on TikTok, which has no such distinction, and NULL on every row
+   * written before the migration. It is what makes "no transcript because this
+   * is a photograph" distinguishable from "the reel's transcription failed" —
+   * the first a fact about the post, the second about our capture.
+   */
+  mediaType: varchar("media_type", { length: 16 }),
 
   likeCount: bigint("like_count", { mode: "number" }),
   commentCount: bigint("comment_count", { mode: "number" }),

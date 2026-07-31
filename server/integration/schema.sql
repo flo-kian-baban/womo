@@ -500,6 +500,7 @@ CREATE TABLE public.content_items (
     create_time timestamp with time zone,
     region character varying(128),
     temporal_bucket character varying(16),
+    media_type character varying(16),
     like_count bigint,
     comment_count bigint,
     share_count bigint,
