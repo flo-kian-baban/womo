@@ -20,6 +20,7 @@ import { canonicalizeHandle } from './_core/handles';
 import type { PhaseName } from './_core/analysisPhase';
 import { isSpeechTranscript, classifyTranscriptSource } from '@shared/transcriptSource';
 import { computeLlmCostUsd } from '../shared/llmPricing';
+import { deriveEngagementRates } from './engagementRates';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DATABASE-DOWN POLICY (uniform — Session 5)
@@ -2495,6 +2496,25 @@ async function _getCreatorProfileById(subjectId: string, opts?: { observationId?
     .filter(ci => ci.caption)
     .map(ci => ci.caption!);
 
+  /*
+    ── The eight engagement rates, derived rather than stored ─────────────────
+    The collection pipeline computes these over the video pool, shows four of
+    them to the extraction model, and discards the object — so none of the
+    eight has ever been retrievable. Every input is on the `content_items` rows
+    already fetched above, scoped by womo_0011 to ONE observation, which is the
+    same pool the live computation ran over. So this is arithmetic on rows in
+    hand: no second query, no column, and no aggregate that can drift from its
+    inputs when a re-analysis writes new content.
+
+    Read-path only. Nothing here is persisted and nothing the engine reads is
+    touched — `observations.engagement_rate` is still the value the collection
+    pipeline wrote, untouched and unread by this.
+  */
+  const engagementRates = deriveEngagementRates(
+    contentItemRows[0]?.platform ?? row.subjects.primaryPlatform,
+    contentItemRows,
+  );
+
   // Flatten into a shape compatible with existing routers.ts access patterns
   return {
     id: row.subjects.id,
@@ -2551,6 +2571,10 @@ async function _getCreatorProfileById(subjectId: string, opts?: { observationId?
     decodedSymbols: hasDecodedSignals ? decodedSymbolsObj : null,
     // From content_items
     discoveredVideoPoolJson: discoveredPool.length > 0 ? discoveredPool : null,
+    // The eight rates, derived above. Null in any field means absent — the
+    // platform does not publish it, nothing was captured, or the input has no
+    // column — never a measured zero. See server/engagementRates.ts.
+    engagementRates,
     transcriptExcerpts: transcriptsArray.length > 0 ? transcriptsArray : null,
     // Session 7 (J-4 creator side): the shape fit.calculate reads for music
     // overlap — transcripts[].musicMetadata.soundName. Built from the
