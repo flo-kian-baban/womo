@@ -23,6 +23,7 @@
  * — the same reason the creator campaign injects.
  */
 import { TRPCError } from "@trpc/server";
+import { EvidenceGateRefusal } from "../webResearch";
 import type { AnalysisPhase, CampaignState, PlatformName } from "../_core/analysisPhase";
 import { NOT_READY, BRAND_PSEUDO_PLATFORM } from "../_core/analysisPhase";
 import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
@@ -64,17 +65,31 @@ export interface BrandCampaignDeps extends CreatorCampaignDeps {
  * Identical in shape to the creator's: PRECONDITION_FAILED is the min-data
  * refusal — a deliberate "we will not extract from this" — and everything else
  * is an error. The MESSAGES are the gate's and stay FROZEN.
+ *
+ * `confirmedEmpty` follows the same rule as the creator path, and `brandGate`
+ * deliberately never claims it: its refusal reads "Please verify the brand URL
+ * and try again", which is a statement about what we could reach, not a finding
+ * that the brand has no presence. So a refused brand is recorded blocked and
+ * stays requeueable.
  */
 function classifyBrandCollectionFailure(
   err: unknown,
-): { status: CampaignOutcome["status"]; message: string } {
+): { status: CampaignOutcome["status"]; message: string; confirmedEmpty: boolean | null } {
   if (err instanceof TRPCError) {
+    const minData = err.code === "PRECONDITION_FAILED";
     return {
-      status: err.code === "PRECONDITION_FAILED" ? "min_data_rejection" : "error",
+      status: minData ? "min_data_rejection" : "error",
       message: err.message,
+      confirmedEmpty: minData
+        ? (err instanceof EvidenceGateRefusal ? err.confirmedEmpty : false)
+        : null,
     };
   }
-  return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  return {
+    status: "error",
+    message: err instanceof Error ? err.message : String(err),
+    confirmedEmpty: null,
+  };
 }
 
 /**

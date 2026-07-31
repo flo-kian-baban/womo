@@ -45,4 +45,51 @@ describe("fetchTikTokVideosFromAPI author guard", () => {
     expect(mockScrape).not.toHaveBeenCalled();         // no second scrape
     expect(items.map(i => i.id).sort()).toEqual(["own1", "own2"]);
   });
+
+  /*
+    ── A POOL WITH NO secUid IS STILL A POOL ─────────────────────────────────
+    This function used to `return` on a missing secUid BEFORE reading itemList
+    — a vestige of the Phase-1 design where secUid keyed a SEPARATE post-list
+    API call that no longer exists.
+
+    It cost a real capture. Live, 2026-07-31: profile_rendered_grid harvested
+    21 videos for @lynlecheung and scrapeTikTokProfile logged "final result —
+    21 videos"; this guard returned zero one line later, because the leg that
+    supplied them (the rendered grid) carries no secUid. The capture phase saw
+    an empty pool, burned its three attempts, and the campaign was refused.
+
+    Any leg that can supply videos without a structured user payload hits this,
+    so the test pins the shape rather than the leg.
+  */
+  it("keeps videos from a leg that carries NO secUid — the list is the pool, not the key", async () => {
+    vi.mocked(scrapeTikTokProfile).mockResolvedValueOnce({
+      // What the embed + rendered-grid combination produces: real base fields,
+      // real videos, and no secUid anywhere.
+      userInfo: { userInfo: { user: { uniqueId: "testcreator" } } },
+      posts: {
+        data: {
+          itemList: [
+            { id: "grid1", desc: "harvested", stats: {}, music: {}, video: { duration: 15 }, author: { uniqueId: "testcreator" } },
+            { id: "grid2", desc: "also mine", stats: {}, music: {}, video: { duration: 9 }, author: { uniqueId: "testcreator" } },
+            { id: "gridForeign", desc: "someone else", stats: {}, music: {}, video: { duration: 5 }, author: { uniqueId: "juarezaale" } },
+          ],
+        },
+      },
+    } as never);
+
+    const { items, rejected } = await fetchTikTokVideosFromAPI("testcreator");
+    expect(items.map(i => i.id).sort()).toEqual(["grid1", "grid2"]);
+    // The author guard still applies to every item, secUid or not.
+    expect(rejected).toBe(1);
+  });
+
+  it("an empty list is still empty — the fix does not invent a pool", async () => {
+    vi.mocked(scrapeTikTokProfile).mockResolvedValueOnce({
+      userInfo: { userInfo: { user: { uniqueId: "testcreator" } } },
+      posts: { data: { itemList: [] } },
+    } as never);
+    const { items, rejected } = await fetchTikTokVideosFromAPI("testcreator");
+    expect(items).toHaveLength(0);
+    expect(rejected).toBe(0);
+  });
 });

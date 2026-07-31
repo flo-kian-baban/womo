@@ -127,6 +127,35 @@ export type GateVerdict =
       code: "NOT_FOUND" | "TOO_MANY_REQUESTS" | "PRECONDITION_FAILED";
       /** The analyst-facing message, FROZEN and platform-specific. */
       message: string;
+      /**
+       * Did the SUBJECT'S OWN DATA prove there is nothing to analyse?
+       *
+       * ─── Why a refusal must say which kind it is ────────────────────────────
+       * The queue used to record EVERY min-data refusal as `genuine_empty` —
+       * documented in the code as "a confirmed fact about the subject, terminal
+       * by definition and never retried". Measured 2026-07-30: lynlecheung, a
+       * live account that had yielded 27 videos and 9 transcripts three days
+       * earlier, was refused while `profile_xhr_scroll` was returning 403/39B on
+       * 30 of 30 attempts — and was written down as genuinely empty, excluded
+       * from `scanReadyWork` permanently. The gate's own message said the
+       * opposite in the same breath: "or TikTok may be blocking access".
+       *
+       * Only the gate can tell the two apart, because only the gate knows what
+       * its subject's evidence means. `true` requires POSITIVE proof of absence
+       * — TikTok's `assessment.genuineEmpty` (videoCount 0 from a healthy
+       * structured read), Instagram's profile reporting 0 posts. Anything else
+       * is our inability to see, not the subject's emptiness.
+       *
+       * ABSENT MEANS UNCONFIRMED. A gate that says nothing gets the safe
+       * reading: a refusal that a human can requeue, never a fact on the record.
+       * This is the same "absent is NOT zero" rule `classifyEmptyCapture`
+       * already applies one layer down — false "no public content" rejections
+       * have caused subject deletions twice.
+       *
+       * The driver still only ASKS and THROWS: this is data the gate returns,
+       * not a decision it takes, and no message changes.
+       */
+      confirmedEmpty?: boolean;
     };
 
 /** What the gate reads: the banked outputs of phases 1-4. */
@@ -388,6 +417,16 @@ const tiktokGate: PlatformToolset["gate"] = (input) => {
       code: "PRECONDITION_FAILED",
       message: `Insufficient data for @${handle}: ${counts} ` + emptyCaptureMessage(handle, assessment,
         `The scraper could not collect enough content for a reliable analysis. This creator may have limited public content or TikTok may be blocking access. Try again or try a creator with more public content.`),
+      /**
+       * The capture phase ALREADY DECIDED THIS and banked it. `genuineEmpty` is
+       * set only when `classifyEmptyCapture` saw videoCount 0 from an XHR or
+       * rehydration read — the same positive-proof rule that governs the
+       * empty-capture retry. Everything else (a 403, a block page, a search that
+       * happened to surface two videos) leaves it false, and false is the answer
+       * this gate must forward. The message above already hedges both ways; this
+       * is the machine-readable half of the same sentence.
+       */
+      confirmedEmpty: Boolean((assessment as { genuineEmpty?: boolean } | undefined)?.genuineEmpty),
     };
   }
 
@@ -713,12 +752,20 @@ const instagramGate: PlatformToolset["gate"] = (input) => {
         ok: false,
         code: "PRECONDITION_FAILED",
         message: `Instagram returned @${handle}'s profile but none of their posts (the profile reports ${stated} posts). This is usually transient rate-limiting — wait a few minutes and retry. Nothing was saved, and the account should not be deleted.`,
+        // The message says it outright: the profile reports N posts, so the
+        // account is NOT empty and we simply could not read it. This refusal was
+        // also being recorded as `genuine_empty`; it is the clearest possible
+        // case of the opposite.
+        confirmedEmpty: false,
       };
     }
     return {
       ok: false,
       code: "NOT_FOUND",
       message: `@${handle}'s Instagram profile reports 0 posts — there is no content to analyze. (Confirmed by the profile's own stats; this is not a scraping failure.)`,
+      // "Confirmed by the profile's own stats" — positive proof of absence from
+      // the subject's own data, which is exactly what this flag means.
+      confirmedEmpty: true,
     };
   }
 

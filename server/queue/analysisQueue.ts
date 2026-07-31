@@ -613,10 +613,36 @@ async function loadBankedPhases(runId: string): Promise<CampaignState["phases"]>
  * reason given. Found in ACCEPTANCE 1, where eight pre-S3b campaigns sat in the
  * queue view as permanently queued.
  *
- * The failure class matters. A min-data refusal is `genuine_empty`: a
- * deliberate, honest "we will not extract from this", terminal by definition and
- * never retried. Everything else is `structural` — parked for a human rather
- * than looped on, because a campaign that cannot succeed should stop asking.
+ * ─── The failure class matters, and a min-data refusal is TWO different things ──
+ * A min-data refusal used to be recorded as `genuine_empty` unconditionally —
+ * "a confirmed fact about the subject, terminal by definition and never
+ * retried". That is right for exactly one of the two cases it covers.
+ *
+ * Measured 2026-07-30: lynlecheung was refused while `profile_xhr_scroll`
+ * returned 403/39B on 30 of 30 attempts across five creators, and was written
+ * down as genuinely empty — a live account that had yielded 27 videos and 9
+ * transcripts three days earlier, now excluded from `scanReadyWork` for good and
+ * shown to the analyst as a COMPLETE campaign. The gate had said "or TikTok may
+ * be blocking access" in the same message, and the capture phase had already
+ * banked `assessment.genuineEmpty = false`. Nothing read either.
+ *
+ * So the gate now says which kind of refusal it is (`GateVerdict.confirmedEmpty`)
+ * and this function records them differently:
+ *
+ *   CONFIRMED empty → status `genuine_empty`, class `genuine_empty`.
+ *     Unchanged. A fact about the subject. `deriveCampaignState` reads it as
+ *     complete, `requeueCampaignNow` refuses to reopen it, and it never returns.
+ *
+ *   UNCONFIRMED    → status `blocked`, class `structural`.
+ *     A refusal, not a finding. It still LEAVES the queue — `scanReadyWork`
+ *     excludes `structural` and `findIncompleteCampaigns` counts it terminated,
+ *     so the forever-queued campaign this function exists to prevent stays
+ *     prevented. What changes is that it reads as `failed` rather than
+ *     `complete`, and `requeueCampaignNow` WILL reopen it, because a human
+ *     saying "the block has passed" is a claim the ledger should be able to
+ *     accept. Nothing is recorded about the account itself.
+ *
+ * Everything that is not a min-data refusal is `failed`/`structural`, as before.
  */
 async function recordTerminalFailure(
   runId: string,
@@ -624,20 +650,47 @@ async function recordTerminalFailure(
   phase: PhaseName | null,
   message: string | null,
   status: CampaignOutcome["status"],
+  /** Gate's verdict on a min-data refusal; see `CampaignOutcome.refusalConfirmedEmpty`. */
+  refusalConfirmedEmpty: boolean | null,
 ): Promise<void> {
-  const terminal = status === "min_data_rejection";
+  const minData = status === "min_data_rejection";
+  // Absent means unconfirmed — the same safe reading the gate contract takes.
+  const confirmedEmpty = minData && refusalConfirmedEmpty === true;
+  /**
+   * The park reason is what the queue view renders, so the two cases must not
+   * read alike. `blockedGap` is deliberately NOT set: that field states which
+   * evidence a subject is missing, and the whole point here is that we do not
+   * know what this subject has.
+   */
+  const parkReason = confirmedEmpty
+    ? "Confirmed empty: the subject's own data reports no content to analyse."
+    : minData
+      ? "Refused on insufficient evidence — capture could not confirm the account is empty. Requeue once the platform is responding."
+      : null;
   try {
     await recordPhaseState({
       runId,
       subjectHint,
       phase: phase ?? "extract_commit",
       tool: "queue:terminal",
-      status: terminal ? "genuine_empty" : "failed",
-      failureClass: terminal ? "genuine_empty" : "structural",
+      status: confirmedEmpty ? "genuine_empty" : minData ? "blocked" : "failed",
+      failureClass: confirmedEmpty ? "genuine_empty" : "structural",
       attemptCount: 1,
-      output: { terminal: true, status, message },
+      output: {
+        terminal: true,
+        status,
+        message,
+        ...(parkReason ? { parkReason } : {}),
+        // Recorded explicitly so a later audit can tell a refusal that was
+        // classified under this rule from a pre-fix row that was not.
+        ...(minData ? { confirmedEmpty } : {}),
+      },
     });
-    console.warn(`[queue] ${runId} (${subjectHint}) ended without committing: ${status} — ${message ?? "no detail"}`);
+    console.warn(
+      `[queue] ${runId} (${subjectHint}) ended without committing: ${status}` +
+      (minData ? (confirmedEmpty ? " [confirmed empty]" : " [unconfirmed — blocked, requeueable]") : "") +
+      ` — ${message ?? "no detail"}`,
+    );
   } catch (err) {
     // The campaign is already failing; a failed terminal write would leave it
     // spinning, so this is loud rather than swallowed.
@@ -729,7 +782,12 @@ async function processCampaign(
           { runId, handle: handle!, platform: platform as "TikTok" | "Instagram", extras, initialPhases: banked },
           deps.creator,
         )));
-    if (!outcome.committed) await recordTerminalFailure(runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status);
+    if (!outcome.committed) {
+      await recordTerminalFailure(
+        runId, subjectHint, outcome.stoppedAt, outcome.message, outcome.status,
+        outcome.refusalConfirmedEmpty,
+      );
+    }
 
     await recordRunOutcome(runId, outcome.status as RunOutcomeStatus, {
       runType,
@@ -752,7 +810,8 @@ async function processCampaign(
     return outcome;
   } catch (err) {
     console.error(`[queue] ${runId} (${subjectHint}) threw:`, err);
-    await recordTerminalFailure(runId, subjectHint, null, err instanceof Error ? err.message : String(err), "error");
+    // A throw is never a min-data refusal, so the question does not arise.
+    await recordTerminalFailure(runId, subjectHint, null, err instanceof Error ? err.message : String(err), "error", null);
     await recordRunOutcome(runId, "error", {
       runType,
       startedAt,

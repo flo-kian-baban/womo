@@ -44,6 +44,8 @@
 
 import { fetchHtml, detectSilentFailure, requestGovernor, randomMobileUserAgent, recordScrapeEvent } from "../httpClient";
 import { getContext, warmSession, retireContext } from "../browserClient";
+// The ONE shared author check every pool source must use — see shared/authorMatch.
+import { isAuthorMatch } from "@shared/authorMatch";
 
 // ─── Response Types (mirror Forge API response shapes — unchanged from Phase 1) ──
 
@@ -450,6 +452,13 @@ interface FetchResult {
   capture?: ProfileCaptureAssessment;
   /** Base fields from a leg that reads them directly. See profile_embed_json. */
   baseFields?: TikTokBaseFields | null;
+  /**
+   * Videos harvested off the rendered grid, in TikTok's own item shape so they
+   * merge through the SAME `parseItemList` and author guard as every other pool
+   * source. Present only when the XHR pool came back empty — see the harvest
+   * block in `fetchProfileHtml`.
+   */
+  renderedGridItems?: Array<Record<string, unknown>>;
 }
 
 /** Record one profile_xhr_scroll attempt event (see module-header contract). */
@@ -549,12 +558,47 @@ async function fetchProfileHtml(
     : (attempt.event.silentFailureDetected ? "silent_failure" : "error");
   recordProfileAttempt(handle, attempt.event, `${terminalOutcome}${emptyCaptureRetried ? "-after-retry" : ""}`, { superseded: false });
 
+  /*
+    ── SECOND POOL SOURCE ────────────────────────────────────────────────────
+    THE GATE IS THE POOL, NOT THE BASE FIELDS. `profile_rendered_text` used to
+    run only under `if (!embedFields)` — and since profile_embed_json answers
+    15/15, it had never run in production at all. That gate asks "do we still
+    need a follower count?", which is the wrong question for a pool: on
+    2026-07-30 the embed leg answered perfectly for all five creators while
+    profile_xhr_scroll returned zero videos for all five, so the base-field gate
+    was closed at exactly the moment the pool needed a second source.
+
+    So the harvest is gated on `finalCount === 0` — the pool being empty —
+    independently of whether base fields succeeded. When the header is ALSO
+    still missing, the one navigation serves both and the base-field call below
+    is skipped rather than repeated.
+  */
+  let renderedGrid: RenderedGridHarvest | undefined;
+  let renderedLeg: ProfileLegResult | null = null;
+  if (finalCount === 0) {
+    renderedLeg = await attemptProfileRenderedText(handle, { harvestGrid: true });
+    renderedGrid = renderedLeg.grid;
+    // The header half is free once we are here; take it if we still lack fields.
+    if (!embedFields && renderedLeg.outcome === "success") embedFields = renderedLeg.fields;
+  }
+  const renderedCount = renderedGrid?.items.length ?? 0;
+
   const capture: ProfileCaptureAssessment = {
-    videosCaptured: finalCount,
+    // The pool this capture actually produced, from whichever legs answered.
+    videosCaptured: finalCount + renderedCount,
     statedVideoCount: stated.statedVideoCount,
     statedCountSource: stated.statedCountSource,
     emptyCaptureRetried,
-    genuineEmpty: finalCount === 0 && classifyEmptyCapture(stated) === "genuine_empty",
+    /*
+      UNCHANGED, DELIBERATELY. `genuineEmpty` still requires a CONFIRMED zero
+      from a structured read (`classifyEmptyCapture`), and an empty rendered
+      grid is not one: the page may have rendered a shell, a challenge, or a
+      layout this parser does not know. Widening the proof of absence to include
+      "we saw no anchors" is exactly the fail-open that the blocked-vs-empty fix
+      exists to prevent. The grid can only ever ADD videos, never prove there are
+      none.
+    */
+    genuineEmpty: finalCount + renderedCount === 0 && classifyEmptyCapture(stated) === "genuine_empty",
   };
 
   if (attempt.result) {
@@ -567,6 +611,7 @@ async function fetchProfileHtml(
       xhrUserDetail: attempt.result.xhrUserDetail,
       capture,
       baseFields: embedFields,
+      renderedGridItems: renderedGrid?.items,
     };
   }
 
@@ -576,7 +621,10 @@ async function fetchProfileHtml(
   // (The Google-webcache last resort that used to follow was removed — see
   // module header: 3/12 lifetime, 429-walled, webcache retired by Google.)
   if (httpHtml) {
-    return { html: httpHtml, source: httpSource, capture, baseFields: embedFields };
+    return {
+      html: httpHtml, source: httpSource, capture, baseFields: embedFields,
+      renderedGridItems: renderedGrid?.items,
+    };
   }
 
   /*
@@ -591,8 +639,12 @@ async function fetchProfileHtml(
     LAST LEG. Only reached when the embed and both page legs produced nothing —
     at which point one evaluate() on a page we were going to load anyway is the
     difference between a base profile and none.
+
+    `renderedLeg` is checked first so this never navigates twice: when the pool
+    was empty the rendered read has ALREADY run above (for the grid) and its
+    header half was taken there.
   */
-  if (!embedFields) {
+  if (!embedFields && !renderedLeg) {
     const rendered = await attemptProfileRenderedText(handle);
     if (rendered.outcome === "success") embedFields = rendered.fields;
   }
@@ -601,7 +653,25 @@ async function fetchProfileHtml(
     console.warn(
       `[profileScraper] @${handle}: page legs refused — continuing on profile_embed_json base fields alone`,
     );
-    return { html: "", source: "profile_embed_json", capture, baseFields: embedFields };
+    return {
+      html: "", source: "profile_embed_json", capture, baseFields: embedFields,
+      renderedGridItems: renderedGrid?.items,
+    };
+  }
+
+  /*
+    The grid alone is still a capture. If the header was refused but the page
+    rendered a usable grid, we have a real pool and no base fields — better than
+    throwing, which parks a live account as unreachable.
+  */
+  if (renderedCount > 0) {
+    console.warn(
+      `[profileScraper] @${handle}: base fields refused — continuing on profile_rendered_grid alone (${renderedCount} videos)`,
+    );
+    return {
+      html: "", source: "profile_rendered_grid", capture, baseFields: null,
+      renderedGridItems: renderedGrid?.items,
+    };
   }
 
   throw new Error(`[profileScraper] All scrape paths failed for @${handle}`);
@@ -816,6 +886,30 @@ export async function scrapeTikTokProfile(handle: string): Promise<{
     }
   }
 
+  /*
+    ── Rendered-grid merge, LAST ─────────────────────────────────────────────
+    Last because it is the thinnest source: a grid item carries an id, a caption
+    and a display-precision view count, where the two structured sources above
+    carry full stats and a real createTime. So it only ever fills a gap the
+    others left, and dedup by video id means a video both sources saw keeps the
+    structured copy.
+
+    It goes through `parseItemList` like everything else — one shape, one place
+    that builds it. The author guard in `fetchTikTokVideosFromAPI` then applies
+    to these items exactly as it does to the XHR and search paths.
+  */
+  const gridRaw = fetchResult.renderedGridItems ?? [];
+  if (gridRaw.length > 0) {
+    const gridItems = parseItemList(gridRaw, handle);
+    const existingIds = new Set(itemList.map(v => v.id));
+    const newItems = gridItems.filter(v => !existingIds.has(v.id));
+    if (newItems.length > 0) {
+      itemList.push(...newItems);
+      finalSource = `${finalSource}+profile_rendered_grid`;
+      console.log(`[profileScraper] @${handle}: +${newItems.length} videos from profile_rendered_grid`);
+    }
+  }
+
   const confidence = itemList.length >= 20 ? "high" : itemList.length >= 5 ? "medium" : "low";
   console.log(`[profileScraper] @${handle}: final result — ${itemList.length} videos, confidence: ${confidence}, via ${finalSource}`);
 
@@ -871,6 +965,15 @@ export interface ProfileLegResult {
   durationMs: number;
   fields: TikTokBaseFields | null;
   detail?: string;
+  /**
+   * The video grid read off the same page, when the caller asked for it.
+   *
+   * Independent of `fields` and of `outcome`: those describe the HEADER read,
+   * and the two halves fail separately. A page whose header shape changed can
+   * still have rendered a full grid, and throwing the pool away because the
+   * follower count moved would repeat the mistake this leg exists to fix.
+   */
+  grid?: RenderedGridHarvest;
 }
 
 /** The base fields a profile leg can supply. Null = this leg did not carry it. */
@@ -1017,11 +1120,132 @@ export function parseDisplayCount(raw: string | null): number | null {
   return Math.round(n * mult);
 }
 
-export async function attemptProfileRenderedText(handle: string): Promise<ProfileLegResult> {
+// ─── Leg: profile_rendered_grid (the POOL half of the rendered read) ─────────
+//
+// THE SECOND POOL SOURCE. `profile_xhr_scroll` has been the ONLY one since Path
+// A was deleted, and on 2026-07-30 it returned HTTP 403 with a 39-byte body on
+// 30 of 30 attempts across five creators — so every pool that day came from
+// search augmentation, a SUPPLEMENT carrying the whole load. Volume fell 78%
+// (chriswillx 146 videos → 16, khaby.lame 95 → 7) and lynlecheung was refused
+// outright.
+//
+// The grid is on the page the rendered-text leg already navigates. The module
+// header above records the decisive observation: jamescharles rendered a full
+// page with 30 video links in innerText at the same moment profile_xhr_scroll
+// was getting 403/39B on the same handle. Render and data-fetch are refused
+// INDEPENDENTLY, which is what makes this a leg and not a retry.
+//
+// WHAT A TILE CARRIES, and what it does not. An anchor gives the video id and —
+// critically — the AUTHOR, because the href is `/@author/video/<id>`. The
+// thumbnail's alt text carries the caption. The tile's own text carries a view
+// count at DISPLAY precision ("1.2M"). Nothing else is there: no like/comment/
+// share/save counts, no music, no duration, and NO createTime. Those are zero
+// here and must stay zero — the same rule the Instagram pool item follows, for
+// the same reason. A fabricated createTime would be worse than none: the 6-3-3
+// sampler sorts on it, so inventing one would silently reorder the sample.
+//
+// HONEST ABOUT ITS OWN CEILING: a grid item is a POINTER plus a caption. It is
+// enough to know a video exists, enough to attribute it, and enough to feed the
+// transcript chain — which is what the pool is for.
+
+/** One anchor as read off the rendered grid, before any interpretation. */
+export interface RenderedGridTile {
+  /** The anchor's href — the only place the author is stated. */
+  href: string | null;
+  /** Thumbnail alt text; TikTok puts the caption here. */
+  alt?: string | null;
+  /** The tile's own rendered text; carries a display-precision view count. */
+  tileText?: string | null;
+}
+
+export interface RenderedGridHarvest {
+  /**
+   * Author-verified items, in DOM order, shaped like TikTok's own item records
+   * so they go through the SAME `parseItemList` and the SAME author guard in
+   * `fetchTikTokVideosFromAPI` that every other pool source does.
+   */
+  items: Array<Record<string, unknown>>;
+  /** Anchors refused because the author could not be verified — fail-closed. */
+  rejected: number;
+  /** Distinct video ids seen, verified or not. */
+  anchorsSeen: number;
+}
+
+/**
+ * Turn rendered grid anchors into pool items. PURE — exported for the harness,
+ * because this is the whole extraction and it must be provable without a
+ * browser.
+ *
+ * FAIL-CLOSED ON ATTRIBUTION, exactly as the search path is: an anchor whose
+ * href does not state an author that `isAuthorMatch` verifies as this creator
+ * is REJECTED and counted. A profile grid is not self-evidently the creator's —
+ * TikTok renders reposts and recommendation strips on the same page — so "we
+ * are on their profile" is not attribution. The href is.
+ */
+export function parseRenderedGridTiles(
+  handle: string,
+  tiles: RenderedGridTile[],
+): RenderedGridHarvest {
+  const items: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  let rejected = 0;
+
+  for (const tile of tiles) {
+    const href = tile.href ?? "";
+    // `/@author/video/1234` — both captures required. A bare `/video/<id>` with
+    // no author segment is unattributable and therefore refused.
+    const m = href.match(/\/@([^/?#]+)\/video\/(\d+)/);
+    if (!m) { rejected++; continue; }
+    const [, author, videoId] = m;
+
+    if (seen.has(videoId!)) continue;
+    seen.add(videoId!);
+
+    if (!isAuthorMatch(handle, author)) { rejected++; continue; }
+
+    // The view count is the only number a tile carries, at display precision.
+    // Absent or unparseable → 0, never a guess.
+    const views = parseDisplayCount(
+      (tile.tileText ?? "").split("\n").map(l => l.trim()).find(l => /^[\d.,]+\s*[KMB]?$/i.test(l)) ?? null,
+    ) ?? 0;
+
+    items.push({
+      id: videoId,
+      desc: (tile.alt ?? "").trim(),
+      // NOT KNOWN from a tile. Zero means "unknown" to the sampler, which is
+      // the truth; a fabricated timestamp would reorder the 6-3-3 sample.
+      createTime: 0,
+      stats: { playCount: views, diggCount: 0, commentCount: 0, collectCount: 0, shareCount: 0 },
+      music: { title: "", authorName: "", original: false },
+      video: { duration: 0, id: videoId },
+      author: { uniqueId: author, nickname: "", secUid: "" },
+      duetEnabled: false,
+      stitchEnabled: false,
+      isAd: false,
+    });
+  }
+
+  return { items, rejected, anchorsSeen: seen.size };
+}
+
+export async function attemptProfileRenderedText(
+  handle: string,
+  /**
+   * Harvest the video grid from the same navigation.
+   *
+   * Off by default so the base-field leg's cost and behaviour are unchanged
+   * where it already runs. The caller turns it on when the POOL is empty — see
+   * `fetchProfileHtml`, which is where the two needs are reconciled into one
+   * navigation.
+   */
+  opts?: { harvestGrid?: boolean },
+): Promise<ProfileLegResult> {
   const started = Date.now();
   const leg = "profile_rendered_text";
   const url = `https://www.tiktok.com/@${handle}`;
   let ctx: Awaited<ReturnType<typeof getContext>> | null = null;
+  /** Filled by the grid read below, and attached to EVERY return path. */
+  let grid: RenderedGridHarvest | undefined;
   const record = (outcome: ProfileLegOutcome, fields: TikTokBaseFields | null, detail?: string): ProfileLegResult => {
     recordScrapeEvent({
       platform: "tiktok", scrapeMethod: "tiktok_playwright",
@@ -1030,7 +1254,20 @@ export async function attemptProfileRenderedText(handle: string): Promise<Profil
       failureReason: outcome === "success" ? undefined : `profile ${leg}: ${outcome}${detail ? ` — ${detail}` : ""}`,
       durationMs: Date.now() - started,
     });
-    return { leg, outcome, durationMs: Date.now() - started, fields, detail };
+    return { leg, outcome, durationMs: Date.now() - started, fields, detail, grid };
+  };
+  /**
+   * The grid's OWN terminal event. One per invocation, because the pool half and
+   * the header half succeed and fail independently and a single event could only
+   * report one of them.
+   */
+  const recordGrid = (outcome: string, detail?: string): void => {
+    recordScrapeEvent({
+      platform: "tiktok", scrapeMethod: "tiktok_playwright",
+      urlRequested: `${url}#profile=profile_rendered_grid:${outcome}`,
+      failureReason: outcome === "success" ? undefined : `profile profile_rendered_grid: ${outcome}${detail ? ` — ${detail}` : ""}`,
+      durationMs: Date.now() - started,
+    });
   };
 
   try {
@@ -1038,8 +1275,49 @@ export async function attemptProfileRenderedText(handle: string): Promise<Profil
     ctx = await getContext("desktop-chrome", 1);
     const resp = await ctx.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     const status = resp?.status();
-    if (status && status >= 400) return record("blocked", null, `HTTP ${status}`);
+    if (status && status >= 400) {
+      if (opts?.harvestGrid) recordGrid("blocked", `HTTP ${status}`);
+      return record("blocked", null, `HTTP ${status}`);
+    }
     await ctx.page.waitForTimeout(RENDERED_TEXT_SETTLE_MS);
+
+    /*
+      ── The POOL half, read BEFORE the header ────────────────────────────────
+      Before, because the header's own early returns (`blocked` on a shell,
+      `shape_change` on a moved count) must not be able to discard a grid the
+      page did render. Same navigation, same settle, one extra evaluate().
+    */
+    if (opts?.harvestGrid) {
+      // String-form evaluate for the same bundler reason as the header read.
+      const rawTiles = (await ctx.page.evaluate(`(() => {
+        const anchors = Array.from(document.querySelectorAll('a[href*="/video/"]'));
+        return anchors.map(a => {
+          let node = a;
+          for (let i = 0; i < 3 && node.parentElement; i++) node = node.parentElement;
+          const img = a.querySelector('img');
+          return {
+            href: a.getAttribute('href'),
+            alt: img ? img.getAttribute('alt') : null,
+            tileText: node.innerText || null,
+          };
+        });
+      })()`)) as RenderedGridTile[] | null;
+
+      grid = parseRenderedGridTiles(handle, Array.isArray(rawTiles) ? rawTiles : []);
+      if (grid.items.length > 0) {
+        recordGrid("success");
+        console.log(
+          `[profileScraper] @${handle}: profile_rendered_grid — ${grid.items.length} videos harvested ` +
+          `(${grid.anchorsSeen} anchors, ${grid.rejected} refused by the author guard)`,
+        );
+      } else {
+        recordGrid("empty", `${grid.anchorsSeen} anchors seen, ${grid.rejected} refused`);
+        console.warn(
+          `[profileScraper] @${handle}: profile_rendered_grid — no usable videos ` +
+          `(${grid.anchorsSeen} anchors, ${grid.rejected} refused)`,
+        );
+      }
+    }
 
     // String-form evaluate: a function argument is instrumented by the bundler
     // and arrives in the page as `__name is not defined`.

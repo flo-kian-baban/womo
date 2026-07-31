@@ -569,13 +569,32 @@ export async function fetchTikTokVideosFromAPI(
     const user = userInfoData?.user ?? {} as Record<string, unknown>;
     const secUid = user?.secUid ?? "";
 
-    if (!secUid) {
-      console.log(`[webResearch] @${handle}: could not get secUid from user info`);
-      return { items, rejected };
-    }
-
     // Get video list from the combined profile scrape
     const itemList = profileResult.posts?.data?.itemList ?? [];
+
+    /*
+      ── THE secUid GUARD IS ABOUT AN EMPTY LIST, NOT ABOUT secUid ────────────
+      This used to `return` on a missing secUid BEFORE reading `itemList`, a
+      vestige of the Phase-1 design where secUid was the key to a SEPARATE
+      post-list API call. There is no such call any more: `itemList` arrives
+      already populated on the profile result, and secUid is read nowhere else
+      in this function.
+
+      It discarded a real pool the moment a leg that does not carry secUid
+      supplied the videos. Measured live 2026-07-31: profile_rendered_grid
+      harvested 21 videos for @lynlecheung, `scrapeTikTokProfile` reported
+      "final result — 21 videos", and this guard returned zero items one line
+      later — so the capture phase saw an empty pool, retried three times, and
+      the campaign was refused on 3 search-found videos.
+
+      A missing secUid still explains an empty list (it means the structured
+      user payload never arrived), so it stays as the diagnostic for that case.
+      It is no longer allowed to throw away videos we already hold.
+    */
+    if (itemList.length === 0) {
+      if (!secUid) console.log(`[webResearch] @${handle}: no videos and no secUid — the structured user payload never arrived`);
+      return { items, rejected };
+    }
 
     console.log(`[webResearch] @${handle}: API fetch found ${itemList.length} videos`);
 
@@ -2445,6 +2464,32 @@ function assembleCreatorCollection(args: {
   return { research: result, phases: summary.state.phases };
 }
 
+/**
+ * A gate's refusal, thrown — carrying the ONE fact the queue needs to classify
+ * it and nothing else.
+ *
+ * It is a `TRPCError` subclass on purpose: every existing `instanceof TRPCError`
+ * check, every router that lets a gate refusal reach the client, and the frozen
+ * `code`/`message` pair all behave exactly as before. What is added is
+ * `confirmedEmpty`, forwarded verbatim from the verdict — see the field's
+ * documentation on `GateVerdict` for why a refusal must say which kind it is.
+ *
+ * The driver still only ASKS and THROWS. It does not inspect any phase's banked
+ * output to decide this; the gate already did, because only the gate knows what
+ * its subject's evidence means.
+ */
+export class EvidenceGateRefusal extends TRPCError {
+  /** True only when the subject's own data PROVED there is nothing to analyse. */
+  readonly confirmedEmpty: boolean;
+
+  constructor(verdict: Extract<GateVerdict, { ok: false }>) {
+    super({ code: verdict.code, message: verdict.message });
+    this.name = "EvidenceGateRefusal";
+    // Absent means unconfirmed. A gate that says nothing gets the safe reading.
+    this.confirmedEmpty = verdict.confirmedEmpty === true;
+  }
+}
+
 export async function runPhaseCollection<TOut>(args: {
   handle: string;
   platform: PlatformName;
@@ -2555,7 +2600,7 @@ export async function runPhaseCollection<TOut>(args: {
   // gate falls through to the platform registry exactly as before.
   const verdict = (args.gate ?? toolsetFor(platform).gate)({ handle, banked });
   if (!verdict.ok) {
-    throw new TRPCError({ code: verdict.code, message: verdict.message });
+    throw new EvidenceGateRefusal(verdict);
   }
 
   return assemble({ handle, platform, banked, summary, runId });

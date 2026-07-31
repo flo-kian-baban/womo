@@ -109,6 +109,17 @@ describe("deriveCampaignState — the queue view IS the ledger", () => {
     expect(deriveCampaignState([phase("capture", "genuine_empty")])).toBe("complete");
   });
 
+  it("a BLOCKED refusal reads failed, not complete — we never saw the account", () => {
+    /*
+      The counterpart to the test above, and the reason the distinction exists.
+      A min-data refusal we could not confirm is now banked `blocked`, so it
+      lands here rather than in the branch above. It must NOT read complete: an
+      analyst looking at a campaign the platform blocked should see a failure
+      they can requeue, not a finished, empty account.
+    */
+    expect(deriveCampaignState([phase("extract_commit", "blocked")])).toBe("failed");
+  });
+
   it("a future backoff gate reads parked", () => {
     expect(deriveCampaignState([
       phase("capture", "failed", { nextEarliestAt: new Date(Date.now() + 300_000) }),

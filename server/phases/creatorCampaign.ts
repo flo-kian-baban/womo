@@ -38,7 +38,7 @@ import type { CampaignState, PhaseName, PhaseStateEntry, PlatformName } from "..
 import { runPhases, bankedOutput, type BankFn } from "./phaseRunner";
 import { makeSchedulerExecute } from "./phaseScheduler";
 import { makeExtractCommitPhase, type ExtractCommitOutput } from "./derivePhases";
-import { runCollection } from "../webResearch";
+import { runCollection, EvidenceGateRefusal } from "../webResearch";
 import { NOT_READY } from "../_core/analysisPhase";
 import { assembleFromPhases, type DerivePhaseOutput } from "./derivePhases";
 import type {
@@ -96,6 +96,19 @@ export interface CampaignOutcome<TResearch = CreatorResearchResult> {
   status: "success" | "partial" | "saved_none" | "min_data_rejection" | "error";
   /** The analyst-facing reason when the campaign did not commit. */
   message: string | null;
+  /**
+   * For a `min_data_rejection` only: did the gate CONFIRM the subject is empty?
+   *
+   * `true`  → the subject's own data proved there is nothing to analyse. A fact
+   *           about the subject; terminal, and correctly never retried.
+   * `false` → we could not see enough. A refusal, not a finding — the campaign
+   *           still leaves the queue, but it is recorded as blocked rather than
+   *           written down as an empty account.
+   * `null`  → not a min-data refusal; the question does not arise.
+   *
+   * See `GateVerdict.confirmedEmpty`.
+   */
+  refusalConfirmedEmpty: boolean | null;
   /** Which phase stopped it, when it stopped early. */
   stoppedAt: PhaseName | null;
   research: TResearch | null;
@@ -111,14 +124,31 @@ export interface CampaignOutcome<TResearch = CreatorResearchResult> {
  * min-data refusal — a deliberate, honest "we will not extract from this",
  * distinct from a failure.
  */
-function classifyCollectionFailure(err: unknown): { status: CampaignOutcome["status"]; message: string } {
+function classifyCollectionFailure(err: unknown): {
+  status: CampaignOutcome["status"];
+  message: string;
+  confirmedEmpty: boolean | null;
+} {
   if (err instanceof TRPCError) {
+    const minData = err.code === "PRECONDITION_FAILED";
     return {
-      status: err.code === "PRECONDITION_FAILED" ? "min_data_rejection" : "error",
+      status: minData ? "min_data_rejection" : "error",
       message: err.message,
+      /**
+       * Carried from the gate, not inferred here. A refusal thrown by anything
+       * other than `EvidenceGateRefusal` has no verdict behind it, so it gets
+       * the safe reading — unconfirmed — exactly as an absent flag does.
+       */
+      confirmedEmpty: minData
+        ? (err instanceof EvidenceGateRefusal ? err.confirmedEmpty : false)
+        : null,
     };
   }
-  return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  return {
+    status: "error",
+    message: err instanceof Error ? err.message : String(err),
+    confirmedEmpty: null,
+  };
 }
 
 /**
@@ -158,7 +188,12 @@ export interface SubjectCampaignSpec<TResearch> {
     initialPhases?: CampaignState["phases"];
   }) => Promise<{ research: TResearch; phases: CampaignState["phases"] }>;
   /** Map a thrown gate to a terminal outcome — the messages are FROZEN. */
-  classifyFailure: (err: unknown) => { status: CampaignOutcome["status"]; message: string };
+  classifyFailure: (err: unknown) => {
+    status: CampaignOutcome["status"];
+    message: string;
+    /** See `CampaignOutcome.refusalConfirmedEmpty`. */
+    confirmedEmpty: boolean | null;
+  };
   /**
    * The extract_commit phase, when this subject builds its own (S5).
    *
@@ -202,6 +237,8 @@ export async function runSubjectCampaign<TResearch>(
     runId: args.runId, handle: args.handle, platform: args.platform,
     committed: false, subjectId: null, observationId: null,
     stoppedAt: null, research: null, persistence: null,
+    // Only a min-data refusal answers this; every other exit leaves it null.
+    refusalConfirmedEmpty: null,
   } as const;
 
   // ── Phases 1-4 + the FROZEN gates + the pure assembly ──
@@ -212,8 +249,8 @@ export async function runSubjectCampaign<TResearch>(
       extras: args.extras, initialPhases: args.initialPhases,
     });
   } catch (err) {
-    const { status, message } = spec.classifyFailure(err);
-    return { ...base, status, message };
+    const { status, message, confirmedEmpty } = spec.classifyFailure(err);
+    return { ...base, status, message, refusalConfirmedEmpty: confirmedEmpty };
   }
 
   // ── Phase 5: extract_commit, through the same runner ──

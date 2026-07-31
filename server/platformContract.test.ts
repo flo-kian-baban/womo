@@ -145,6 +145,83 @@ describe("gate — the platform decides, the driver only asks", () => {
     }
   });
 
+  /*
+    ─── A refusal must say WHICH KIND it is ──────────────────────────────────
+    The queue records `genuine_empty` — "a confirmed fact about the subject,
+    never retried" — and used to do so for EVERY min-data refusal. Measured
+    2026-07-30: lynlecheung was refused while profile_xhr_scroll returned
+    403/39B on 30 of 30 attempts, and a live account with 27 videos three days
+    earlier was written down as genuinely empty.
+
+    Only the gate can tell the two apart, so these two tests pin the one bit
+    that decides it. They assert the FLAG only — the messages are FROZEN and
+    already pinned above.
+  */
+  it("TikTok: a min-data refusal does NOT claim the account is empty when capture never confirmed it", () => {
+    const v = toolsetFor("TikTok").gate({
+      handle: "creator",
+      banked: {
+        // What a blocked capture banks: nothing captured, and — decisively —
+        // no stated count from any structured read to prove the zero.
+        capture: {
+          stats: { followerCount: 162_500_000, bio: "b" },
+          pool: { videoTitles: [] },
+          assessment: {
+            videosCaptured: 0, statedVideoCount: null, statedCountSource: null,
+            emptyCaptureRetried: true, genuineEmpty: false,
+          },
+        },
+        augment: { quotaExhausted: false, pool: { videoTitles: ["one"] } },
+        transcribe: { transcripts: [], discoveredVideoPool: [] },
+      },
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.code).toBe("PRECONDITION_FAILED");
+      expect(v.confirmedEmpty).toBe(false);
+    }
+  });
+
+  it("TikTok: a min-data refusal DOES claim empty when capture proved it from a structured read", () => {
+    const v = toolsetFor("TikTok").gate({
+      handle: "creator",
+      banked: {
+        capture: {
+          stats: { followerCount: 12, bio: "b" },
+          pool: { videoTitles: [] },
+          // videoCount 0 read off the XHR — positive proof of absence, which is
+          // the only thing that earns the confirmed reading.
+          assessment: {
+            videosCaptured: 0, statedVideoCount: 0, statedCountSource: "xhr",
+            emptyCaptureRetried: false, genuineEmpty: true,
+          },
+        },
+        augment: { quotaExhausted: false, pool: { videoTitles: [] } },
+        transcribe: { transcripts: [], discoveredVideoPool: [] },
+      },
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.code).toBe("PRECONDITION_FAILED");
+      expect(v.confirmedEmpty).toBe(true);
+    }
+  });
+
+  it("Instagram: a rate-limited profile is refused WITHOUT claiming the account is empty", () => {
+    // The message already says "the profile reports N posts" — the account is
+    // demonstrably not empty and we simply could not read it.
+    const v = toolsetFor("Instagram").gate({
+      handle: "creator",
+      banked: {
+        capture: { stats: { followerCount: 500, videoCount: 2314 }, pool: { videoItems: [] } },
+        augment: { pool: { videoItems: [] } },
+        transcribe: { transcripts: [], discoveredVideoPool: [] },
+      },
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.confirmedEmpty).toBe(false);
+  });
+
   it("TikTok: sufficient evidence passes", () => {
     const titles = ["a", "b", "c", "d", "e"];
     const v = toolsetFor("TikTok").gate({
