@@ -222,8 +222,36 @@ export async function submitCampaigns(requests: SubmitRequest[]): Promise<Submit
  * execution, so a banked count never blocks a retry; it is history, and a
  * requeue should not erase how much a campaign has already cost.
  */
-export async function requeueCampaignNow(runId: string): Promise<void> {
+/**
+ * What a requeue actually did, so the caller can tell the analyst.
+ *
+ * `rowsReset > 0` is the only case that reopens anything. Zero is not a
+ * failure — it is usually the skip rule working — but it MUST be
+ * distinguishable from a rescue, and the reason must say which of the three
+ * zeroes it is.
+ */
+export interface RequeueOutcome {
+  /** Phase rows actually set back to `pending` with their failure class cleared. */
+  rowsReset: number;
+  /** Which phases will re-run. Empty when nothing was reset. */
+  phasesReset: PhaseName[];
+  /**
+   * Why nothing was reopened. Null when `rowsReset > 0`.
+   *
+   *  `committed`         — extract_commit banked an observation. Terminal and
+   *                        correct; re-running is a new analysis, not a resume.
+   *  `confirmed_empty`   — a `genuine_empty` row. A fact about the SUBJECT,
+   *                        deliberately never retried.
+   *  `already_advancing` — nothing was parked or failed, and the campaign is
+   *                        not terminal. It needed no rescue; the next drain
+   *                        advances it.
+   */
+  noResetReason: "committed" | "confirmed_empty" | "already_advancing" | null;
+}
+
+export async function requeueCampaignNow(runId: string): Promise<RequeueOutcome> {
   const rows = await getPhaseState(runId);
+  const phasesReset: PhaseName[] = [];
   for (const r of rows) {
     if (r.status === "complete" || r.status === "partial" || r.status === "genuine_empty") continue;
     await recordPhaseState({
@@ -239,9 +267,38 @@ export async function requeueCampaignNow(runId: string): Promise<void> {
       nextEarliestAt: null,
       output: r.output,
     });
+    phasesReset.push(r.phase as PhaseName);
   }
   // "…picks it up immediately" — with idle backoff that promise needs a kick.
   kickQueueNow();
+
+  if (phasesReset.length > 0) {
+    return { rowsReset: phasesReset.length, phasesReset, noResetReason: null };
+  }
+
+  /*
+    NOTHING WAS RESET — and the caller has to be able to say WHY.
+
+    The skip rule above is correct and unchanged: complete, partial and
+    genuine_empty rows must not be reopened. But "correct" is not the same as
+    "nothing happened", and until now this function returned void, so
+    `creator.resumeRun` reported `{requeued: true}` for a campaign it had not
+    touched. Observed live on two campaigns whose every row was terminal: both
+    returned success, neither moved a byte.
+
+    Reason order mirrors `deriveCampaignState` deliberately — a committed
+    campaign reads committed there even if some other row is genuine_empty, and
+    two answers to the same question must not disagree.
+  */
+  const commit = rows.find(r => r.phase === "extract_commit");
+  const noResetReason: RequeueOutcome["noResetReason"] =
+    commit && (commit.status === "complete" || commit.status === "partial") ? "committed"
+    : rows.some(r => r.status === "genuine_empty") ? "confirmed_empty"
+    // Every row is complete/partial with no terminal marker: the campaign is
+    // UNFINISHED and needed no rescue. `findIncompleteCampaigns` — the drain's
+    // second query, which exists for exactly this shape — will advance it.
+    : "already_advancing";
+  return { rowsReset: 0, phasesReset: [], noResetReason };
 }
 
 // ─── Status ──────────────────────────────────────────────────────────────────

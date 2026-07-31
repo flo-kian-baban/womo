@@ -1525,9 +1525,51 @@ export const appRouter = router({
             message: `Run ${input.runId} is a ${platform} campaign, which has no registered phase toolset — resuming it would never advance.`,
           });
         }
-        // Clear the backoff gate so the next drain picks it up immediately.
-        await requeueCampaignNow(input.runId);
-        return { runId: input.runId, requeued: true };
+        /*
+          Clear the backoff gate so the next drain picks it up immediately —
+          and REPORT WHAT ACTUALLY HAPPENED.
+
+          This returned `{requeued: true}` unconditionally. `requeueCampaignNow`
+          returned void, so there was nothing to report on, and the guard above
+          was the only thing standing between an analyst and a false success.
+          It is not enough: observed live, two campaigns whose every row was
+          terminal were requeued, nothing was reset, and both returned success.
+          The comment on that guard says it exists so this endpoint does not
+          "report `requeued: true` for a campaign that can never advance" —
+          which is exactly what it did.
+
+          `requeued` is now the truth: it is false when nothing reopened, and
+          `reason` says which of the three zeroes it was. The skip rule itself
+          is unchanged — complete, partial and genuine_empty rows must not be
+          reopened, and this only stops us claiming otherwise.
+        */
+        const outcome = await requeueCampaignNow(input.runId);
+        if (outcome.rowsReset > 0) {
+          return {
+            runId: input.runId,
+            requeued: true,
+            rowsReset: outcome.rowsReset,
+            phasesReset: outcome.phasesReset,
+            reason: null,
+            message: `Requeued ${outcome.rowsReset} phase${outcome.rowsReset === 1 ? "" : "s"} (${outcome.phasesReset.join(", ")}). The next drain will pick this campaign up.`,
+          };
+        }
+        // Each message states the campaign's actual state and that the refusal
+        // to reopen is correct — an analyst should leave knowing why, not
+        // wondering whether the click registered.
+        const message = outcome.noResetReason === "committed"
+          ? "Nothing to requeue: this campaign already committed an observation, so there is no unfinished work to resume. Re-analysing the subject is a separate action."
+          : outcome.noResetReason === "confirmed_empty"
+            ? "Nothing to requeue: this campaign ended as genuine_empty — the subject's own data confirmed there is no content to analyse. That is a fact about the subject rather than a failure of ours, and it is deliberately never retried."
+            : "Nothing needed requeueing: no phase was parked or failed. This campaign is unfinished and the next drain will advance it on its own.";
+        return {
+          runId: input.runId,
+          requeued: false,
+          rowsReset: 0,
+          phasesReset: [],
+          reason: outcome.noResetReason,
+          message,
+        };
       }),
 
     ingestSupplementalVideo: publicProcedure
