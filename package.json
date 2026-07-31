@@ -1,19 +1,26 @@
 {
   "name": "connex-fit-engine",
   "version": "0.10.0",
+  "productName": "Connex FIT",
   "type": "module",
   "license": "MIT",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
     "start:local": "NODE_ENV=development tsx watch server/_core/index.ts",
     "spike:electron": "electron electron/main.cjs",
+    "build:client": "vite build",
+    "build:server": "esbuild server/_core/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/server.cjs --external:playwright --external:playwright-core --external:playwright-extra --external:puppeteer-extra-plugin-stealth --external:ffmpeg-static --external:pg-native --define:process.env.WOMO_PACKAGED='\"1\"'",
+    "build:browser": "rm -rf build/ms-playwright && mkdir -p build/ms-playwright && cp -R \"$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1223\" build/ms-playwright/ && echo \"staged headless shell: $(du -sh build/ms-playwright | cut -f1)\"",
+    "build:app": "pnpm run build:client && pnpm run build:server && pnpm run build:browser",
+    "package:mac": "pnpm run build:app && electron-builder --mac --arm64",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:integration": "TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/womo_test vitest run --config vitest.integration.config.ts",
     "test:db:up": "docker run -d --rm --name womo-test-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=womo_test -p 55432:5432 postgres:17-alpine",
     "test:db:down": "docker rm -f womo-test-pg",
-    "harness:up": "pnpm run test:db:up && sleep 4 && docker exec womo-test-pg psql -q -U postgres -d womo_test -c 'drop schema if exists public cascade; create schema public;' && docker exec -i womo-test-pg psql -q -U postgres -d womo_test < server/integration/schema.sql > /dev/null && pnpm run harness:seed && echo 'harness ready — pnpm harness:app'",
+    "harness:up": "pnpm run test:db:up && sleep 4 && docker exec womo-test-pg psql -q -U postgres -d womo_test -c 'drop schema if exists public cascade; create schema public;' && docker exec -i womo-test-pg psql -q -U postgres -d womo_test < server/integration/schema.sql > /dev/null && pnpm run harness:seed && echo 'harness ready \u2014 pnpm harness:app'",
     "harness:app": "DATABASE_URL=postgresql://postgres:postgres@localhost:55432/womo_test NODE_ENV=development tsx watch server/_core/index.ts",
     "harness:seed": "docker exec -i womo-test-pg psql -q -v ON_ERROR_STOP=1 -U postgres -d womo_test < tools/queue-state-harness/seed-states.sql && echo 're-seeded'",
     "harness:capture": "tsx tools/queue-state-harness/capture.ts",
@@ -107,6 +114,7 @@
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.5",
     "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "pnpm": "^10.15.1",
     "postcss": "^8.4.47",
@@ -130,6 +138,45 @@
     },
     "overrides": {
       "tailwindcss>nanoid": "3.3.7"
+    }
+  },
+  "build": {
+    "appId": "com.connex.fitengine",
+    "productName": "Connex FIT",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/main.cjs",
+      "dist/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/node_modules/**/{test,__tests__,tests,example,examples,doc,docs}/**"
+    ],
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**",
+      "**/node_modules/.pnpm/ffmpeg-static@*/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/ms-playwright",
+        "to": "ms-playwright"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.business",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }
   }
 }

@@ -4,7 +4,6 @@ import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { setupVite } from "./vite";
 
 // ─── Process-level safety net ────────────────────────────────────────────────
 // A single unhandled rejection or uncaught exception must not silently wedge or
@@ -36,9 +35,31 @@ async function startServer() {
     })
   );
 
-  // Local-only app: always serve the client through Vite middleware (no build
-  // step, no static dist). Runs the same regardless of NODE_ENV.
-  await setupVite(app, server);
+  /*
+    ── How the client is served: exactly two paths, chosen at BUILD time ──────
+    Dev (`pnpm start:local`) serves through Vite middleware — no build step,
+    instant reload, unchanged from Phase 1.
+
+    The packaged app has no Vite: it is a devDependency and a .dmg ships none.
+    So it serves the `vite build` output from disk instead.
+
+    WOMO_PACKAGED is replaced with a literal at bundle time (esbuild --define),
+    which makes the condition constant and lets esbuild DELETE the branch not
+    taken — including its import. That is what keeps Vite and its plugin chain
+    out of `dist/server.cjs` entirely, rather than merely unreached at runtime.
+
+    The key is WOMO_PACKAGED and NOT NODE_ENV, deliberately. Phase 1 removed
+    five other production-mode behaviours (crash-fast env validation, the DB
+    probe's exit(1), ENV.isProduction, the VITE_API_URL split). Keying off
+    NODE_ENV=production is precisely how those would drift back.
+  */
+  if (process.env.WOMO_PACKAGED === "1") {
+    const { serveStatic } = await import("./serveStatic");
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
+    await setupVite(app, server);
+  }
 
   // ─── Port binding ────────────────────────────────────────────────────────────
   // Bind directly to process.env.PORT (default 3000) — no port scanning.
